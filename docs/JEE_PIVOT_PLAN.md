@@ -146,21 +146,30 @@ A JEE product lives or dies on **question quality**. Options, best first:
 
 Always show the source label (PYQ 2024 Shift 2 / AI-verified / From your module) and give every question a "Report error" button.
 
+**Update (3 Nov 2026):** the sourcing research is done. See [QUESTION_BANK_SOURCING.md](QUESTION_BANK_SOURCING.md) for where to get past papers, answer keys, mocks and open datasets legally, why coaching test series (Allen and others) can't be used, and a 4-week plan.
+
 ---
 
-## 9. AI model routing and cost (prices from the official Gemini pricing page, 3 Nov 2026)
+## 9. AI model routing and cost (updated 3 Nov 2026: Claude is now the main AI)
 
-| Model | Use for | Price per 1M tokens (input / output) |
+The app uses **Anthropic Claude** whenever `ANTHROPIC_API_KEY` is set. Gemini is used only as a fallback if its key is also configured (or first, with `AI_PROVIDER=gemini`). Check current prices on Anthropic's and Higgsfield's pricing pages.
+
+| Model | Used for | Price |
 |---|---|---|
-| `gemini-3.1-flash-lite` | Default: topic extraction, flashcards, error classification | $0.25 / $1.50 |
-| `gemini-3.8-flash` | Tutoring, solutions, question generation | $0.75 / $3.75 → **$1.50 / $7.50 from 1 Jan 2027** |
-| `gemini-4-argon` | Only to verify hard or disputed problems | $2 / $10 → **$4 / $20 from 1 Dec 2026**, no free tier |
-| `gemini-3.8-live` | Voice tutor | ≈ $0.023 per minute (audio in + out) |
-| `gemini-omni-1.1-flash` | Video | ≈ $0.10 per second of video, so **cut** |
+| `claude-sonnet-5-5` (effort: medium) | AI tutor, quiz and question writing, notes scanning | $2 / $10 per 1M tokens (input / output) |
+| `claude-haiku-5-5` (effort: low) | Document analysis, flashcards, mistake analysis, teach-back, voice answers, 3D models | from $0.10 / $0.50 per 1M tokens |
+| Higgsfield `ideogram/v4.0` | Create: labelled diagrams | ≈ $0.03 per image |
+| Higgsfield `kling-video/v3.0/std/text-to-video` | Create: 5-second videos | ≈ $0.042 per second (≈ $0.21 per video) |
 
-**Example:** a 200-page module is about 120k tokens. The current code sends the whole document with every question, which costs about **$0.18 per question** on 3.8 Flash at 2027 prices. With retrieval (about 4k tokens) it costs about **$0.01**, or about **$0.002 on Flash-Lite**. Retrieval is not optional.
+Override the Claude models with `ANTHROPIC_MODEL_SMART` and `ANTHROPIC_MODEL_FAST`, and the Higgsfield models with the `HIGGSFIELD_*_MODEL` variables (see `.env.example`). Higgsfield deletes generated files after 7 days.
 
-**Free-tier warning:** on Gemini's free tier, prompts are used to improve Google's products. With student (mostly minor) data, use the paid tier in production.
+**Example:** uploads are capped at 20 pages (about 10–20k tokens). The tutor sends the whole document with every question, so one answer costs roughly **$0.02–0.07 on Sonnet**, including thinking tokens. Two next optimisations:
+- **Retrieval:** send only the 3–4 relevant pages.
+- **Prompt caching:** cache the document part of the prompt.
+
+Together they should cut that by about 80–90%. Watch the per-student cost metric (section 11) from day one.
+
+**Gemini free-tier warning (if you add a Gemini key):** on Gemini's free tier, prompts are used to improve Google's products. With student (mostly minor) data, use the paid tier in production.
 
 ---
 
