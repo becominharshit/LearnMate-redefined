@@ -26,12 +26,12 @@ export class AppErrorBoundary extends React.Component<
     if (!this.state.error) return this.props.children;
 
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FCFBF9] px-4">
+      <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
         <div className="max-w-md text-center space-y-4">
-          <h1 className="font-serif-editorial text-3xl font-bold text-[#121827]">
+          <h1 className="font-serif-editorial text-3xl font-bold text-ink">
             Something went wrong
           </h1>
-          <p className="text-sm text-[#606B7C]">
+          <p className="text-sm text-muted">
             This screen hit an unexpected error. Your saved study materials are not affected.
           </p>
           <div className="flex items-center justify-center gap-3">
@@ -46,7 +46,7 @@ export class AppErrorBoundary extends React.Component<
             </button>
             <button
               onClick={() => window.location.reload()}
-              className="px-5 py-2.5 rounded-lg border border-black/10 text-xs font-semibold text-[#121827] cursor-pointer"
+              className="px-5 py-2.5 rounded-lg border border-black/10 text-xs font-semibold text-ink cursor-pointer"
             >
               Reload
             </button>

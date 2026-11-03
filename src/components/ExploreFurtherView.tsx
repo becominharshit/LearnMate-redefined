@@ -142,11 +142,11 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
     <div className="p-6 sm:p-8 space-y-6 flex-1">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
-          <h2 className="text-xl font-bold text-[#172033] flex items-center gap-2">
-            <Youtube className="w-5 h-5 text-[#EA4335]" />
+          <h2 className="text-xl font-bold text-ink flex items-center gap-2">
+            <Youtube className="w-5 h-5 text-danger" />
             <span>Explore Further: YouTube Recommendations</span>
           </h2>
-          <p className="text-xs sm:text-sm text-[#64748B]">
+          <p className="text-xs sm:text-sm text-muted">
             Concept-specific educational tutorials ranked by relevance, channel authority, and duration.
           </p>
         </div>
@@ -182,10 +182,10 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
                 }}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
                   isSelected
-                    ? 'bg-[#1A73E8] text-white border-[#1A73E8]'
+                    ? 'bg-brand text-white border-brand'
                     : isWeak
-                    ? 'bg-[#FEF9EE] text-amber-900 border-amber-200 hover:bg-amber-100'
-                    : 'bg-[#F8FAFC] text-slate-700 border-slate-200 hover:bg-slate-100'
+                    ? 'bg-warning-soft text-amber-900 border-amber-200 hover:bg-amber-100'
+                    : 'bg-canvas text-slate-700 border-slate-200 hover:bg-slate-100'
                 }`}
               >
                 {isWeak ? `Focus: ${chip}` : chip}
@@ -203,13 +203,13 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
               onChange={(e) => setCustomSearchInput(e.target.value)}
               placeholder="Search a specific concept, theorem, or formula..."
               aria-label="Search educational YouTube videos"
-              className="w-full pl-9 pr-4 py-2 rounded-full bg-[#F8FAFC] border border-slate-200 text-xs sm:text-sm text-[#172033] focus:outline-none focus:border-[#4285F4]"
+              className="w-full pl-9 pr-4 py-2 rounded-full bg-canvas border border-slate-200 text-xs sm:text-sm text-ink focus:outline-none focus:border-brand"
             />
           </div>
           <button
             type="submit"
             disabled={isLoading || !customSearchInput.trim()}
-            className="px-4 py-2 rounded-full bg-[#1A73E8] hover:bg-[#1557B0] text-white text-xs font-semibold disabled:opacity-50 cursor-pointer"
+            className="px-4 py-2 rounded-full bg-brand hover:bg-brand-strong text-white text-xs font-semibold disabled:opacity-50 cursor-pointer"
           >
             Find Videos
           </button>
@@ -219,7 +219,7 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
       {/* Results Area */}
       {isLoading ? (
         <div className="py-16 text-center space-y-3">
-          <Loader2 className="w-7 h-7 animate-spin text-[#EA4335] mx-auto" />
+          <Loader2 className="w-7 h-7 animate-spin text-danger mx-auto" />
           <p className="text-sm font-medium text-slate-700">
             Searching & ranking educational lectures for &ldquo;{selectedQuery}&rdquo;...
           </p>
@@ -251,7 +251,7 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
                     </span>
                   )}
                   <div className="absolute inset-0 bg-black/25 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="w-11 h-11 rounded-full bg-[#EA4335] text-white flex items-center justify-center shadow-lg">
+                    <span className="w-11 h-11 rounded-full bg-danger text-white flex items-center justify-center shadow-lg">
                       <Play className="w-5 h-5 fill-current ml-0.5" />
                     </span>
                   </div>
@@ -259,21 +259,21 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
 
                 <div className="p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold text-[#EA4335] block truncate">
+                    <span className="text-[11px] font-semibold text-danger block truncate">
                       {video.channelTitle}
                     </span>
                   </div>
-                  <h3 className="text-sm font-bold text-[#172033] line-clamp-2 leading-snug">
+                  <h3 className="text-sm font-bold text-ink line-clamp-2 leading-snug">
                     {video.title}
                   </h3>
                   {video.relevanceReason && (
-                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#E6F4EA] text-[#137333] text-[11px] font-medium">
+                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-success-soft text-success text-[11px] font-medium">
                       <CheckCircle2 className="w-3 h-3 shrink-0" />
                       <span className="truncate">{video.relevanceReason}</span>
                     </div>
                   )}
                   {video.description && (
-                    <p className="text-xs text-[#64748B] line-clamp-2 leading-relaxed">
+                    <p className="text-xs text-muted line-clamp-2 leading-relaxed">
                       {video.description}
                     </p>
                   )}
@@ -285,7 +285,7 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
                   href={video.watchUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#1A73E8] hover:underline"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
                 >
                   <span>Watch on YouTube</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -295,7 +295,7 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
                   <button
                     type="button"
                     onClick={() => void onImportYouTubeUrl(video.watchUrl)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#E8F0FE] hover:bg-[#D2E3FC] text-[#1A73E8] text-[11px] font-semibold cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-soft hover:bg-brand-200 text-brand text-[11px] font-semibold cursor-pointer"
                   >
                     <Sparkles className="w-3 h-3" />
                     <span>Analyze in LearnMate</span>
@@ -309,25 +309,25 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
         /* Honest API Configuration / Unconfigured or Empty State (Never Fabricates Fake Video URLs) */
         <div
           data-testid="youtube-recommendations-config-state"
-          className="rounded-2xl bg-[#F8FAFC] border border-slate-200/90 p-6 sm:p-8 space-y-4 max-w-2xl"
+          className="rounded-2xl bg-canvas border border-slate-200/90 p-6 sm:p-8 space-y-4 max-w-2xl"
         >
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FCE8E6] text-[#EA4335] flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-[#FCE8E6] text-danger flex items-center justify-center shrink-0">
               <AlertCircle className="w-5 h-5" />
             </div>
             <div className="space-y-1.5">
-              <h3 className="text-base font-bold text-[#172033]">
+              <h3 className="text-base font-bold text-ink">
                 {isConfigured
                   ? 'No Strongly Relevant Video Matches Found'
                   : 'YouTube Data API v3 Configuration Required for In-App Video Cards'}
               </h3>
-              <p className="text-xs sm:text-sm text-[#64748B] leading-relaxed">
+              <p className="text-xs sm:text-sm text-muted leading-relaxed">
                 {statusMessage ||
                   'LearnMate filters out clickbait, shorts, and off-topic results. Try searching a more specific concept above, or open a concept-targeted YouTube search below.'}
               </p>
               {activeSearchQuery && (
-                <p className="text-[11px] text-[#64748B]">
-                  Targeted query: <span className="font-semibold text-[#172033]">{activeSearchQuery}</span>
+                <p className="text-[11px] text-muted">
+                  Targeted query: <span className="font-semibold text-ink">{activeSearchQuery}</span>
                 </p>
               )}
             </div>
@@ -348,9 +348,9 @@ export const ExploreFurtherView: React.FC<ExploreFurtherViewProps> = ({
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-[#EA4335] text-xs font-semibold text-[#172033] transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-danger text-xs font-semibold text-ink transition-colors"
                 >
-                  <Youtube className="w-4 h-4 text-[#EA4335]" />
+                  <Youtube className="w-4 h-4 text-danger" />
                   <span>Search YouTube: {concept}</span>
                   <ExternalLink className="w-3 h-3 text-slate-400" />
                 </a>

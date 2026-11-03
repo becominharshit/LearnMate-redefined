@@ -22,7 +22,7 @@ test('classifyGeminiError distinguishes transient 429, daily quota exhaustion, a
   );
   assert.equal(transient429.category, 'temporarily_busy');
   assert.equal(transient429.retryable, true);
-  assert.equal(transient429.userMessage, 'Gemini is temporarily busy. Try again shortly.');
+  assert.equal(transient429.userMessage, 'The AI is temporarily busy. Try again shortly.');
   assert.equal(transient429.retryAfterMs, 2000);
 
   const dailyQuota = classifyGeminiError(

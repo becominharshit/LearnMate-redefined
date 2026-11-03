@@ -23,7 +23,9 @@ import {
 } from '../types/study';
 import { studyStorage } from '../services/storageService';
 import { aiStudyClient } from '../services/aiClient';
+import { classifyJeeSubject } from '../utils/jeeSubjects';
 import { QuizProctorOverlay } from './QuizProctorOverlay';
+import { MathText } from './MathText';
 
 interface PracticeWorkspaceViewProps {
   documents: StudyDocument[];
@@ -35,23 +37,6 @@ interface PracticeWorkspaceViewProps {
 }
 
 type PracticeSourceMode = 'notes' | 'chapters' | 'past_papers';
-
-/**
- * Renders option text with stacked mathematical fractions when the option is a simple fraction like "1/13"
- */
-function renderFormattedMathText(text: string): React.ReactNode {
-  const trimmed = text.trim();
-  const simpleFracMatch = /^(-?\d+)\s*\/\s*(\d+)$/.exec(trimmed);
-  if (simpleFracMatch) {
-    return (
-      <span className="lm-fraction text-lg font-serif-editorial">
-        <span className="num">{simpleFracMatch[1]}</span>
-        <span className="den">{simpleFracMatch[2]}</span>
-      </span>
-    );
-  }
-  return <span>{text}</span>;
-}
 
 export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   documents,
@@ -104,24 +89,16 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   }, [sessionActive, submittedResult, remainingSeconds]);
 
   const topicPills = useMemo(() => {
-    const base = [
-      'All',
-      'Sample Spaces',
-      'Events',
-      'Conditional Probability',
-      'Bayes’ Theorem',
-      'Random Variables',
-      'Distributions',
-    ];
-    if (currentDoc?.topics) {
-      for (const t of currentDoc.topics) {
-        if (!base.some((b) => b.toLowerCase() === t.name.toLowerCase())) {
-          base.push(t.name);
-        }
-      }
-    }
-    return base.slice(0, 8);
+    const names = (currentDoc?.topics || []).map((t) => t.name).filter(Boolean);
+    return ['All', ...Array.from(new Set(names))].slice(0, 8);
   }, [currentDoc]);
+
+  const docLabel = currentDoc ? currentDoc.title.replace(/\.pdf$/i, '') : 'Your notes';
+  const subjectLabel = currentDoc
+    ? classifyJeeSubject(
+        `${currentDoc.title} ${currentDoc.topics.map((t) => t.name).join(' ')}`
+      ) || 'Practice'
+    : 'Practice';
 
   const handleStartPracticeSet = async (focusWeakTopic?: string) => {
     try {
@@ -223,8 +200,8 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
     const newAttempt: QuizAttempt = {
       id: `attempt-${Date.now()}`,
-      documentId: currentDoc?.id || 'doc-probability',
-      documentTitle: currentDoc?.title || 'Probability Notes.pdf',
+      documentId: currentDoc?.id || 'practice',
+      documentTitle: currentDoc?.title || 'Practice set',
       mode: practiceMode === 'Exam Mode' ? 'adaptive' : 'diagnostic',
       questions,
       answers,
@@ -247,36 +224,36 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
       <div className="max-w-2xl mx-auto py-16 text-center space-y-4">
         {isGenerating ? (
           <>
-            <Loader2 className="w-8 h-8 mx-auto animate-spin text-[#C84428]" />
-            <h2 className="font-serif-editorial text-2xl font-bold text-[#121827]">
+            <Loader2 className="w-8 h-8 mx-auto animate-spin text-brand" />
+            <h2 className="font-serif-editorial text-2xl font-bold text-ink">
               Preparing your practice set…
             </h2>
-            <p className="text-sm text-[#606B7C]">
+            <p className="text-sm text-muted">
               Generating {questionCount} questions from {currentDoc?.title || 'your material'}.
               The timer starts when the questions appear.
             </p>
             <button
               type="button"
               onClick={exitPracticeSession}
-              className="px-4 py-2 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#F7F5F0] text-xs font-semibold text-[#121827] cursor-pointer"
+              className="px-4 py-2 rounded-lg border border-line bg-white hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
             >
               Cancel
             </button>
           </>
         ) : (
           <>
-            <XCircle className="w-8 h-8 mx-auto text-[#C84428]" />
-            <h2 className="font-serif-editorial text-2xl font-bold text-[#121827]">
+            <XCircle className="w-8 h-8 mx-auto text-danger" />
+            <h2 className="font-serif-editorial text-2xl font-bold text-ink">
               Couldn&apos;t create a practice set
             </h2>
-            <p className="text-sm text-[#606B7C]">
+            <p className="text-sm text-muted">
               {generationError || 'No questions were generated. Please try again.'}
             </p>
             <div className="flex items-center justify-center gap-2.5">
               <button
                 type="button"
                 onClick={exitPracticeSession}
-                className="px-4 py-2 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#F7F5F0] text-xs font-semibold text-[#121827] cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-line bg-white hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
               >
                 ← Back to Builder
               </button>
@@ -308,8 +285,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div className="space-y-1.5">
             <div className="lm-kicker">
-              MATHEMATICS &nbsp;/&nbsp;{' '}
-              {currentDoc ? currentDoc.title.replace(/\.pdf$/i, '').toUpperCase() : 'PROBABILITY'}
+              {subjectLabel} &nbsp;/&nbsp; {docLabel}
             </div>
             <h1 className="lm-editorial-title text-4xl sm:text-5xl">
               Check your understanding.
@@ -318,44 +294,44 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
           <div className="flex items-center gap-3 self-start sm:self-end">
             {remainingSeconds !== null && !submittedResult && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#E8E6E2] text-xs font-medium text-[#121827] tabular-nums">
-                <Clock className="w-3.5 h-3.5 text-[#C84428]" />
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-line text-xs font-medium text-ink tabular-nums">
+                <Clock className="w-3.5 h-3.5 text-brand" />
                 <span>
                   {Math.floor(remainingSeconds / 60)}:
                   {String(remainingSeconds % 60).padStart(2, '0')}
                 </span>
               </span>
             )}
-            <span className="text-sm font-medium text-[#606B7C] tabular-nums">
-              Question <strong className="text-[#121827]">{currentIndex + 1}</strong> of{' '}
-              <strong className="text-[#121827]">{questions.length}</strong>
+            <span className="text-sm font-medium text-muted tabular-nums">
+              Question <strong className="text-ink">{currentIndex + 1}</strong> of{' '}
+              <strong className="text-ink">{questions.length}</strong>
             </span>
           </div>
         </div>
 
         {/* Thin Full-Width Terracotta Progress Bar matching Image 9 */}
-        <div className="w-full h-1.5 rounded-full bg-[#EFECE6] overflow-hidden">
+        <div className="w-full h-1.5 rounded-full bg-soft overflow-hidden">
           <div
-            className="h-full rounded-full bg-[#C84428] transition-all duration-300"
+            className="h-full rounded-full bg-brand transition-all duration-300"
             style={{ width: `${progressPct}%` }}
           />
         </div>
 
         {/* Submitted Score Summary Banner (if user submitted set) */}
         {submittedResult && (
-          <div className="lm-card-editorial p-5 bg-[#FCFBF9] border-[#C84428]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="lm-card-editorial p-5 bg-canvas border-brand/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[#C84428]">
+              <div className="text-xs font-semibold uppercase tracking-wider text-brand">
                 Practice Set Complete
               </div>
-              <div className="font-serif-editorial text-2xl font-bold text-[#121827]">
+              <div className="font-serif-editorial text-2xl font-bold text-ink">
                 You scored {submittedResult.score} / {submittedResult.totalQuestions} (
                 {Math.round(
                   (submittedResult.score / Math.max(1, submittedResult.totalQuestions)) * 100
                 )}
                 %)
               </div>
-              <p className="text-xs text-[#606B7C]">
+              <p className="text-xs text-muted">
                 Review the step-by-step explanations below or return to the Practice Set Builder.
               </p>
             </div>
@@ -363,7 +339,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               <button
                 type="button"
                 onClick={exitPracticeSession}
-                className="px-4 py-2 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#F7F5F0] text-xs font-semibold text-[#121827] cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-line bg-white hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
               >
                 ← Back to Builder
               </button>
@@ -383,7 +359,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         <div className="lm-card-editorial p-6 sm:p-10 space-y-7">
           {/* Card Top Bar: Question Badge + Save for later */}
           <div className="flex items-center justify-between">
-            <span className="px-3 py-1 rounded-md bg-[#FBECE6] text-[#C84428] text-xs font-semibold">
+            <span className="px-3 py-1 rounded-md bg-brand-soft text-brand text-xs font-semibold">
               Question {currentIndex + 1}
             </span>
 
@@ -396,7 +372,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 }))
               }
               className={`inline-flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                isSavedForLater ? 'text-[#C84428] font-semibold' : 'text-[#606B7C] hover:text-[#121827]'
+                isSavedForLater ? 'text-brand font-semibold' : 'text-muted hover:text-ink'
               }`}
             >
               <Bookmark className={`w-3.5 h-3.5 ${isSavedForLater ? 'fill-current' : ''}`} />
@@ -405,9 +381,10 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           </div>
 
           {/* Large Editorial Question Text */}
-          <div className="font-serif-editorial text-xl sm:text-2xl font-medium text-[#121827] leading-relaxed">
-            {activeQuestion.question}
-          </div>
+          <MathText
+            text={activeQuestion.question}
+            className="text-lg sm:text-xl font-medium text-ink leading-relaxed"
+          />
 
           {/* 4 Full-Width Answer Cards matching Image 9 */}
           <div className="space-y-3.5">
@@ -417,22 +394,22 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               const isCorrect = activeQuestion.correctIndex === idx;
 
               let cardClasses =
-                'bg-white border-[#E8E6E2] hover:border-[#C84428]/50 text-[#121827]';
+                'bg-white border-line hover:border-brand/50 text-ink';
               let badgeClasses =
-                'bg-[#FCFBF9] border border-[#D6D3CD] text-[#606B7C]';
+                'bg-canvas border border-line-strong text-muted';
 
               if (submittedResult) {
                 if (isCorrect) {
-                  cardClasses = 'bg-[#E2F5EA]/60 border-[#2E7D52] text-[#121827]';
-                  badgeClasses = 'bg-[#2E7D52] text-white border-[#2E7D52]';
+                  cardClasses = 'bg-success-soft/60 border-success text-ink';
+                  badgeClasses = 'bg-success text-white border-success';
                 } else if (isSelected) {
-                  cardClasses = 'bg-[#FBECE6]/70 border-[#C84428] text-[#121827]';
-                  badgeClasses = 'bg-[#C84428] text-white border-[#C84428]';
+                  cardClasses = 'bg-danger-soft border-danger text-ink';
+                  badgeClasses = 'bg-danger text-white border-danger';
                 }
               } else if (isSelected) {
                 cardClasses =
-                  'bg-[#FBECE6]/55 border-[#C84428] ring-1 ring-[#C84428]/30 text-[#121827]';
-                badgeClasses = 'bg-[#C84428] text-white border-[#C84428]';
+                  'bg-brand-soft/55 border-brand ring-1 ring-brand/30 text-ink';
+                badgeClasses = 'bg-brand text-white border-brand';
               }
 
               return (
@@ -455,16 +432,16 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                     >
                       {letter}
                     </span>
-                    <div className="text-base text-[#121827]">
-                      {renderFormattedMathText(optText)}
+                    <div className="text-base text-ink">
+                      <MathText text={optText} variant="inline" />
                     </div>
                   </div>
 
                   {submittedResult && isCorrect && (
-                    <CheckCircle2 className="w-5 h-5 text-[#2E7D52] shrink-0" />
+                    <CheckCircle2 className="w-5 h-5 text-success shrink-0" />
                   )}
                   {submittedResult && isSelected && !isCorrect && (
-                    <XCircle className="w-5 h-5 text-[#C84428] shrink-0" />
+                    <XCircle className="w-5 h-5 text-danger shrink-0" />
                   )}
                 </button>
               );
@@ -473,16 +450,16 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
           {/* Grounded Explanation Box when submitted */}
           {submittedResult && (
-            <div className="p-4 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2] space-y-1.5 text-xs">
-              <div className="font-semibold text-[#C84428]">
-                Verified Solution (Source: Page {activeQuestion.sourcePage})
+            <div className="p-4 rounded-xl bg-canvas border border-line space-y-1.5 text-xs">
+              <div className="font-semibold text-brand">
+                Solution (Source: Page {activeQuestion.sourcePage})
               </div>
-              <p className="text-[#121827] leading-relaxed">{activeQuestion.explanation}</p>
+              <MathText text={activeQuestion.explanation} className="text-sm text-ink" />
             </div>
           )}
 
           {/* Bottom Navigation Bar matching Image 9 */}
-          <div className="pt-4 border-t border-[#F2F0EC] flex items-center justify-between gap-3">
+          <div className="pt-4 border-t border-soft flex items-center justify-between gap-3">
             <button
               type="button"
               onClick={() => {
@@ -492,7 +469,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                   exitPracticeSession();
                 }
               }}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#606B7C] hover:text-[#121827] cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-muted hover:text-ink cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
               <span>{currentIndex > 0 ? 'Previous' : 'Exit to Builder'}</span>
@@ -503,7 +480,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setCurrentIndex((prev) => prev + 1)}
-                  className="px-3 py-2 text-xs font-medium text-[#606B7C] hover:text-[#121827] cursor-pointer"
+                  className="px-3 py-2 text-xs font-medium text-muted hover:text-ink cursor-pointer"
                 >
                   Skip
                 </button>
@@ -590,15 +567,13 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
       {/* Editorial Header matching Image 10 */}
       <div className="space-y-2 max-w-2xl">
         <div className="lm-kicker">
-          MATHEMATICS &nbsp;/&nbsp;{' '}
-          {currentDoc ? currentDoc.title.replace(/\.pdf$/i, '').toUpperCase() : 'PROBABILITY'}
+          {subjectLabel} &nbsp;/&nbsp; {docLabel}
         </div>
         <h1 className="lm-editorial-title text-4xl sm:text-5xl">
           Practice, with purpose.
         </h1>
-        <p className="lm-editorial-subtitle text-base sm:text-lg text-[#4B5563]">
-          Build a custom practice set from your notes, chapters or past papers, and focus on
-          what matters most.
+        <p className="lm-editorial-subtitle text-base sm:text-lg text-body">
+          Build a JEE-style practice set from your own notes, and focus on what matters most.
         </p>
       </div>
 
@@ -610,7 +585,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           <div className="lm-card-editorial p-6 space-y-6">
             {/* Section 1: Choose what to practice */}
             <div className="space-y-3">
-              <h2 className="font-serif-editorial text-lg font-bold text-[#121827]">
+              <h2 className="font-serif-editorial text-lg font-bold text-ink">
                 Choose what to practice
               </h2>
 
@@ -621,20 +596,23 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                     title: 'My Notes',
                     subtitle: currentDoc
                       ? `${currentDoc.title} (${currentDoc.pages.length} pages)`
-                      : 'Probability Notes.pdf (4 pages)',
+                      : 'Upload a chapter or notes first',
                     icon: FileText,
+                    available: true,
                   },
                   {
                     id: 'chapters' as PracticeSourceMode,
                     title: 'Chapters',
-                    subtitle: 'Class 12 · Probability',
+                    subtitle: 'JEE Main syllabus chapters',
                     icon: BookOpen,
+                    available: false,
                   },
                   {
                     id: 'past_papers' as PracticeSourceMode,
                     title: 'Past Papers',
-                    subtitle: 'JEE Main & Board Questions',
+                    subtitle: 'JEE Main previous-year questions',
                     icon: ClipboardCheck,
+                    available: false,
                   },
                 ].map((src) => {
                   const Icon = src.icon;
@@ -643,35 +621,44 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                     <button
                       key={src.id}
                       type="button"
+                      disabled={!src.available}
                       onClick={() => setSourceMode(src.id)}
-                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                        selected
-                          ? 'bg-[#FCF8F6] border-[#C84428] ring-1 ring-[#C84428]/25'
-                          : 'bg-white border-[#E8E6E2] hover:border-[#C84428]/40'
+                      title={src.available ? undefined : 'Coming soon'}
+                      className={`relative p-4 rounded-xl border text-left transition-all flex flex-col justify-between gap-2 ${
+                        !src.available
+                          ? 'bg-soft border-line opacity-70 cursor-not-allowed'
+                          : selected
+                          ? 'bg-brand-soft/60 border-brand ring-1 ring-brand/25 cursor-pointer'
+                          : 'bg-white border-line hover:border-brand/40 cursor-pointer'
                       }`}
                     >
+                      {!src.available && (
+                        <span className="absolute -top-2 right-3 px-2 py-0.5 rounded-full bg-white border border-line text-[10px] font-bold text-muted">
+                          Coming soon
+                        </span>
+                      )}
                       <div className="flex items-center justify-between w-full">
                         <div className="flex items-center gap-2">
                           <Icon
                             className={`w-4 h-4 ${
-                              selected ? 'text-[#C84428]' : 'text-[#606B7C]'
+                              selected ? 'text-brand' : 'text-muted'
                             }`}
                           />
-                          <span className="font-serif-editorial font-bold text-sm text-[#121827]">
+                          <span className="font-serif-editorial font-bold text-sm text-ink">
                             {src.title}
                           </span>
                         </div>
                         <span
                           className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                            selected ? 'border-[#C84428]' : 'border-[#D6D3CD]'
+                            selected ? 'border-brand' : 'border-line-strong'
                           }`}
                         >
                           {selected && (
-                            <span className="w-2 h-2 rounded-full bg-[#C84428]" />
+                            <span className="w-2 h-2 rounded-full bg-brand" />
                           )}
                         </span>
                       </div>
-                      <div className="text-xs text-[#606B7C] truncate">{src.subtitle}</div>
+                      <div className="text-xs text-muted truncate">{src.subtitle}</div>
                     </button>
                   );
                 })}
@@ -679,14 +666,14 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
               {documents.length > 1 && sourceMode === 'notes' && (
                 <div className="pt-1 flex items-center gap-2 text-xs">
-                  <span className="text-[#606B7C]">Active Note Source:</span>
+                  <span className="text-muted">Active Note Source:</span>
                   <select
                     value={currentDoc?.id || ''}
                     onChange={(e) => {
                       const found = documents.find((d) => d.id === e.target.value);
                       if (found) onSelectDoc(found);
                     }}
-                    className="px-2.5 py-1 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] text-xs font-medium text-[#121827]"
+                    className="px-2.5 py-1 rounded-lg border border-line bg-canvas text-xs font-medium text-ink"
                   >
                     {documents.map((doc) => (
                       <option key={doc.id} value={doc.id}>
@@ -698,17 +685,17 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               )}
             </div>
 
-            <div className="border-t border-[#F2F0EC]" />
+            <div className="border-t border-soft" />
 
             {/* Section 2: Refine your set */}
             <div className="space-y-4">
-              <h2 className="font-serif-editorial text-lg font-bold text-[#121827]">
+              <h2 className="font-serif-editorial text-lg font-bold text-ink">
                 Refine your set
               </h2>
 
               {/* Topics Row */}
               <div className="space-y-2">
-                <label className="block text-xs font-medium text-[#606B7C]">Topics</label>
+                <label className="block text-xs font-medium text-muted">Topics</label>
                 <div className="flex flex-wrap items-center gap-2">
                   {topicPills.map((pill) => {
                     const active = selectedTopicPill === pill;
@@ -719,8 +706,8 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                         onClick={() => setSelectedTopicPill(pill)}
                         className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer border ${
                           active
-                            ? 'bg-[#FBECE6] border-[#F2C9BC] text-[#C84428] font-semibold'
-                            : 'bg-white border-[#E8E6E2] text-[#3D4655] hover:border-[#C84428]/40'
+                            ? 'bg-brand-soft border-[#F2C9BC] text-brand font-semibold'
+                            : 'bg-white border-line text-body hover:border-brand/40'
                         }`}
                       >
                         {pill}
@@ -733,7 +720,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               {/* Questions & Difficulty Row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-[#606B7C]">Questions</label>
+                  <label className="block text-xs font-medium text-muted">Questions</label>
                   <div className="flex items-center gap-1.5">
                     {[5, 10, 15, 20, 30].map((cnt) => (
                       <button
@@ -742,8 +729,8 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                         onClick={() => setQuestionCount(cnt)}
                         className={`px-3.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                           questionCount === cnt
-                            ? 'bg-[#FBECE6] border-[#C84428]/40 text-[#C84428] font-semibold'
-                            : 'bg-white border-[#E8E6E2] text-[#3D4655] hover:bg-[#FCFBF9]'
+                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
+                            : 'bg-white border-line text-body hover:bg-canvas'
                         }`}
                       >
                         {cnt}
@@ -753,7 +740,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-[#606B7C]">Difficulty</label>
+                  <label className="block text-xs font-medium text-muted">Difficulty</label>
                   <div className="flex items-center gap-1.5">
                     {(['Mixed', 'Easy', 'Medium', 'Hard'] as const).map((diff) => (
                       <button
@@ -762,8 +749,8 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                         onClick={() => setDifficulty(diff)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                           difficulty === diff
-                            ? 'bg-[#FBECE6] border-[#C84428]/40 text-[#C84428] font-semibold'
-                            : 'bg-white border-[#E8E6E2] text-[#3D4655] hover:bg-[#FCFBF9]'
+                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
+                            : 'bg-white border-line text-body hover:bg-canvas'
                         }`}
                       >
                         {diff}
@@ -776,7 +763,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               {/* Time Limit & Mode Row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-[#606B7C]">Time Limit</label>
+                  <label className="block text-xs font-medium text-muted">Time Limit</label>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(['No Limit', '10 min', '20 min', '30 min'] as const).map((tl) => (
                       <button
@@ -785,8 +772,8 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                         onClick={() => setTimeLimit(tl)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                           timeLimit === tl
-                            ? 'bg-[#FBECE6] border-[#C84428]/40 text-[#C84428] font-semibold'
-                            : 'bg-white border-[#E8E6E2] text-[#3D4655] hover:bg-[#FCFBF9]'
+                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
+                            : 'bg-white border-line text-body hover:bg-canvas'
                         }`}
                       >
                         {tl}
@@ -796,7 +783,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-[#606B7C]">Mode</label>
+                  <label className="block text-xs font-medium text-muted">Mode</label>
                   <div className="flex items-center gap-1.5">
                     {(['Practice Mode', 'Exam Mode'] as const).map((m) => (
                       <button
@@ -805,8 +792,8 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                         onClick={() => setPracticeMode(m)}
                         className={`px-3.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                           practiceMode === m
-                            ? 'bg-[#FBECE6] border-[#C84428]/40 text-[#C84428] font-semibold'
-                            : 'bg-white border-[#E8E6E2] text-[#3D4655] hover:bg-[#FCFBF9]'
+                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
+                            : 'bg-white border-line text-body hover:bg-canvas'
                         }`}
                       >
                         {m}
@@ -818,9 +805,9 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             </div>
 
             {/* Summary & Generate Practice Set Action Bar */}
-            <div className="pt-4 border-t border-[#F2F0EC] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="text-xs text-[#606B7C]">
-                <strong className="text-[#121827]">{questionCount} questions</strong> &nbsp;·&nbsp;{' '}
+            <div className="pt-4 border-t border-soft flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="text-xs text-muted">
+                <strong className="text-ink">{questionCount} questions</strong> &nbsp;·&nbsp;{' '}
                 {difficulty} difficulty &nbsp;·&nbsp;{' '}
                 {timeLimit === 'No Limit' ? 'Untimed' : timeLimit.replace('min', 'minutes')}{' '}
                 &nbsp;·&nbsp; {practiceMode}
@@ -851,13 +838,13 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           {/* Recent Attempts Card matching Image 10 */}
           <div className="lm-card-editorial p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-serif-editorial text-lg font-bold text-[#121827]">
+              <h2 className="font-serif-editorial text-lg font-bold text-ink">
                 Recent Attempts
               </h2>
               <button
                 type="button"
                 onClick={() => void handleStartPracticeSet()}
-                className="inline-flex items-center gap-1 text-xs font-medium text-[#C84428] hover:underline cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline cursor-pointer"
               >
                 <span>View all</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -865,35 +852,35 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             </div>
 
             {recentAttemptRows.length === 0 && (
-              <p className="text-xs text-[#606B7C]">
+              <p className="text-xs text-muted">
                 No practice sets yet. Your completed sets will be listed here.
               </p>
             )}
 
-            <div className="divide-y divide-[#F2F0EC]">
+            <div className="divide-y divide-soft">
               {recentAttemptRows.map((row) => (
                 <div
                   key={row.id}
                   className="py-3.5 flex items-center justify-between gap-4 first:pt-1 last:pb-1"
                 >
                   <div className="min-w-0">
-                    <div className="font-serif-editorial font-bold text-sm text-[#121827] truncate">
+                    <div className="font-serif-editorial font-bold text-sm text-ink truncate">
                       {row.title}
                     </div>
-                    <div className="text-xs text-[#606B7C] mt-0.5">{row.meta}</div>
+                    <div className="text-xs text-muted mt-0.5">{row.meta}</div>
                   </div>
 
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="px-2.5 py-1 rounded-md bg-[#E2F5EA] text-[#2E7D52] font-bold text-xs tabular-nums">
+                    <span className="px-2.5 py-1 rounded-md bg-success-soft text-success font-bold text-xs tabular-nums">
                       {row.pct}%
                     </span>
                     <button
                       type="button"
                       onClick={() => void handleStartPracticeSet()}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#121827] cursor-pointer"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
                     >
                       <span>Review</span>
-                      <ChevronDown className="w-3 h-3 text-[#606B7C]" />
+                      <ChevronDown className="w-3 h-3 text-muted" />
                     </button>
                   </div>
                 </div>
@@ -906,22 +893,22 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         <div className="lg:col-span-4 space-y-6">
           {/* Your Practice Progress Chart Card */}
           <div className="lm-card-editorial p-6 space-y-4">
-            <h2 className="font-serif-editorial text-lg font-bold text-[#121827]">
+            <h2 className="font-serif-editorial text-lg font-bold text-ink">
               Your Practice Progress
             </h2>
 
             <div className="flex items-baseline gap-2">
-              <span className="font-serif-editorial font-bold text-3xl text-[#121827] tabular-nums">
+              <span className="font-serif-editorial font-bold text-3xl text-ink tabular-nums">
                 {avgAccuracy === null ? '—' : `${avgAccuracy}%`}
               </span>
-              <span className="text-xs text-[#606B7C]">Avg. Accuracy</span>
-              <span className="text-xs text-[#606B7C] ml-auto">
+              <span className="text-xs text-muted">Avg. Accuracy</span>
+              <span className="text-xs text-muted ml-auto">
                 {attempts.length} {attempts.length === 1 ? 'set' : 'sets'}
               </span>
             </div>
 
             {trendPoints.length < 2 ? (
-              <p className="text-xs text-[#606B7C] pt-2">
+              <p className="text-xs text-muted pt-2">
                 Complete at least two practice sets to see your accuracy trend.
               </p>
             ) : (
@@ -934,22 +921,22 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                       y1={y}
                       x2="268"
                       y2={y}
-                      stroke="#F2F0EC"
+                      stroke="#E2E8F0"
                       strokeWidth="1"
                     />
                   ))}
-                  <text x="0" y="23" fontSize="9" fill="#7B8494">
+                  <text x="0" y="23" fontSize="9" fill="#94A3B8">
                     100%
                   </text>
-                  <text x="0" y="61" fontSize="9" fill="#7B8494">
+                  <text x="0" y="61" fontSize="9" fill="#94A3B8">
                     50%
                   </text>
-                  <text x="0" y="99" fontSize="9" fill="#7B8494">
+                  <text x="0" y="99" fontSize="9" fill="#94A3B8">
                     0%
                   </text>
                   <polyline
                     fill="none"
-                    stroke="#C84428"
+                    stroke="#4F46E5"
                     strokeWidth="2.2"
                     points={trendPoints.map((pt) => `${pt.x},${pt.y}`).join(' ')}
                   />
@@ -960,7 +947,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                         cy={pt.y}
                         r="3.5"
                         fill="#FFFFFF"
-                        stroke="#C84428"
+                        stroke="#4F46E5"
                         strokeWidth="2"
                       />
                       <text
@@ -968,7 +955,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                         y="112"
                         textAnchor="middle"
                         fontSize="9"
-                        fill="#7B8494"
+                        fill="#94A3B8"
                       >
                         {pt.label}
                       </text>
@@ -982,16 +969,16 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           {/* Focus on these topics Card matching Image 10 */}
           <div className="lm-card-editorial p-6 space-y-4">
             <div className="space-y-1">
-              <h2 className="font-serif-editorial text-lg font-bold text-[#121827]">
+              <h2 className="font-serif-editorial text-lg font-bold text-ink">
                 Focus on these topics
               </h2>
-              <p className="text-xs text-[#606B7C]">
+              <p className="text-xs text-muted">
                 Based on your recent mistakes and quiz results:
               </p>
             </div>
 
             {weakTopicRows.length === 0 && (
-              <p className="text-xs text-[#606B7C]">
+              <p className="text-xs text-muted">
                 No weak topics yet. They will appear here after you answer practice questions.
               </p>
             )}
@@ -1000,15 +987,15 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               {weakTopicRows.map((wt) => (
                 <div key={wt.name} className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-[#121827] flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-[#C84428]" />
+                    <span className="font-medium text-ink flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-brand" />
                       {wt.name}
                     </span>
-                    <span className="font-bold text-[#C84428] tabular-nums">{wt.pct}%</span>
+                    <span className="font-bold text-brand tabular-nums">{wt.pct}%</span>
                   </div>
-                  <div className="w-full h-1.5 rounded-full bg-[#F2EAE4] overflow-hidden">
+                  <div className="w-full h-1.5 rounded-full bg-brand-soft overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-[#C84428]"
+                      className="h-full rounded-full bg-brand"
                       style={{ width: `${wt.pct}%` }}
                     />
                   </div>
@@ -1020,7 +1007,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               <button
                 type="button"
                 onClick={() => void handleStartPracticeSet(weakTopicRows[0].name)}
-                className="w-full py-2.5 px-4 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] hover:bg-[#FBECE6] hover:text-[#C84428] text-xs font-semibold text-[#121827] transition-colors cursor-pointer"
+                className="w-full py-2.5 px-4 rounded-lg border border-line bg-canvas hover:bg-brand-soft hover:text-brand text-xs font-semibold text-ink transition-colors cursor-pointer"
               >
                 Practice Weakest Topic: {weakTopicRows[0].name}
               </button>

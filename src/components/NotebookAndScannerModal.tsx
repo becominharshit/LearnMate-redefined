@@ -332,7 +332,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
         className="w-full max-w-4xl rounded-3xl bg-white border border-slate-200 shadow-2xl overflow-hidden my-auto"
       >
         {/* Top Modal Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 bg-[#F8FAFC] border-b border-slate-200">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 bg-canvas border-b border-slate-200">
           <div className="flex items-center gap-2">
             {[
               { id: 'scan', label: 'Scan Notes (OCR)', icon: Camera },
@@ -353,8 +353,8 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                   onClick={() => setActiveTab(tab.id as typeof activeTab)}
                   className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                     active
-                      ? 'bg-[#1A73E8] text-white shadow-2xs'
-                      : 'bg-white text-[#64748B] hover:text-[#172033] border border-slate-200/80'
+                      ? 'bg-brand text-white shadow-2xs'
+                      : 'bg-white text-muted hover:text-ink border border-slate-200/80'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -379,10 +379,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
             <div className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-bold text-[#172033]">
+                  <h3 className="text-lg font-bold text-ink">
                     Camera & Handwritten Note Scanner
                   </h3>
-                  <p className="text-xs text-[#64748B]">
+                  <p className="text-xs text-muted">
                     Upload or snap a photo of handwritten notebook pages or whiteboards to convert into editable digital notes.
                   </p>
                 </div>
@@ -398,9 +398,9 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-[#172033] cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-ink cursor-pointer"
                   >
-                    <Upload className="w-3.5 h-3.5 text-[#1A73E8]" />
+                    <Upload className="w-3.5 h-3.5 text-brand" />
                     <span>Upload / Camera Photo</span>
                   </button>
                   <button
@@ -408,7 +408,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     onClick={() => void handleRunOcrScan()}
                     disabled={isScanning}
                     data-testid="run-ocr-scan-btn"
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1A73E8] hover:bg-[#1557B0] text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>{isScanning ? 'Scanning with Gemini OCR...' : 'Extract & Digitize Notes'}</span>
@@ -421,7 +421,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                 {/* Left: Original Image Preview + Rotate / Enhance Controls */}
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#172033]">
+                    <span className="text-xs font-bold text-ink">
                       Original Scanned Page
                     </span>
                     <div className="flex items-center gap-1.5">
@@ -438,7 +438,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                         onClick={() => setHighContrastPreview((p) => !p)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
                           highContrastPreview
-                            ? 'bg-[#E8F0FE] border-[#4285F4] text-[#1A73E8]'
+                            ? 'bg-brand-soft border-brand text-brand'
                             : 'bg-white border-slate-200 text-slate-700'
                         }`}
                       >
@@ -468,14 +468,14 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     value={scanTitle}
                     onChange={(e) => setScanTitle(e.target.value)}
                     placeholder="Title for scanned notes..."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-[#172033]"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-ink"
                   />
                 </div>
 
                 {/* Right: Clean Digital Notes | Handwritten-style Notes (Kalam) */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 flex flex-col">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#172033]">
+                    <span className="text-xs font-bold text-ink">
                       Digitized Editable Notes
                     </span>
                     <div className="inline-flex rounded-xl bg-slate-100 p-1">
@@ -484,7 +484,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                         onClick={() => setNoteDisplayStyle('clean')}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
                           noteDisplayStyle === 'clean'
-                            ? 'bg-white text-[#1A73E8] shadow-2xs'
+                            ? 'bg-white text-brand shadow-2xs'
                             : 'text-slate-600'
                         }`}
                       >
@@ -495,7 +495,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                         onClick={() => setNoteDisplayStyle('handwritten')}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
                           noteDisplayStyle === 'handwritten'
-                            ? 'bg-white text-[#1A73E8] shadow-2xs'
+                            ? 'bg-white text-brand shadow-2xs'
                             : 'text-slate-600'
                         }`}
                       >
@@ -518,10 +518,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                         setScannedHandwrittenText(e.target.value);
                       }
                     }}
-                    className={`w-full flex-1 p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-[#4285F4] ${
+                    className={`w-full flex-1 p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-brand ${
                       noteDisplayStyle === 'handwritten'
                         ? 'font-handwriting text-base bg-[#FFFDF5] text-slate-800 leading-relaxed'
-                        : 'text-xs font-sans bg-slate-50/50 text-[#172033] leading-relaxed'
+                        : 'text-xs font-sans bg-slate-50/50 text-ink leading-relaxed'
                     }`}
                   />
 
@@ -546,7 +546,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       </div>
                     ) : (
                       <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900 flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-[#34A853] shrink-0" />
+                        <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
                         <span>{scanSavedMsg}</span>
                       </div>
                     ))}
@@ -555,7 +555,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     <button
                       type="button"
                       onClick={() => handleSaveScanToNotebook(false)}
-                      className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-[#172033] cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-ink cursor-pointer"
                     >
                       Save to My Notebook
                     </button>
@@ -563,7 +563,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       type="button"
                       onClick={() => handleSaveScanToNotebook(true)}
                       data-testid="study-scanned-notes-btn"
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#34A853] hover:bg-[#137333] text-white text-xs font-semibold cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-success hover:bg-success text-white text-xs font-semibold cursor-pointer"
                     >
                       <span>Study & Generate Flashcards</span>
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -577,10 +577,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
           {activeTab === 'voice' && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-lg font-bold text-[#172033]">
+                <h3 className="text-lg font-bold text-ink">
                   Voice Note & Lecture Recorder
                 </h3>
-                <p className="text-xs text-[#64748B]">
+                <p className="text-xs text-muted">
                   Record spoken explanations or class lectures, transcribe with Gemini, and turn them into structured study notes and flashcards.
                 </p>
               </div>
@@ -592,7 +592,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     value={voiceTitle}
                     onChange={(e) => setVoiceTitle(e.target.value)}
                     placeholder="Lecture or voice note title..."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-[#172033]"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-ink"
                   />
 
                   <div className="flex items-center justify-between p-4 rounded-2xl bg-white border border-slate-200">
@@ -600,17 +600,17 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       <div
                         className={`w-10 h-10 rounded-xl flex items-center justify-center ${
                           isRecording
-                            ? 'bg-red-100 text-[#EA4335] animate-pulse'
-                            : 'bg-[#E8F0FE] text-[#1A73E8]'
+                            ? 'bg-red-100 text-danger animate-pulse'
+                            : 'bg-brand-soft text-brand'
                         }`}
                       >
                         <Mic className="w-5 h-5" />
                       </div>
                       <div>
-                        <div className="text-xs font-bold text-[#172033]">
+                        <div className="text-xs font-bold text-ink">
                           {isRecording ? 'Recording Microphone...' : 'Microphone Ready'}
                         </div>
-                        <div className="text-[11px] text-[#64748B] tabular-nums">
+                        <div className="text-[11px] text-muted tabular-nums">
                           Elapsed: {Math.floor(recordingSeconds / 60)}:
                           {String(recordingSeconds % 60).padStart(2, '0')}
                         </div>
@@ -621,7 +621,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       <button
                         type="button"
                         onClick={() => void handleStartRecording()}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#EA4335] hover:bg-red-700 text-white text-xs font-semibold cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-danger hover:bg-red-700 text-white text-xs font-semibold cursor-pointer"
                       >
                         <Play className="w-3.5 h-3.5" />
                         <span>Record</span>
@@ -650,7 +650,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       rows={4}
                       value={spokenOrTypedTranscript}
                       onChange={(e) => setSpokenOrTypedTranscript(e.target.value)}
-                      className="w-full p-3 rounded-xl border border-slate-200 bg-white text-xs text-[#172033]"
+                      className="w-full p-3 rounded-xl border border-slate-200 bg-white text-xs text-ink"
                     />
                   </div>
 
@@ -659,7 +659,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       type="button"
                       disabled={isTranscribing}
                       onClick={() => void handleRunAudioTranscription(false)}
-                      className="px-3.5 py-2 rounded-xl bg-[#1A73E8] hover:bg-[#1557B0] text-white text-xs font-semibold cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer"
                     >
                       {isTranscribing
                         ? 'Summarizing Lecture...'
@@ -669,7 +669,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       type="button"
                       disabled={isTranscribing}
                       onClick={() => void handleRunAudioTranscription(true)}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#34A853] hover:bg-[#137333] text-white text-xs font-semibold cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-success hover:bg-success text-white text-xs font-semibold cursor-pointer"
                     >
                       <span>Convert to Study Material</span>
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -688,10 +688,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                 </div>
 
                 <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
-                  <span className="text-xs font-bold text-[#172033]">
+                  <span className="text-xs font-bold text-ink">
                     Structured Study Notes Output
                   </span>
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-[#172033] whitespace-pre-wrap min-h-[220px]">
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-ink whitespace-pre-wrap min-h-[220px]">
                     {transcribedNotes ||
                       'Click "Transcribe & Save to Notebook" or "Convert to Study Material" to transform your voice recording into structured bullet points, formulas, and flashcards.'}
                   </div>
@@ -704,17 +704,17 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-[#172033]">
+                  <h3 className="text-lg font-bold text-ink">
                     My Personal Notebook
                   </h3>
-                  <p className="text-xs text-[#64748B]">
+                  <p className="text-xs text-muted">
                     All your digitized handwritten scans and transcribed voice lectures in one place.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setActiveTab('scan')}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1A73E8] text-white text-xs font-semibold cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>New Scan</span>
@@ -723,10 +723,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
 
               {notebookEntries.length === 0 ? (
                 <div className="p-8 rounded-2xl border border-dashed border-slate-200 text-center space-y-2">
-                  <p className="text-sm font-semibold text-[#172033]">
+                  <p className="text-sm font-semibold text-ink">
                     Your personal notebook is empty
                   </p>
-                  <p className="text-xs text-[#64748B]">
+                  <p className="text-xs text-muted">
                     Scan handwritten notes or record a voice summary to save entries here.
                   </p>
                 </div>
@@ -739,14 +739,14 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     >
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[#172033]">
+                          <span className="text-xs font-bold text-ink">
                             {entry.title}
                           </span>
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[#E8F0FE] text-[#1A73E8]">
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-brand-soft text-brand">
                             {entry.type === 'scanned_note' ? 'Scanned OCR' : 'Voice Note'}
                           </span>
                         </div>
-                        <p className="text-xs text-[#64748B] line-clamp-3 whitespace-pre-wrap">
+                        <p className="text-xs text-muted line-clamp-3 whitespace-pre-wrap">
                           {entry.cleanContent}
                         </p>
                       </div>
@@ -790,7 +790,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                             });
                             onClose();
                           }}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-[#1A73E8] hover:underline cursor-pointer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline cursor-pointer"
                         >
                           <span>Open in Learn</span>
                           <ArrowRight className="w-3.5 h-3.5" />
@@ -806,10 +806,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
           {activeTab === 'planner' && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-lg font-bold text-[#172033]">
+                <h3 className="text-lg font-bold text-ink">
                   Daily Study Planner & Revision Schedule
                 </h3>
-                <p className="text-xs text-[#64748B]">
+                <p className="text-xs text-muted">
                   Organize your daily study blocks, spaced-repetition reviews, and mock exam targets.
                 </p>
               </div>
@@ -820,7 +820,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
                   placeholder="Add a study goal (e.g. Complete Bayes Theorem 15-question drill)..."
-                  className="flex-1 min-w-[220px] px-3.5 py-2 rounded-xl border border-slate-200 text-xs text-[#172033]"
+                  className="flex-1 min-w-[220px] px-3.5 py-2 rounded-xl border border-slate-200 text-xs text-ink"
                 />
                 <input
                   type="number"
@@ -828,11 +828,11 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                   max={180}
                   value={newTaskMins}
                   onChange={(e) => setNewTaskMins(Number(e.target.value))}
-                  className="w-24 px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-[#172033]"
+                  className="w-24 px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-ink"
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#1A73E8] text-white text-xs font-semibold hover:bg-[#1557B0] cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-semibold hover:bg-brand-strong cursor-pointer"
                 >
                   Add Task
                 </button>
@@ -845,7 +845,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all ${
                       task.completed
                         ? 'bg-emerald-50/50 border-emerald-200 text-slate-500'
-                        : 'bg-white border-slate-200 text-[#172033]'
+                        : 'bg-white border-slate-200 text-ink'
                     }`}
                   >
                     <label className="flex items-center gap-3 cursor-pointer flex-1">
@@ -859,7 +859,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                           setPlannerTasks(next);
                           studyStorage.saveStudyPlannerTasks(next);
                         }}
-                        className="w-4 h-4 accent-[#34A853] rounded cursor-pointer"
+                        className="w-4 h-4 accent-success rounded cursor-pointer"
                       />
                       <div>
                         <div
@@ -869,7 +869,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                         >
                           {task.title}
                         </div>
-                        <div className="text-[11px] text-[#64748B]">
+                        <div className="text-[11px] text-muted">
                           {task.dateIso} • {task.durationMinutes} mins • {task.category}
                         </div>
                       </div>

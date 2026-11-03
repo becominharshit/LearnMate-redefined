@@ -35,6 +35,16 @@ const UNIT_GROUPS: Record<string, string[]> = {
   Speed: ['m/s', 'km/h', 'mph'],
 };
 
+/** Shown when the active material has no formulas that could be extracted. */
+const JEE_QUICK_FORMULAS: Array<{ subject: string; items: string[] }> = [
+  { subject: 'Physics', items: ['v = u + at', 's = ut + ½at²', 'v² = u² + 2as', 'T = 2π√(l/g)'] },
+  { subject: 'Chemistry', items: ['PV = nRT', 'ΔG = ΔH − TΔS', 'pH = −log[H⁺]'] },
+  {
+    subject: 'Mathematics',
+    items: ['x = (−b ± √(b² − 4ac)) / 2a', 'sin²θ + cos²θ = 1', 'd/dx (xⁿ) = n·xⁿ⁻¹'],
+  },
+];
+
 /**
  * Converts a finite decimal number to an exact reduced fraction { num, den }
  * when denominator <= 1000 and error < 1e-9.
@@ -155,9 +165,9 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
         data-testid="study-tools-trigger"
         aria-expanded={isOpen}
         title="Open Study Tools (Scientific Calculator, Units, Statistics, Formulas, Graph)"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-[#F7F5F0] text-[#121827] border border-[#E8E6E2] text-xs font-medium transition-colors cursor-pointer"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-soft text-ink border border-line text-xs font-medium transition-colors cursor-pointer"
       >
-        <Calculator className="w-3.5 h-3.5 text-[#C84428]" />
+        <Calculator className="w-3.5 h-3.5 text-brand" />
         <span>Study Tools</span>
       </button>
 
@@ -165,7 +175,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#121827]/25 backdrop-blur-[2px] p-4 lm-no-print"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/25 backdrop-blur-[2px] p-4 lm-no-print"
             onMouseDown={(e) => {
               if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
                 setOpen(false);
@@ -178,25 +188,25 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
               role="dialog"
               aria-modal="true"
               aria-label="Study Tools"
-              className="w-full max-w-[490px] rounded-2xl bg-[#FFFFFF] border border-[#E8E6E2] shadow-2xl overflow-hidden"
+              className="w-full max-w-[490px] rounded-2xl bg-[#FFFFFF] border border-line shadow-2xl overflow-hidden"
             >
             {/* Editorial Modal Header matching Image 5 */}
             <div className="flex items-center justify-between px-6 pt-5 pb-3">
-              <h2 className="font-serif-editorial text-2xl font-bold text-[#121827] tracking-tight">
+              <h2 className="font-serif-editorial text-2xl font-bold text-ink tracking-tight">
                 Study Tools
               </h2>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close Study Tools"
-                className="p-1.5 rounded-lg text-[#606B7C] hover:text-[#121827] hover:bg-[#F7F5F0] transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-soft transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* 5 Editorial Tabs with Terracotta Active Indicator */}
-            <div className="flex items-center gap-1 px-6 border-b border-[#E8E6E2] overflow-x-auto">
+            <div className="flex items-center gap-1 px-6 border-b border-line overflow-x-auto">
               {[
                 { id: 'calc', label: 'Calculator', icon: Calculator },
                 { id: 'units', label: 'Units', icon: Ruler },
@@ -213,8 +223,8 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                     onClick={() => setActiveTool(tab.id as ToolTab)}
                     className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
                       active
-                        ? 'border-[#C84428] text-[#C84428] font-semibold'
-                        : 'border-transparent text-[#606B7C] hover:text-[#121827]'
+                        ? 'border-brand text-brand font-semibold'
+                        : 'border-transparent text-muted hover:text-ink'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
@@ -229,8 +239,8 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
               {activeTool === 'calc' && (
                 <div className="space-y-4">
                   {/* Expression & Fraction Display Box matching Image 5 */}
-                  <div className="rounded-xl border border-[#E8E6E2] bg-[#FCFBF9] p-4 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-[#606B7C]">
+                  <div className="rounded-xl border border-line bg-canvas p-4 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-muted">
                       <span className="font-mono text-[11px] truncate max-w-[260px]">
                         {calcExpr || 'Enter mathematical expression'}
                       </span>
@@ -239,7 +249,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                           type="button"
                           onClick={() => setShowHistory((p) => !p)}
                           title="Calculation History"
-                          className="p-1 rounded hover:bg-[#E8E6E2]/50 text-[#606B7C] cursor-pointer"
+                          className="p-1 rounded hover:bg-line/50 text-muted cursor-pointer"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
                         </button>
@@ -248,7 +258,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                           onClick={() =>
                             setAngleMode((prev) => (prev === 'DEG' ? 'RAD' : 'DEG'))
                           }
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold text-[#606B7C] hover:bg-[#E8E6E2]/50 cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold text-muted hover:bg-line/50 cursor-pointer"
                         >
                           <span>{angleMode}</span>
                           <ChevronDown className="w-3 h-3" />
@@ -265,12 +275,12 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                       }}
                       aria-label="Scientific calculator expression"
                       placeholder="e.g. 1/13 + (2 * 5)^2"
-                      className="w-full bg-transparent font-serif-editorial text-xl text-[#121827] focus:outline-none"
+                      className="w-full bg-transparent font-serif-editorial text-xl text-ink focus:outline-none"
                     />
 
                     <div
                       data-testid="calc-result-display"
-                      className="flex items-center justify-end gap-2 pt-1 font-serif-editorial text-2xl font-semibold text-[#121827] tabular-nums"
+                      className="flex items-center justify-end gap-2 pt-1 font-serif-editorial text-2xl font-semibold text-ink tabular-nums"
                     >
                       <span>=</span>
                       {exactFraction ? (
@@ -285,7 +295,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                   </div>
 
                   {showHistory && calcHistory.length > 0 && (
-                    <div className="rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] p-2.5 text-xs space-y-1 max-h-28 overflow-y-auto">
+                    <div className="rounded-lg border border-line bg-canvas p-2.5 text-xs space-y-1 max-h-28 overflow-y-auto">
                       {calcHistory.map((item, idx) => (
                         <button
                           key={idx}
@@ -297,8 +307,8 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                           }}
                           className="w-full flex items-center justify-between px-2 py-1 rounded hover:bg-white text-left cursor-pointer"
                         >
-                          <span className="font-mono text-[#606B7C]">{item.expr}</span>
-                          <span className="font-semibold text-[#121827]">= {item.res}</span>
+                          <span className="font-mono text-muted">{item.expr}</span>
+                          <span className="font-semibold text-ink">= {item.res}</span>
                         </button>
                       ))}
                     </div>
@@ -328,7 +338,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                             setCalcExpr((prev) => `${prev}${fn.token}`);
                           }
                         }}
-                        className="py-2 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] hover:bg-[#F3F1EC] text-xs font-serif-editorial font-medium text-[#121827] flex items-center justify-center cursor-pointer"
+                        className="py-2 rounded-lg border border-line bg-canvas hover:bg-[#F3F1EC] text-xs font-serif-editorial font-medium text-ink flex items-center justify-center cursor-pointer"
                       >
                         {fn.token === 'BACKSPACE' ? <Delete className="w-3.5 h-3.5" /> : fn.label}
                       </button>
@@ -368,10 +378,10 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                         }}
                         className={`py-2.5 rounded-lg text-base font-serif-editorial font-medium transition-colors cursor-pointer border ${
                           btn.variant === 'clear'
-                            ? 'bg-[#FBECE6] border-[#F3D1C6] text-[#C84428] font-semibold hover:bg-[#F7DDD3]'
+                            ? 'bg-brand-soft border-[#F3D1C6] text-brand font-semibold hover:bg-[#F7DDD3]'
                             : btn.variant === 'op'
-                            ? 'bg-[#F5F3EE] border-[#E8E6E2] text-[#121827] hover:bg-[#ECE9E2]'
-                            : 'bg-[#FCFBF9] border-[#E8E6E2] text-[#121827] hover:bg-[#F5F3EE]'
+                            ? 'bg-soft border-line text-ink hover:bg-[#ECE9E2]'
+                            : 'bg-canvas border-line text-ink hover:bg-soft'
                         }`}
                       >
                         {btn.label}
@@ -382,21 +392,21 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                     <button
                       type="button"
                       onClick={() => setCalcExpr((prev) => `${prev}0`)}
-                      className="col-span-2 py-2.5 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] hover:bg-[#F5F3EE] text-base font-serif-editorial font-medium text-[#121827] cursor-pointer"
+                      className="col-span-2 py-2.5 rounded-lg border border-line bg-canvas hover:bg-soft text-base font-serif-editorial font-medium text-ink cursor-pointer"
                     >
                       0
                     </button>
                     <button
                       type="button"
                       onClick={() => setCalcExpr((prev) => `${prev}.`)}
-                      className="py-2.5 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] hover:bg-[#F5F3EE] text-base font-serif-editorial font-medium text-[#121827] cursor-pointer"
+                      className="py-2.5 rounded-lg border border-line bg-canvas hover:bg-soft text-base font-serif-editorial font-medium text-ink cursor-pointer"
                     >
                       .
                     </button>
                     <button
                       type="button"
                       onClick={() => setCalcExpr((prev) => `${prev}+`)}
-                      className="py-2.5 rounded-lg border border-[#E8E6E2] bg-[#F5F3EE] hover:bg-[#ECE9E2] text-base font-serif-editorial font-medium text-[#121827] cursor-pointer"
+                      className="py-2.5 rounded-lg border border-line bg-soft hover:bg-[#ECE9E2] text-base font-serif-editorial font-medium text-ink cursor-pointer"
                     >
                       +
                     </button>
@@ -404,7 +414,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                       type="button"
                       onClick={() => handleRunCalc(calcExpr)}
                       data-testid="calc-equals-btn"
-                      className="py-2.5 rounded-lg bg-[#C84428] hover:bg-[#AF371E] text-white text-base font-serif-editorial font-semibold transition-colors cursor-pointer"
+                      className="py-2.5 rounded-lg bg-brand hover:bg-brand-strong text-white text-base font-serif-editorial font-semibold transition-colors cursor-pointer"
                     >
                       =
                     </button>
@@ -426,8 +436,8 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                         }}
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border ${
                           unitCategory === cat
-                            ? 'bg-[#FBECE6] border-[#C84428]/30 text-[#C84428]'
-                            : 'bg-[#FCFBF9] border-[#E8E6E2] text-[#606B7C] hover:text-[#121827]'
+                            ? 'bg-brand-soft border-brand/30 text-brand'
+                            : 'bg-canvas border-line text-muted hover:text-ink'
                         }`}
                       >
                         {cat}
@@ -437,24 +447,24 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
 
                   <div className="grid grid-cols-3 gap-3 items-end">
                     <div>
-                      <label className="block text-xs font-semibold text-[#606B7C] mb-1">
+                      <label className="block text-xs font-semibold text-muted mb-1">
                         Value
                       </label>
                       <input
                         type="number"
                         value={unitVal}
                         onChange={(e) => setUnitVal(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] font-semibold text-sm text-[#121827]"
+                        className="w-full px-3 py-2 rounded-lg border border-line bg-canvas font-semibold text-sm text-ink"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-[#606B7C] mb-1">
+                      <label className="block text-xs font-semibold text-muted mb-1">
                         From
                       </label>
                       <select
                         value={fromUnit}
                         onChange={(e) => setFromUnit(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-[#E8E6E2] bg-white font-semibold text-sm text-[#121827]"
+                        className="w-full px-3 py-2 rounded-lg border border-line bg-white font-semibold text-sm text-ink"
                       >
                         {(UNIT_GROUPS[unitCategory] || []).map((u) => (
                           <option key={u} value={u}>
@@ -464,13 +474,13 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-[#606B7C] mb-1">
+                      <label className="block text-xs font-semibold text-muted mb-1">
                         To
                       </label>
                       <select
                         value={toUnit}
                         onChange={(e) => setToUnit(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-[#E8E6E2] bg-white font-semibold text-sm text-[#121827]"
+                        className="w-full px-3 py-2 rounded-lg border border-line bg-white font-semibold text-sm text-ink"
                       >
                         {(UNIT_GROUPS[unitCategory] || []).map((u) => (
                           <option key={u} value={u}>
@@ -481,9 +491,9 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                     </div>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-[#FBECE6]/60 border border-[#C84428]/25 flex items-center justify-between">
-                    <span className="text-xs font-medium text-[#606B7C]">Converted Value:</span>
-                    <span className="font-serif-editorial font-bold text-lg text-[#C84428] tabular-nums">
+                  <div className="p-4 rounded-xl bg-brand-soft/60 border border-brand/25 flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted">Converted Value:</span>
+                    <span className="font-serif-editorial font-bold text-lg text-brand tabular-nums">
                       {convertedOutput.ok
                         ? `${convertedOutput.value} ${toUnit.toUpperCase()}`
                         : convertedOutput.error}
@@ -494,78 +504,86 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
 
               {activeTool === 'stats' && (
                 <div className="space-y-3">
-                  <label className="block text-xs font-semibold text-[#606B7C]">
+                  <label className="block text-xs font-semibold text-muted">
                     Dataset Values (comma-separated):
                   </label>
                   <input
                     type="text"
                     value={statsInput}
                     onChange={(e) => setStatsInput(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] font-mono text-xs text-[#121827]"
+                    className="w-full px-3 py-2 rounded-lg border border-line bg-canvas font-mono text-xs text-ink"
                   />
                   {statsSummary ? (
                     <div className="grid grid-cols-2 gap-2.5 pt-1">
-                      <div className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]">
-                        <div className="text-[11px] text-[#606B7C]">Mean (μ / X̄)</div>
-                        <div className="font-serif-editorial font-bold text-base text-[#121827] tabular-nums">
+                      <div className="p-3 rounded-xl bg-canvas border border-line">
+                        <div className="text-[11px] text-muted">Mean (μ / X̄)</div>
+                        <div className="font-serif-editorial font-bold text-base text-ink tabular-nums">
                           {statsSummary.mean}
                         </div>
                       </div>
-                      <div className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]">
-                        <div className="text-[11px] text-[#606B7C]">Median</div>
-                        <div className="font-serif-editorial font-bold text-base text-[#121827] tabular-nums">
+                      <div className="p-3 rounded-xl bg-canvas border border-line">
+                        <div className="text-[11px] text-muted">Median</div>
+                        <div className="font-serif-editorial font-bold text-base text-ink tabular-nums">
                           {statsSummary.median}
                         </div>
                       </div>
-                      <div className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]">
-                        <div className="text-[11px] text-[#606B7C]">Sample Std Dev (s)</div>
-                        <div className="font-serif-editorial font-bold text-base text-[#C84428] tabular-nums">
+                      <div className="p-3 rounded-xl bg-canvas border border-line">
+                        <div className="text-[11px] text-muted">Sample Std Dev (s)</div>
+                        <div className="font-serif-editorial font-bold text-base text-brand tabular-nums">
                           {statsSummary.sampleStdDev}
                         </div>
                       </div>
-                      <div className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]">
-                        <div className="text-[11px] text-[#606B7C]">Population Std Dev (σ)</div>
-                        <div className="font-serif-editorial font-bold text-base text-[#2E7D52] tabular-nums">
+                      <div className="p-3 rounded-xl bg-canvas border border-line">
+                        <div className="text-[11px] text-muted">Population Std Dev (σ)</div>
+                        <div className="font-serif-editorial font-bold text-base text-success tabular-nums">
                           {statsSummary.populationStdDev}
                         </div>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-[#606B7C]">Enter at least one number.</p>
+                    <p className="text-xs text-muted">Enter at least one number.</p>
                   )}
                 </div>
               )}
 
               {activeTool === 'formulas' && (
                 <div className="space-y-2.5 max-h-72 overflow-y-auto">
-                  <div className="text-xs font-semibold text-[#606B7C]">
-                    {activeDocument
+                  <div className="text-xs font-semibold text-muted">
+                    {docFormulas.length > 0 && activeDocument
                       ? `Extracted from ${activeDocument.title}`
-                      : 'Essential Probability & Calculus Reference'}
+                      : activeDocument
+                      ? `No formulas found in ${activeDocument.title}. JEE quick reference:`
+                      : 'JEE quick reference'}
                   </div>
                   {docFormulas.length > 0 ? (
                     docFormulas.map((f, i) => (
                       <div
                         key={i}
-                        className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2] space-y-1"
+                        className="p-3 rounded-xl bg-canvas border border-line space-y-1"
                       >
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#C84428]">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-brand">
                           Page {f.page}
                         </span>
-                        <div className="font-serif-editorial text-sm text-[#121827]">{f.text}</div>
+                        <div className="font-serif-editorial text-sm text-ink">{f.text}</div>
                       </div>
                     ))
                   ) : (
-                    <div className="space-y-2 font-serif-editorial text-sm text-[#121827]">
-                      <div className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]">
-                        Conditional Probability: P(A | B) = P(A ∩ B) / P(B), P(B) &gt; 0
-                      </div>
-                      <div className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]">
-                        Bayes’ Theorem: P(A | B) = [P(B | A) · P(A)] / P(B)
-                      </div>
-                      <div className="p-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]">
-                        Variance Identity: Var(X) = E[X²] − (E[X])²
-                      </div>
+                    <div className="space-y-2 text-sm text-ink">
+                      {JEE_QUICK_FORMULAS.map((group) => (
+                        <div
+                          key={group.subject}
+                          className="p-3 rounded-xl bg-canvas border border-line space-y-1"
+                        >
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-brand">
+                            {group.subject}
+                          </span>
+                          {group.items.map((item) => (
+                            <div key={item} className="font-serif-editorial">
+                              {item}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -581,8 +599,8 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                         onClick={() => setGraphFn(fn)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold cursor-pointer border ${
                           graphFn === fn
-                            ? 'bg-[#C84428] border-[#C84428] text-white'
-                            : 'bg-[#FCFBF9] border-[#E8E6E2] text-[#121827] hover:bg-[#F5F3EE]'
+                            ? 'bg-brand border-brand text-white'
+                            : 'bg-canvas border-line text-ink hover:bg-soft'
                         }`}
                       >
                         f(x) = {fn}
@@ -591,13 +609,13 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                   </div>
                   <svg
                     viewBox="0 0 320 160"
-                    className="w-full h-40 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2]"
+                    className="w-full h-40 rounded-xl bg-canvas border border-line"
                   >
                     <line x1="0" y1="80" x2="320" y2="80" stroke="#D6D3CD" strokeWidth="1" />
                     <line x1="160" y1="0" x2="160" y2="160" stroke="#D6D3CD" strokeWidth="1" />
                     <polyline
                       fill="none"
-                      stroke="#C84428"
+                      stroke="#4F46E5"
                       strokeWidth="2.5"
                       points={Array.from({ length: 81 })
                         .map((_, i) => {

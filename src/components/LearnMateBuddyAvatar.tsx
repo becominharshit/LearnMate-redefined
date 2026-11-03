@@ -347,7 +347,7 @@ export const LearnMateBuddyAvatar: React.FC<LearnMateBuddyAvatarProps> = ({
       </div>
 
       {/* Compact State Pill */}
-      <div className="mt-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200/90 shadow-2xs text-[11px] font-semibold text-[#172033]">
+      <div className="mt-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200/90 shadow-2xs text-[11px] font-semibold text-ink">
         <span
           className="w-2 h-2 rounded-full shrink-0"
           style={{ backgroundColor: currentBadge.dotColor }}

@@ -343,19 +343,14 @@ export function App() {
 
   if (hasAccountDataAtStartup && !isAuthReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FCFBF9] text-sm text-[#606B7C]">
+      <div className="min-h-screen flex items-center justify-center bg-canvas text-sm text-muted">
         Loading your account…
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FCFBF9] text-[#121827] pt-16">
-      {/* True Glassmorphic Top Strip (Clear frosted glass, no colored background) */}
-      <div
-        className="fixed top-0 left-0 right-0 h-16 z-30 bg-white/10 dark:bg-white/[0.04] backdrop-blur-2xl backdrop-saturate-150 border-b border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_30px_rgba(0,0,0,0.02)] pointer-events-none transition-colors"
-        aria-hidden="true"
-      />
+    <div className="min-h-screen flex flex-col bg-canvas text-ink pb-20 lg:pb-0">
       <DynamicCompanion activeDoc={effectiveDoc} />
       <Navbar
         activeTab={activeTab}
@@ -409,7 +404,7 @@ export function App() {
         )}
 
         {activeTab === 'dashboard' && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <StudentDashboardView
               studentName={
                 user?.displayName
@@ -427,7 +422,7 @@ export function App() {
         )}
 
         {(activeTab === 'study' || activeTab === 'ai-tutor') && activeDoc && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-5">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-5">
             <StudyView
               documents={documents}
               activeDocument={effectiveDoc}
@@ -438,7 +433,7 @@ export function App() {
               initialSubMode={activeTab === 'ai-tutor' ? 'explain' : studyInitialMode}
               presentationMode={activeTab === 'ai-tutor' ? 'ai-tutor' : 'study-space'}
               onAttemptSaved={refreshDocumentsState}
-              onNavigateProgress={() => handleSelectTab('dashboard')}
+              onNavigateProgress={() => handleSelectTab('analytics')}
               onOpenPdfWorkspace={() => handleSelectTab('pdf-workspace')}
               onOpenUploadModal={() => handleSelectTab('home')}
               isCloudSynced={!!user}
@@ -448,10 +443,10 @@ export function App() {
 
         {(activeTab === 'study' || activeTab === 'ai-tutor') && !activeDoc && (
           <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
-            <h2 className="font-serif-editorial text-3xl font-bold text-[#121827]">
+            <h2 className="font-serif-editorial text-3xl font-bold text-ink">
               No Study Document Selected
             </h2>
-            <p className="text-sm text-[#606B7C]">
+            <p className="text-sm text-muted">
               Upload a PDF or select one of your materials to start studying.
             </p>
             <button
@@ -464,7 +459,7 @@ export function App() {
         )}
 
         {activeTab === 'revision' && activeDoc && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <QuickReviseView
               activeDocument={effectiveDoc}
               onNavigateToCitation={(pageNumber) => {
@@ -480,7 +475,7 @@ export function App() {
 
         {activeTab === 'revision' && !activeDoc && (
           <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
-            <h2 className="font-serif-editorial text-3xl font-bold text-[#121827]">
+            <h2 className="font-serif-editorial text-3xl font-bold text-ink">
               Select a Material to Revise
             </h2>
             <button
@@ -493,7 +488,7 @@ export function App() {
         )}
 
         {activeTab === 'practice' && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <PracticeWorkspaceView
               documents={documents}
               activeDoc={activeDoc}
@@ -512,7 +507,7 @@ export function App() {
         )}
 
         {activeTab === 'explore' && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <ExploreWorkspaceView
               activeSubTab={exploreSubTab}
               onSelectSubTab={setExploreSubTab}
@@ -529,7 +524,7 @@ export function App() {
         )}
 
         {activeTab === 'create' && effectiveDoc && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-5">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-5">
             <CreativeStudioView
               documents={documents}
               activeDocument={effectiveDoc}
@@ -550,10 +545,10 @@ export function App() {
 
         {activeTab === 'create' && !effectiveDoc && (
           <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
-            <h2 className="font-serif-editorial text-3xl font-bold text-[#121827]">
+            <h2 className="font-serif-editorial text-3xl font-bold text-ink">
               Add Study Material First
             </h2>
-            <p className="text-sm text-[#606B7C]">
+            <p className="text-sm text-muted">
               The creative tools work on one of your study materials. Upload a PDF or paste notes to begin.
             </p>
             <button
@@ -566,7 +561,7 @@ export function App() {
         )}
 
         {activeTab === 'pdf-workspace' && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <PdfWorkspaceView
               documents={documents}
               activeDoc={activeDoc}
@@ -583,7 +578,7 @@ export function App() {
         )}
 
         {activeTab === 'analytics' && (
-          <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <ProgressView
               documents={documents}
               attempts={studyStorage.getQuizAttempts()}

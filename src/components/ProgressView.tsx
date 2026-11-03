@@ -111,7 +111,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
             id="progress-doc-filter"
             value={selectedDocFilter}
             onChange={(e) => setSelectedDocFilter(e.target.value)}
-            className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-[14px] font-medium text-slate-800 focus:outline-none focus:border-[#4285F4]"
+            className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-[14px] font-medium text-slate-800 focus:outline-none focus:border-brand"
           >
             <option value="all">All Study Materials ({attempts.length} attempts)</option>
             {documents.map((doc) => (
@@ -133,7 +133,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
           <button
             type="button"
             onClick={handleDownloadReport}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1A73E8] hover:bg-[#1557B0] text-white text-[14px] font-semibold shadow-2xs transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4285F4]"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-[14px] font-semibold shadow-2xs transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
             <Download className="w-4 h-4" />
             <span>Download Report</span>
@@ -157,21 +157,21 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
       {filteredFocusSessions.length > 0 && (
         <div className="p-4 rounded-2xl bg-[#F3F7FE] border border-blue-100 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#DCE8FD] text-[#4285F4] flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-[#DCE8FD] text-brand flex items-center justify-center shrink-0">
               <Timer className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-bold text-[#172033]">
+              <p className="text-sm font-bold text-ink">
                 {filteredFocusSessions.length} Completed Focus{' '}
                 {filteredFocusSessions.length === 1 ? 'Session' : 'Sessions'} ({totalFocusMinutes}{' '}
                 mins)
               </p>
-              <p className="text-xs text-[#64748B]">
+              <p className="text-xs text-muted">
                 Recorded from real Study Timer focus sessions
               </p>
             </div>
           </div>
-          <span className="text-xs font-semibold text-[#1A73E8] bg-white px-3 py-1 rounded-full border border-blue-200/80">
+          <span className="text-xs font-semibold text-brand bg-white px-3 py-1 rounded-full border border-blue-200/80">
             Latest: {new Date(filteredFocusSessions[0].completedAt).toLocaleDateString()}
           </span>
         </div>
@@ -180,7 +180,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
       {/* Honest Empty State when no quizzes have been submitted yet */}
       {filteredAttempts.length === 0 ? (
         <div className="bg-white rounded-3xl border border-slate-200/90 p-10 sm:p-14 text-center max-w-xl mx-auto space-y-5 shadow-xs">
-          <div className="w-16 h-16 rounded-2xl bg-[#F2FBF6] text-[#34A853] flex items-center justify-center mx-auto">
+          <div className="w-16 h-16 rounded-2xl bg-success-soft text-success flex items-center justify-center mx-auto">
             <BarChart2 className="w-8 h-8" />
           </div>
           <div className="space-y-2">
@@ -196,7 +196,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
               <button
                 type="button"
                 onClick={() => onStartQuizForDocument(documents[0], 'quiz')}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[#1A73E8] hover:bg-[#1557B0] text-white text-[15px] font-semibold shadow-sm transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-brand hover:bg-brand-strong text-white text-[15px] font-semibold shadow-sm transition-colors cursor-pointer"
               >
                 <BookOpen className="w-4 h-4" />
                 <span>Take Diagnostic Quiz on {documents[0].title}</span>
@@ -219,9 +219,9 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#F2FBF6] border border-emerald-100 space-y-1">
+            <div className="p-5 rounded-2xl bg-success-soft border border-emerald-100 space-y-1">
               <span className="text-xs font-semibold text-slate-500">Average Accuracy</span>
-              <p className="text-3xl font-extrabold text-[#16A34A] tabular-nums">
+              <p className="text-3xl font-extrabold text-success tabular-nums">
                 {summary.averageScorePct}%
               </p>
               <p className="text-xs text-slate-600 tabular-nums">
@@ -229,7 +229,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#FEF9EE] border border-amber-100 space-y-1">
+            <div className="p-5 rounded-2xl bg-warning-soft border border-amber-100 space-y-1">
               <span className="text-xs font-semibold text-slate-500">First → Latest Improvement</span>
               <p className="text-3xl font-extrabold text-slate-900 tabular-nums flex items-center gap-1.5">
                 <span>
@@ -237,7 +237,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                     ? `+${summary.overallDeltaPct}%`
                     : `${summary.overallDeltaPct ?? 0}%`}
                 </span>
-                <TrendingUp className="w-5 h-5 text-[#16A34A]" />
+                <TrendingUp className="w-5 h-5 text-success" />
               </p>
               <p className="text-xs text-slate-600 tabular-nums">
                 {summary.firstAttemptPct}% initial → {summary.latestAttemptPct}% latest
@@ -287,7 +287,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                         </span>
                       )}
                       {item.status === 'improved' && (
-                        <span className="inline-flex items-center gap-1 text-xs font-bold text-[#1A73E8]">
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-brand">
                           <Award className="w-3.5 h-3.5" /> Improved (+{item.deltaPct}%)
                         </span>
                       )}
@@ -303,10 +303,10 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                       <div
                         className={`h-full transition-all duration-300 ${
                           item.latestScorePct >= 80
-                            ? 'bg-[#16A34A]'
+                            ? 'bg-success'
                             : item.latestScorePct >= 50
-                            ? 'bg-[#FBBC05]'
-                            : 'bg-[#EA4335]'
+                            ? 'bg-warning'
+                            : 'bg-danger'
                         }`}
                         style={{ width: `${Math.max(6, item.latestScorePct)}%` }}
                       />
@@ -340,7 +340,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                       <span className="text-sm font-bold text-slate-900">
                         {attempt.documentTitle}
                       </span>
-                      <span className="text-xs font-semibold text-[#1A73E8]">
+                      <span className="text-xs font-semibold text-brand">
                         · {attempt.mode === 'adaptive' ? 'Adaptive Practice' : 'Diagnostic Quiz'}
                       </span>
                     </div>

@@ -128,15 +128,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const recentDocs = showAllRecent ? documents : documents.slice(0, 4);
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-[#FCFBF9] text-[#121827]">
+    <div className="min-h-[calc(100vh-4rem)] bg-canvas text-ink">
       <div className="max-w-[1240px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-10">
         {/* Masthead Header */}
         <div className="space-y-4 max-w-3xl">
           <div className="lm-kicker">ACADEMIC STUDY WORKSPACE</div>
-          <h1 className="font-serif-editorial text-4xl sm:text-5xl font-bold tracking-tight text-[#121827] leading-[1.12]">
+          <h1 className="font-serif-editorial text-4xl sm:text-5xl font-bold tracking-tight text-ink leading-[1.12]">
             Read deeply. Practice with purpose.
           </h1>
-          <p className="text-base sm:text-lg text-[#606B7C] font-normal leading-relaxed">
+          <p className="text-base sm:text-lg text-muted font-normal leading-relaxed">
             Bring your textbooks, lecture notes, or video classes into one quiet studio.
             LearnMate indexes page-accurate concepts, builds adaptive practice sets, and explains difficult derivations on demand.
           </p>
@@ -146,25 +146,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <button
               type="button"
               onClick={() => onOpenNotebookModal?.('scan')}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white hover:bg-[#F7F5F0] border border-[#E8E6E2] text-xs font-semibold text-[#121827] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white hover:bg-soft border border-line text-xs font-semibold text-ink transition-colors cursor-pointer"
             >
-              <Camera className="w-3.5 h-3.5 text-[#C84428]" />
+              <Camera className="w-3.5 h-3.5 text-brand" />
               <span>Scan Handwritten Notes</span>
             </button>
             <button
               type="button"
               onClick={() => onOpenNotebookModal?.('voice')}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white hover:bg-[#F7F5F0] border border-[#E8E6E2] text-xs font-semibold text-[#121827] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white hover:bg-soft border border-line text-xs font-semibold text-ink transition-colors cursor-pointer"
             >
-              <Mic className="w-3.5 h-3.5 text-[#C84428]" />
+              <Mic className="w-3.5 h-3.5 text-brand" />
               <span>Record Voice Lecture</span>
             </button>
             <button
               type="button"
               onClick={() => onNavigateTab('explore')}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white hover:bg-[#F7F5F0] border border-[#E8E6E2] text-xs font-semibold text-[#121827] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white hover:bg-soft border border-line text-xs font-semibold text-ink transition-colors cursor-pointer"
             >
-              <Compass className="w-3.5 h-3.5 text-[#2E7D52]" />
+              <Compass className="w-3.5 h-3.5 text-success" />
               <span>Research Papers &amp; Courses</span>
             </button>
 
@@ -172,7 +172,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectDocument(documents[0], 'explain')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#FBECE6] hover:bg-[#F8E0D7] text-xs font-semibold text-[#C84428] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-brand-soft hover:bg-[#F8E0D7] text-xs font-semibold text-brand transition-colors cursor-pointer"
               >
                 <span>Continue: {documents[0].title.replace(/\.pdf$/i, '')}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -182,19 +182,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
 
         {/* Master Document Ingestion Hub */}
-        <section aria-labelledby="ingest-heading" className="bg-white border border-[#E8E6E2] rounded-2xl p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E8E6E2] pb-5">
+        <section aria-labelledby="ingest-heading" className="bg-white border border-line rounded-2xl p-6 sm:p-8 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-line pb-5">
             <div>
-              <h2 id="ingest-heading" className="font-serif-editorial text-2xl font-bold text-[#121827]">
+              <h2 id="ingest-heading" className="font-serif-editorial text-2xl font-bold text-ink">
                 Import Study Material
               </h2>
-              <p className="text-xs sm:text-sm text-[#606B7C] mt-0.5">
+              <p className="text-xs sm:text-sm text-muted mt-0.5">
                 Select your source material to index into your personal study space.
               </p>
             </div>
 
             {/* Ingestion Source Tabs */}
-            <div role="tablist" aria-label="Ingestion Source" className="inline-flex p-1 rounded-xl bg-[#F7F5F0] border border-[#E8E6E2] self-start sm:self-auto">
+            <div role="tablist" aria-label="Ingestion Source" className="inline-flex p-1 rounded-xl bg-soft border border-line self-start sm:self-auto">
               <button
                 type="button"
                 role="tab"
@@ -202,8 +202,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={() => setIngestTab('pdf')}
                 className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   ingestTab === 'pdf'
-                    ? 'bg-white text-[#121827] shadow-xs'
-                    : 'text-[#606B7C] hover:text-[#121827]'
+                    ? 'bg-white text-ink shadow-xs'
+                    : 'text-muted hover:text-ink'
                 }`}
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -216,8 +216,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={() => setIngestTab('notes')}
                 className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   ingestTab === 'notes'
-                    ? 'bg-white text-[#121827] shadow-xs'
-                    : 'text-[#606B7C] hover:text-[#121827]'
+                    ? 'bg-white text-ink shadow-xs'
+                    : 'text-muted hover:text-ink'
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
@@ -230,11 +230,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={() => setIngestTab('youtube')}
                 className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   ingestTab === 'youtube'
-                    ? 'bg-white text-[#121827] shadow-xs'
-                    : 'text-[#606B7C] hover:text-[#121827]'
+                    ? 'bg-white text-ink shadow-xs'
+                    : 'text-muted hover:text-ink'
                 }`}
               >
-                <Youtube className="w-3.5 h-3.5 text-[#C84428]" />
+                <Youtube className="w-3.5 h-3.5 text-brand" />
                 <span>YouTube Lecture</span>
               </button>
             </div>
@@ -261,22 +261,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
               onClick={() => fileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-8 sm:p-12 text-center space-y-3 cursor-pointer transition-colors ${
                 isDragOver
-                  ? 'border-[#C84428] bg-[#FBECE6]/40'
-                  : 'border-[#D2CFC7] hover:border-[#C84428] bg-[#FAF8F5]/60 hover:bg-[#FAF8F5]'
+                  ? 'border-brand bg-brand-soft/40'
+                  : 'border-[#D2CFC7] hover:border-brand bg-canvas/60 hover:bg-canvas'
               }`}
             >
-              <div className="w-12 h-12 rounded-xl bg-white border border-[#E8E6E2] text-[#C84428] flex items-center justify-center mx-auto shadow-2xs">
+              <div className="w-12 h-12 rounded-xl bg-white border border-line text-brand flex items-center justify-center mx-auto shadow-2xs">
                 {isProcessing ? (
-                  <Loader2 className="w-6 h-6 animate-spin text-[#C84428]" />
+                  <Loader2 className="w-6 h-6 animate-spin text-brand" />
                 ) : (
                   <Upload className="w-6 h-6" />
                 )}
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-semibold text-[#121827]">
+                <p className="text-sm font-semibold text-ink">
                   {isProcessing ? 'Processing PDF document...' : 'Drop your PDF here, or click to browse'}
                 </p>
-                <p className="text-xs text-[#606B7C]">
+                <p className="text-xs text-muted">
                   Textbook chapters, lecture slides, research papers, or syllabus documents (up to 20 pages)
                 </p>
               </div>
@@ -309,7 +309,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <form onSubmit={handleNotesSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
-                  <label htmlFor="home-notes-title" className="block text-xs font-semibold text-[#121827] mb-1">
+                  <label htmlFor="home-notes-title" className="block text-xs font-semibold text-ink mb-1">
                     Document Title (Optional)
                   </label>
                   <input
@@ -318,14 +318,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     value={notesTitle}
                     onChange={(e) => setNotesTitle(e.target.value)}
                     placeholder="e.g. Thermodynamics: First Law and Carnot Cycles"
-                    className="w-full h-10 px-3.5 rounded-lg border border-[#E8E6E2] bg-[#FAF8F5]/40 text-xs font-medium text-[#121827] focus:outline-none focus:border-[#C84428]"
+                    className="w-full h-10 px-3.5 rounded-lg border border-line bg-canvas/40 text-xs font-medium text-ink focus:outline-none focus:border-brand"
                   />
                 </div>
                 <div className="flex items-end">
                   <button
                     type="button"
                     onClick={() => setPasteModalOpen(true)}
-                    className="w-full h-10 px-3 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#F7F5F0] text-xs font-semibold text-[#606B7C] hover:text-[#121827] transition-colors cursor-pointer"
+                    className="w-full h-10 px-3 rounded-lg border border-line bg-white hover:bg-soft text-xs font-semibold text-muted hover:text-ink transition-colors cursor-pointer"
                   >
                     Open Full-Screen Notes Editor
                   </button>
@@ -333,7 +333,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
 
               <div>
-                <label htmlFor="home-notes-body" className="block text-xs font-semibold text-[#121827] mb-1">
+                <label htmlFor="home-notes-body" className="block text-xs font-semibold text-ink mb-1">
                   Lecture Content or Markdown Notes
                 </label>
                 <textarea
@@ -342,12 +342,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   value={notesContent}
                   onChange={(e) => setNotesContent(e.target.value)}
                   placeholder="Paste lecture excerpts, definitions, or revision notes here (minimum 25 characters)..."
-                  className="w-full p-3.5 rounded-lg border border-[#E8E6E2] bg-[#FAF8F5]/40 text-xs text-[#121827] focus:outline-none focus:border-[#C84428] leading-relaxed"
+                  className="w-full p-3.5 rounded-lg border border-line bg-canvas/40 text-xs text-ink focus:outline-none focus:border-brand leading-relaxed"
                 />
               </div>
 
               <div className="flex items-center justify-between gap-3 pt-1">
-                <span className="text-[11px] text-[#606B7C]">
+                <span className="text-[11px] text-muted">
                   {notesContent.trim().length} characters • Paginated automatically on save
                 </span>
                 <button
@@ -375,12 +375,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {ingestTab === 'youtube' && (
             <form onSubmit={handleYouTubeSubmit} className="space-y-4">
               <div className="space-y-1">
-                <label htmlFor="home-youtube-url" className="block text-xs font-semibold text-[#121827]">
+                <label htmlFor="home-youtube-url" className="block text-xs font-semibold text-ink">
                   Public YouTube Lecture URL
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <div className="relative flex-1">
-                    <Youtube className="w-4 h-4 text-[#C84428] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <Youtube className="w-4 h-4 text-brand absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       id="home-youtube-url"
                       type="url"
@@ -388,7 +388,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       onChange={(e) => setYoutubeUrlInput(e.target.value)}
                       placeholder="https://www.youtube.com/watch?v=..."
                       disabled={isProcessing}
-                      className="w-full h-10 pl-10 pr-3.5 rounded-lg border border-[#E8E6E2] bg-[#FAF8F5]/40 text-xs text-[#121827] focus:outline-none focus:border-[#C84428]"
+                      className="w-full h-10 pl-10 pr-3.5 rounded-lg border border-line bg-canvas/40 text-xs text-ink focus:outline-none focus:border-brand"
                     />
                   </div>
                   <button
@@ -410,7 +410,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-[#606B7C]">
+              <p className="text-xs text-muted">
                 LearnMate retrieves the lecture transcript, formats timestamped study sections, and prepares conceptual questions.
               </p>
             </form>
@@ -423,7 +423,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-left text-xs text-red-800"
             >
               <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-[#C84428] shrink-0" />
+                <AlertCircle className="w-4 h-4 text-brand shrink-0" />
                 <span>{errorMessage}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -453,10 +453,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
         {/* 4 Core Academic Study Pillars */}
         <section aria-labelledby="pillars-heading" className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 id="pillars-heading" className="font-serif-editorial text-2xl font-bold text-[#121827]">
+            <h2 id="pillars-heading" className="font-serif-editorial text-2xl font-bold text-ink">
               Study Workspaces
             </h2>
-            <span className="text-xs text-[#606B7C]">Choose your task</span>
+            <span className="text-xs text-muted">Choose your task</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -467,22 +467,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 if (documents[0]) onSelectDocument(documents[0], 'explain');
                 else onNavigateTab('study');
               }}
-              className="group text-left rounded-xl bg-white border border-[#E8E6E2] p-5 hover:border-[#C84428]/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
+              className="group text-left rounded-xl bg-white border border-line p-5 hover:border-brand/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
             >
               <div className="space-y-3">
-                <div className="w-10 h-10 rounded-lg bg-[#FBECE6] text-[#C84428] flex items-center justify-center">
+                <div className="w-10 h-10 rounded-lg bg-brand-soft text-brand flex items-center justify-center">
                   <BookOpen className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-serif-editorial text-base font-bold text-[#121827] group-hover:text-[#C84428] transition-colors">
+                  <h3 className="font-serif-editorial text-base font-bold text-ink group-hover:text-brand transition-colors">
                     Study Space
                   </h3>
-                  <p className="text-xs text-[#606B7C] leading-relaxed mt-1">
+                  <p className="text-xs text-muted leading-relaxed mt-1">
                     Socratic AI tutor, multi-page chapter summaries, flashcards, and audio lectures.
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#C84428]">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand">
                 <span>Open Space</span>
                 <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
               </span>
@@ -492,22 +492,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <button
               type="button"
               onClick={() => onNavigateTab('practice')}
-              className="group text-left rounded-xl bg-white border border-[#E8E6E2] p-5 hover:border-[#2E7D52]/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
+              className="group text-left rounded-xl bg-white border border-line p-5 hover:border-success/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
             >
               <div className="space-y-3">
-                <div className="w-10 h-10 rounded-lg bg-[#EBF6EE] text-[#2E7D52] flex items-center justify-center">
+                <div className="w-10 h-10 rounded-lg bg-[#EBF6EE] text-success flex items-center justify-center">
                   <ClipboardCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-serif-editorial text-base font-bold text-[#121827] group-hover:text-[#2E7D52] transition-colors">
+                  <h3 className="font-serif-editorial text-base font-bold text-ink group-hover:text-success transition-colors">
                     Practice &amp; Mock Exams
                   </h3>
-                  <p className="text-xs text-[#606B7C] leading-relaxed mt-1">
+                  <p className="text-xs text-muted leading-relaxed mt-1">
                     Timed diagnostic tests for JEE, NEET, CUET, Boards, and University courses with proctored full screen.
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2E7D52]">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-success">
                 <span>Start Practice</span>
                 <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
               </span>
@@ -517,22 +517,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <button
               type="button"
               onClick={() => onNavigateTab('pdf-workspace')}
-              className="group text-left rounded-xl bg-white border border-[#E8E6E2] p-5 hover:border-[#D97706]/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
+              className="group text-left rounded-xl bg-white border border-line p-5 hover:border-warning/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
             >
               <div className="space-y-3">
-                <div className="w-10 h-10 rounded-lg bg-[#FEF6E0] text-[#D97706] flex items-center justify-center">
+                <div className="w-10 h-10 rounded-lg bg-[#FEF6E0] text-warning flex items-center justify-center">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-serif-editorial text-base font-bold text-[#121827] group-hover:text-[#D97706] transition-colors">
+                  <h3 className="font-serif-editorial text-base font-bold text-ink group-hover:text-warning transition-colors">
                     PDF Annotation Studio
                   </h3>
-                  <p className="text-xs text-[#606B7C] leading-relaxed mt-1">
+                  <p className="text-xs text-muted leading-relaxed mt-1">
                     Read, highlight passages, sketch diagrams in margins, and export annotated lecture notes.
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#D97706]">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-warning">
                 <span>Open Reader</span>
                 <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
               </span>
@@ -542,22 +542,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <button
               type="button"
               onClick={() => onNavigateTab('explore')}
-              className="group text-left rounded-xl bg-white border border-[#E8E6E2] p-5 hover:border-[#2563EB]/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
+              className="group text-left rounded-xl bg-white border border-line p-5 hover:border-brand/60 transition-all shadow-xs cursor-pointer flex flex-col justify-between space-y-4"
             >
               <div className="space-y-3">
-                <div className="w-10 h-10 rounded-lg bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center">
+                <div className="w-10 h-10 rounded-lg bg-[#EFF6FF] text-brand flex items-center justify-center">
                   <Compass className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-serif-editorial text-base font-bold text-[#121827] group-hover:text-[#2563EB] transition-colors">
+                  <h3 className="font-serif-editorial text-base font-bold text-ink group-hover:text-brand transition-colors">
                     Explore &amp; Research
                   </h3>
-                  <p className="text-xs text-[#606B7C] leading-relaxed mt-1">
+                  <p className="text-xs text-muted leading-relaxed mt-1">
                     Daily student newspaper, ArXiv papers, OpenAlex search, and campus study maps.
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2563EB]">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand">
                 <span>Browse Library</span>
                 <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
               </span>
@@ -568,12 +568,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
         {/* Recent Study Materials Library */}
         {documents.length > 0 && (
           <section aria-labelledby="recent-heading" className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E8E6E2] pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
               <div className="flex items-center gap-2.5">
-                <h2 id="recent-heading" className="font-serif-editorial text-2xl font-bold text-[#121827]">
+                <h2 id="recent-heading" className="font-serif-editorial text-2xl font-bold text-ink">
                   Recent Materials
                 </h2>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-[#F7F5F0] text-[#606B7C] border border-[#E8E6E2]">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-soft text-muted border border-line">
                   {documents.length} {documents.length === 1 ? 'file' : 'files'}
                 </span>
               </div>
@@ -583,7 +583,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowAllRecent((prev) => !prev)}
-                    className="text-xs font-semibold text-[#606B7C] hover:text-[#121827] transition-colors cursor-pointer"
+                    className="text-xs font-semibold text-muted hover:text-ink transition-colors cursor-pointer"
                   >
                     {showAllRecent ? 'Show Less' : `View All (${documents.length})`}
                   </button>
@@ -591,7 +591,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <button
                   type="button"
                   onClick={() => onNavigateTab('dashboard')}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#C84428] hover:underline cursor-pointer"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline cursor-pointer"
                 >
                   <span>Student Dashboard</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -608,26 +608,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 return (
                   <div
                     key={doc.id}
-                    className="bg-white border border-[#E8E6E2] rounded-xl p-4 shadow-2xs hover:border-[#C84428]/50 transition-all flex flex-col justify-between space-y-3"
+                    className="bg-white border border-line rounded-xl p-4 shadow-2xs hover:border-brand/50 transition-all flex flex-col justify-between space-y-3"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-lg bg-[#FAF8F5] border border-[#E8E6E2] text-[#606B7C] flex items-center justify-center shrink-0 mt-0.5">
+                        <div className="w-9 h-9 rounded-lg bg-canvas border border-line text-muted flex items-center justify-center shrink-0 mt-0.5">
                           {isYt ? (
-                            <Youtube className="w-4 h-4 text-[#C84428]" />
+                            <Youtube className="w-4 h-4 text-brand" />
                           ) : (
-                            <FileText className="w-4 h-4 text-[#606B7C]" />
+                            <FileText className="w-4 h-4 text-muted" />
                           )}
                         </div>
                         <div className="min-w-0">
                           <button
                             type="button"
                             onClick={() => onSelectDocument(doc, 'explain')}
-                            className="text-left font-serif-editorial text-sm font-bold text-[#121827] hover:text-[#C84428] transition-colors truncate block max-w-sm sm:max-w-md cursor-pointer"
+                            className="text-left font-serif-editorial text-sm font-bold text-ink hover:text-brand transition-colors truncate block max-w-sm sm:max-w-md cursor-pointer"
                           >
                             {doc.title.replace(/\.pdf$/i, '')}
                           </button>
-                          <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] text-[#606B7C]">
+                          <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] text-muted">
                             <span className="font-medium">
                               {pageCount} {pageCount === 1 ? 'page' : 'pages'}
                             </span>
@@ -637,7 +637,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FAF8F5] text-[#606B7C] border border-[#E8E6E2] shrink-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-canvas text-muted border border-line shrink-0">
                         {isYt ? 'Video' : isPdf ? 'PDF' : 'Notes'}
                       </span>
                     </div>
@@ -647,21 +647,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onSelectDocument(doc, 'explain')}
-                        className="px-2.5 py-1 rounded-md bg-[#FAF8F5] hover:bg-[#FBECE6] text-[#121827] hover:text-[#C84428] font-medium transition-colors cursor-pointer"
+                        className="px-2.5 py-1 rounded-md bg-canvas hover:bg-brand-soft text-ink hover:text-brand font-medium transition-colors cursor-pointer"
                       >
                         Explain
                       </button>
                       <button
                         type="button"
                         onClick={() => onSelectDocument(doc, 'quick-revise')}
-                        className="px-2.5 py-1 rounded-md bg-[#FAF8F5] hover:bg-[#FBECE6] text-[#121827] hover:text-[#C84428] font-medium transition-colors cursor-pointer"
+                        className="px-2.5 py-1 rounded-md bg-canvas hover:bg-brand-soft text-ink hover:text-brand font-medium transition-colors cursor-pointer"
                       >
                         Quick Revise
                       </button>
                       <button
                         type="button"
                         onClick={() => onSelectDocument(doc, 'quiz')}
-                        className="px-2.5 py-1 rounded-md bg-[#FAF8F5] hover:bg-[#EBF6EE] text-[#121827] hover:text-[#2E7D52] font-medium transition-colors cursor-pointer"
+                        className="px-2.5 py-1 rounded-md bg-canvas hover:bg-[#EBF6EE] text-ink hover:text-success font-medium transition-colors cursor-pointer"
                       >
                         Quiz
                       </button>
@@ -671,7 +671,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                           onSelectDocument(doc);
                           onNavigateTab('revision');
                         }}
-                        className="px-2.5 py-1 rounded-md bg-[#FAF8F5] hover:bg-[#F7F5F0] text-[#606B7C] hover:text-[#121827] font-medium transition-colors cursor-pointer ml-auto"
+                        className="px-2.5 py-1 rounded-md bg-canvas hover:bg-soft text-muted hover:text-ink font-medium transition-colors cursor-pointer ml-auto"
                       >
                         Flashcards
                       </button>
@@ -687,7 +687,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {/* Multi-Page Study Notes Paste Modal */}
       {pasteModalOpen && (
         <div
-          className="fixed inset-0 z-50 bg-[#121827]/40 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-ink/40 backdrop-blur-xs flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="paste-modal-title"
@@ -696,15 +696,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
           }}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl border border-[#E8E6E2] w-full max-w-2xl overflow-hidden"
+            className="bg-white rounded-2xl shadow-xl border border-line w-full max-w-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 py-4 border-b border-[#E8E6E2] bg-[#FCFBF9] flex items-center justify-between">
+            <div className="px-6 py-4 border-b border-line bg-canvas flex items-center justify-between">
               <div>
-                <h3 id="paste-modal-title" className="font-serif-editorial text-lg font-bold text-[#121827]">
+                <h3 id="paste-modal-title" className="font-serif-editorial text-lg font-bold text-ink">
                   Paste Study Notes
                 </h3>
-                <p className="text-xs text-[#606B7C]">
+                <p className="text-xs text-muted">
                   LearnMate divides your notes into structured pages and extracts key topics.
                 </p>
               </div>
@@ -712,7 +712,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 type="button"
                 onClick={() => setPasteModalOpen(false)}
                 aria-label="Close modal"
-                className="p-1.5 rounded-lg text-[#606B7C] hover:text-[#121827] hover:bg-[#F7F5F0] cursor-pointer"
+                className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-soft cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -722,7 +722,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <div>
                 <label
                   htmlFor="full-notes-title"
-                  className="block text-xs font-semibold text-[#121827] mb-1.5"
+                  className="block text-xs font-semibold text-ink mb-1.5"
                 >
                   Document Title
                 </label>
@@ -732,14 +732,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   value={notesTitle}
                   onChange={(e) => setNotesTitle(e.target.value)}
                   placeholder="e.g. Organic Chemistry Chapter 4: Reaction Mechanisms"
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-[#E8E6E2] text-xs font-medium text-[#121827] focus:outline-none focus:border-[#C84428]"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-line text-xs font-medium text-ink focus:outline-none focus:border-brand"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor="full-notes-body"
-                  className="block text-xs font-semibold text-[#121827] mb-1.5"
+                  className="block text-xs font-semibold text-ink mb-1.5"
                 >
                   Study Notes (Optional: use &quot;--- Page 1 ---&quot; to divide into specific pages)
                 </label>
@@ -749,15 +749,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   value={notesContent}
                   onChange={(e) => setNotesContent(e.target.value)}
                   placeholder="Paste lecture notes, textbook excerpts, or study guides here (minimum 25 characters)..."
-                  className="w-full px-3.5 py-3 rounded-lg border border-[#E8E6E2] text-xs text-[#121827] focus:outline-none focus:border-[#C84428] leading-relaxed"
+                  className="w-full px-3.5 py-3 rounded-lg border border-line text-xs text-ink focus:outline-none focus:border-brand leading-relaxed"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#E8E6E2]">
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setPasteModalOpen(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold text-[#606B7C] hover:bg-[#F7F5F0] cursor-pointer"
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-muted hover:bg-soft cursor-pointer"
                 >
                   Cancel
                 </button>

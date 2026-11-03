@@ -65,6 +65,8 @@ export interface StudentTutorContext {
   recentScorePct?: number | null;
   completedRevisionCount?: number;
   totalRevisionCount?: number;
+  /** Reply language from the student profile, e.g. "English" or "Hindi + English (Hinglish)". */
+  preferredLanguage?: string;
 }
 
 export interface TutorMessage {
@@ -323,11 +325,15 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 
 export type WorkspaceTab =
   | 'home'
+  | 'dashboard'
   | 'study'
+  | 'revision'
   | 'practice'
+  | 'ai-tutor'
   | 'pdf-workspace'
   | 'create'
-  | 'explore';
+  | 'explore'
+  | 'analytics';
 
 export interface LearnMateNotification {
   id: string;

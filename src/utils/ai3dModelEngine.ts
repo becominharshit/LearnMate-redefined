@@ -1,5 +1,7 @@
 import type { Custom3DSceneSpec, Custom3DMeshSpec } from '../types/study.ts';
+import { callClaude } from './anthropicClient.ts';
 
+/** Plain-text Claude call; returns null when no key is set, the call fails or the reply is cut off. */
 export async function callAnthropicMessagesApi(params: {
   apiKey?: string;
   model?: string;
@@ -8,35 +10,25 @@ export async function callAnthropicMessagesApi(params: {
   maxTokens?: number;
 }): Promise<string | null> {
   const key = (params.apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
-  if (!key) return null;
+  if (!key || key.startsWith('MY_')) return null;
 
-  // Use fast Haiku 4.5 by default or Sonnet 4.5
-  const model = params.model || 'claude-haiku-4-5-20251001';
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: params.maxTokens || 2048,
-        ...(params.system ? { system: params.system } : {}),
-        messages: [{ role: 'user', content: params.prompt }],
-      }),
+    const result = await callClaude({
+      apiKey: key,
+      baseUrl: process.env.ANTHROPIC_BASE_URL,
+      model: params.model || 'claude-haiku-5-5',
+      system: params.system,
+      messages: [{ role: 'user', content: params.prompt }],
+      // Thinking counts toward max_tokens, so leave room beyond the reply itself.
+      maxTokens: params.maxTokens || 8000,
+      effort: 'low',
+      timeoutMs: 60_000,
     });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      console.warn(`Anthropic API returned HTTP ${res.status}: ${errText.slice(0, 120)}`);
+    if (result.stopReason === 'max_tokens') {
+      console.warn('Anthropic API reply was cut off (max_tokens reached).');
       return null;
     }
-
-    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
-    const textBlock = data.content?.find((c) => c.type === 'text');
-    return textBlock?.text || null;
+    return result.text || null;
   } catch (err) {
     console.warn('Anthropic API request failed:', err instanceof Error ? err.message : String(err));
     return null;

@@ -42,6 +42,19 @@ import {
   callAnthropicMessagesApi,
   generateProcedural3DScene,
 } from './src/utils/ai3dModelEngine.ts';
+import {
+  callClaude,
+  toClaudeJsonSchema,
+  CLAUDE_IMAGE_MEDIA_TYPES,
+  type ClaudeEffort,
+} from './src/utils/anthropicClient.ts';
+import {
+  buildHiggsfieldAuthHeader,
+  submitHiggsfieldJob,
+  waitForHiggsfieldResult,
+  uploadDataUrlToHiggsfield,
+  type HiggsfieldSubmitResponse,
+} from './src/utils/higgsfieldClient.ts';
 import type { Custom3DSceneSpec } from './src/types/study.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -71,7 +84,82 @@ const FALLBACK_MODEL_CHAIN = [
   'gemini-3.8-flash',
   'gemini-flash-latest',
 ] as const;
-const GEMINI_TIMEOUT_MS = 9500;
+const GEMINI_TIMEOUT_MS = 25000;
+
+// Anthropic Claude: "smart" for tutoring, quizzes and OCR; "fast" for high-volume extraction.
+const CLAUDE_SMART_MODEL = process.env.ANTHROPIC_MODEL_SMART?.trim() || 'claude-sonnet-5-5';
+const CLAUDE_FAST_MODEL = process.env.ANTHROPIC_MODEL_FAST?.trim() || 'claude-haiku-5-5';
+
+type AiTier = 'fast' | 'smart';
+
+function getAnthropicApiKey(): string | null {
+  const key = (process.env.ANTHROPIC_API_KEY || '').trim();
+  if (!key || key.startsWith('MY_')) return null;
+  return key;
+}
+
+function hasGeminiConfigured(): boolean {
+  return (
+    Boolean(getDeveloperGenAIClient()) ||
+    resolveVertexConfig({ fallbackProjectId: DEFAULT_GCP_PROJECT_ID }).mode === 'enabled'
+  );
+}
+
+/** Claude is used whenever its key is set, unless AI_PROVIDER=gemini and Gemini is configured. */
+function anthropicPreferred(): boolean {
+  if (!getAnthropicApiKey()) return false;
+  const preference = (process.env.AI_PROVIDER || 'auto').trim().toLowerCase();
+  return !(preference === 'gemini' && hasGeminiConfigured());
+}
+
+function claudeModelFor(tier: AiTier): string {
+  return tier === 'fast' ? CLAUDE_FAST_MODEL : CLAUDE_SMART_MODEL;
+}
+
+// Higgsfield media generation (Create section). Model ids are overridable via env.
+const HIGGSFIELD_IMAGE_MODELS = {
+  diagram: process.env.HIGGSFIELD_DIAGRAM_MODEL?.trim() || 'ideogram/v4.0',
+  illustration: process.env.HIGGSFIELD_ILLUSTRATION_MODEL?.trim() || 'recraft/v4.1/text-to-image',
+  photo: process.env.HIGGSFIELD_PHOTO_MODEL?.trim() || 'higgsfield-ai/soul/v2/standard',
+} as const;
+const HIGGSFIELD_TEXT_TO_VIDEO_MODEL =
+  process.env.HIGGSFIELD_VIDEO_MODEL?.trim() || 'kling-video/v3.0/std/text-to-video';
+const HIGGSFIELD_IMAGE_TO_VIDEO_MODEL =
+  process.env.HIGGSFIELD_IMAGE_TO_VIDEO_MODEL?.trim() || 'kling-video/v2.5-turbo/pro/image-to-video';
+
+/** Optional proxy or local mock server for Higgsfield; defaults to https://api.higgsfield.ai. */
+const HIGGSFIELD_API_BASE = process.env.HIGGSFIELD_BASE_URL?.trim() || undefined;
+
+function getHiggsfieldAuth(): string | null {
+  const key = (process.env.HIGGSFIELD_API_KEY || '').trim();
+  if (!key || key.startsWith('MY_')) return null;
+  return buildHiggsfieldAuthHeader(key, process.env.HIGGSFIELD_API_SECRET);
+}
+
+/** Reply-language instruction for tutoring prompts, from the student's profile preference. */
+function languageInstruction(preferred?: string): string {
+  const raw = (preferred || '').trim();
+  const lang = raw.toLowerCase();
+  if (lang.includes('hinglish')) {
+    return 'Language: reply in Hinglish, i.e. conversational Hindi written in Roman (English) script mixed naturally with English technical terms, for example "Pehle free body diagram banao, phir Newton ka second law lagao." Keep formulas, units and technical terms in English.';
+  }
+  if (!lang || lang === 'english') {
+    return 'Language: reply in clear, simple English. If the student writes in Hinglish or Hindi, reply in the same style.';
+  }
+  const languageName = raw.replace(/[^A-Za-z ]/g, '').trim() || 'English';
+  return `Language: reply in simple ${languageName}, keeping formulas, units and technical terms in English.`;
+}
+
+/** Appended to prompts whose output the UI renders with KaTeX (Markdown + LaTeX + mhchem). */
+const LATEX_FORMAT_RULES = `Formatting rules for every text field:
+- Write all mathematics in LaTeX between single dollar signs for inline math ($v = u + at$) and double dollar signs for display equations ($$F = \\frac{G m_1 m_2}{r^2}$$).
+- Write chemical formulas and reactions with mhchem inside math: $\\ce{H2SO4}$, $\\ce{N2 + 3H2 -> 2NH3}$.
+- Never put LaTeX commands outside dollar delimiters. Use Markdown for structure: short paragraphs, numbered steps, **bold** key terms.`;
+
+/** For text the UI shows as plain text (sticky notes, mind maps, revision plans, copy and export). */
+const UNICODE_FORMAT_RULES = `Formatting rules for every text field:
+- Write formulas as plain text with Unicode symbols, for example v = u + at, s = ut + ½at², x², √2, π, Δx, θ, μ, ∫, Σ, →, ≤, ≥, ≈, ×, and chemical formulas such as H₂SO₄ and CO₂.
+- Never use LaTeX, dollar signs or Markdown formatting.`;
 
 // Tracks per-model quota/rate-limit cooldown timestamps so requests immediately route to healthy models
 const modelCooldownUntil = new Map<string, number>();
@@ -102,7 +190,8 @@ function getOrderedCandidateModels(preferredModel?: string): string[] {
 }
 
 const geminiManager = new GeminiRequestManager({
-  maxConcurrency: 2,
+  // Shared by every student's requests; 2 slots made everyone queue behind one slow call.
+  maxConcurrency: 6,
   maxRetries: 2,
   baseDelayMs: 650,
   maxDelayMs: 6000,
@@ -126,7 +215,8 @@ const geminiManager = new GeminiRequestManager({
     const approxTokens = Math.max(1, Math.round(entry.approxInputChars / 4));
     const statusLabel = entry.status === 'failed' ? 'fallback_engaged' : entry.status;
     console.log(
-      `[GeminiManager] op=${entry.operation} model=${entry.model} state=${statusLabel} retries=${entry.retries} durationMs=${entry.durationMs} approxInputTokens=${approxTokens}`
+      `[AI] op=${entry.operation} model=${entry.model} state=${statusLabel} retries=${entry.retries} durationMs=${entry.durationMs} approxInputTokens=${approxTokens}` +
+        (entry.errorReason ? ` reason="${entry.errorReason}"` : '')
     );
   },
 });
@@ -163,6 +253,7 @@ interface StudentTutorContextInput {
   recentScorePct?: number | null;
   completedRevisionCount?: number;
   totalRevisionCount?: number;
+  preferredLanguage?: string;
 }
 
 type TutorSourceType = 'material' | 'general' | 'both';
@@ -221,6 +312,52 @@ interface VideoGenerationJob {
 }
 
 const videoJobs = new Map<string, VideoGenerationJob>();
+
+/** Polls a Higgsfield video job in the background and records the result for the client to fetch. */
+async function trackHiggsfieldVideoJob(
+  jobId: string,
+  submitted: HiggsfieldSubmitResponse,
+  authHeader: string
+): Promise<void> {
+  const settle = (patch: Partial<VideoGenerationJob>) => {
+    const record = videoJobs.get(jobId);
+    if (!record) return;
+    videoJobs.set(jobId, { ...record, ...patch, updatedAt: new Date().toISOString() });
+  };
+  try {
+    const result = await waitForHiggsfieldResult({
+      authHeader,
+      baseUrl: HIGGSFIELD_API_BASE,
+      requestId: submitted.request_id,
+      statusUrl: submitted.status_url,
+      timeoutMs: 15 * 60 * 1000,
+    });
+    const url = result.video?.url;
+    if (url) {
+      settle({
+        status: 'completed',
+        videoUrl: url,
+        verificationStatus: 'WORKING_VERIFIED',
+        fallbackMode: 'none',
+        userFacingNotice:
+          'Video generated with Higgsfield. Higgsfield keeps the file for 7 days, so download it to keep it.',
+      });
+    } else {
+      settle({
+        status: 'failed',
+        errorReason: 'Higgsfield returned no video.',
+        userFacingNotice: 'Higgsfield finished but returned no video. Playing the animated explanation instead.',
+      });
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    settle({
+      status: 'failed',
+      errorReason: reason,
+      userFacingNotice: `Higgsfield video generation failed: ${reason}`,
+    });
+  }
+}
 
 let cachedVertexProbe: {
   result: VertexDiagnosticProbeResult;
@@ -442,14 +579,109 @@ async function getTrialEligibleStudyClient(): Promise<{
   return { ai: getDeveloperGenAIClient(), provider: 'developer_api' };
 }
 
-async function generateStructuredJson<T>(params: {
+interface StructuredJsonParams {
   operation: string;
   prompt: string;
   systemInstruction: string;
   responseSchema: Record<string, unknown>;
   preferredModel?: string;
   bypassCache?: boolean;
-}): Promise<{ data: T; modelUsed: string; providerUsed?: AiBackendProvider }> {
+  /** "fast" for extraction-style tasks, "smart" (default) for tutoring and question writing. */
+  tier?: AiTier;
+  /** "latex" when the UI renders the fields with MathText (KaTeX); "unicode" when it shows plain text. */
+  mathFormat?: 'latex' | 'unicode' | 'plain';
+  maxOutputTokens?: number;
+}
+
+type StructuredJsonResult<T> = { data: T; modelUsed: string; providerUsed?: AiBackendProvider };
+
+/**
+ * Routes structured-JSON generation to Claude (when ANTHROPIC_API_KEY is set) and falls back to
+ * Gemini only if Gemini is also configured. Throws NO_API_KEY when no provider is available.
+ */
+async function generateStructuredJson<T>(
+  params: StructuredJsonParams
+): Promise<StructuredJsonResult<T>> {
+  const prepared: StructuredJsonParams = {
+    ...params,
+    systemInstruction:
+      params.mathFormat === 'latex'
+        ? `${params.systemInstruction}\n\n${LATEX_FORMAT_RULES}`
+        : params.mathFormat === 'unicode'
+        ? `${params.systemInstruction}\n\n${UNICODE_FORMAT_RULES}`
+        : params.systemInstruction,
+  };
+
+  if (anthropicPreferred()) {
+    try {
+      return await generateStructuredJsonWithClaude<T>(prepared);
+    } catch (err) {
+      if (!hasGeminiConfigured()) throw err;
+      console.warn(
+        `[AI] Claude failed for ${params.operation} (${err instanceof Error ? err.message : String(err)}); trying Gemini.`
+      );
+    }
+  }
+  return generateStructuredJsonWithGemini<T>(prepared);
+}
+
+async function generateStructuredJsonWithClaude<T>(
+  params: StructuredJsonParams
+): Promise<StructuredJsonResult<T>> {
+  const apiKey = getAnthropicApiKey();
+  if (!apiKey) throw new Error('NO_API_KEY');
+
+  const tier: AiTier = params.tier || 'smart';
+  const model = claudeModelFor(tier);
+  const effort: ClaudeEffort = tier === 'fast' ? 'low' : 'medium';
+  const cacheKey = computeRequestFingerprint([
+    'claude',
+    params.operation,
+    model,
+    params.systemInstruction,
+    params.prompt,
+  ]);
+
+  return geminiManager.execute({
+    operation: params.operation,
+    model,
+    cacheKey,
+    bypassCache: params.bypassCache,
+    approxInputChars: params.prompt.length + params.systemInstruction.length,
+    task: async () => {
+      const result = await callClaude({
+        apiKey,
+        baseUrl: process.env.ANTHROPIC_BASE_URL,
+        model,
+        system: params.systemInstruction,
+        messages: [{ role: 'user', content: params.prompt }],
+        // Thinking tokens count toward max_tokens, so leave generous room.
+        maxTokens: params.maxOutputTokens ?? (tier === 'fast' ? 8000 : 16000),
+        effort,
+        jsonSchema: toClaudeJsonSchema(params.responseSchema),
+        timeoutMs: tier === 'fast' ? 45_000 : 90_000,
+      });
+      if (result.stopReason === 'max_tokens') {
+        throw new Error('CLAUDE_OUTPUT_TRUNCATED: the AI answer was cut off. Try a smaller request.');
+      }
+      if (result.stopReason === 'refusal') {
+        throw new Error('CLAUDE_REFUSAL: the AI declined this request.');
+      }
+      if (!result.text.trim()) {
+        throw new Error('EMPTY_RESPONSE');
+      }
+      return {
+        data: JSON.parse(result.text) as T,
+        modelUsed: result.model,
+        providerUsed: 'anthropic_claude' as AiBackendProvider,
+      };
+    },
+  });
+}
+
+async function generateStructuredJsonWithGemini<T>(
+  params: StructuredJsonParams
+): Promise<StructuredJsonResult<T>> {
   const { ai: primaryAi, provider: primaryProvider } = await getTrialEligibleStudyClient();
   const fallbackDevAi = primaryProvider === 'vertex_ai' ? getDeveloperGenAIClient() : null;
 
@@ -788,8 +1020,9 @@ function attachGeminiLiveWebSocketServer(httpServer: http.Server) {
             safeSend({
               type: 'status',
               state: 'fallback_ready',
-              message:
-                'Live voice AI is not set up on this server (missing API key). Voice answers can only read out matching lines from your notes.',
+              message: getAnthropicApiKey()
+                ? 'Voice mode: speak or type your question. Claude answers and your browser reads the answer aloud.'
+                : 'Live voice AI is not set up on this server (missing API key). Voice answers can only read out matching lines from your notes.',
             });
             return;
           }
@@ -939,7 +1172,46 @@ Rules for Voice Tutoring:
             }
           }
 
-          // Live AI unavailable: read out matching lines from the notes, never a made-up answer.
+          // No Gemini Live session: answer with Claude as short spoken text for browser TTS.
+          const voiceClaudeKey = getAnthropicApiKey();
+          if (voiceClaudeKey) {
+            try {
+              const material = sessionPages
+                .slice(0, 8)
+                .map((p) => `Page ${p.pageNumber} (${p.title}): ${p.content.slice(0, 800)}`)
+                .join('\n\n');
+              const spoken = await callClaude({
+                apiKey: voiceClaudeKey,
+                baseUrl: process.env.ANTHROPIC_BASE_URL,
+                model: CLAUDE_FAST_MODEL,
+                maxTokens: 4000,
+                effort: 'low',
+                timeoutMs: 30_000,
+                system: `You are LearnMate's friendly voice tutor for JEE Main (Physics, Chemistry, Mathematics), helping with "${sessionTitle}".
+Your reply is read aloud by a speech synthesizer, so:
+- Answer in 2 to 4 short spoken sentences.
+- No Markdown, no bullet points, no LaTeX; say formulas in words (for example "v equals u plus a t").
+- If the student's notes below cover the question, say which page.
+${sessionWeakTopics.length > 0 ? `- The student is working on: ${sessionWeakTopics.join(', ')}.` : ''}
+
+Student notes:
+${material || 'No notes provided.'}`,
+                messages: [{ role: 'user', content: qText }],
+              });
+              const spokenText = spoken.text.replace(/[*#_`$\\]/g, '').replace(/\s+/g, ' ').trim();
+              if (spokenText) {
+                safeSend({ type: 'voice_response', text: spokenText, citations: [], sourceType: 'general' });
+                return;
+              }
+            } catch (err) {
+              console.warn(
+                '[Voice] Claude answer failed:',
+                err instanceof Error ? err.message : String(err)
+              );
+            }
+          }
+
+          // No AI available: read out matching lines from the notes, never a made-up answer.
           const excerpt = buildMaterialExcerptFallback(qText, sessionPages, [], {
             weakTopics: sessionWeakTopics,
           });
@@ -1034,6 +1306,8 @@ async function startServer() {
           }>;
         }>({
           operation: 'study_analyze',
+          tier: 'fast',
+          mathFormat: 'unicode',
           systemInstruction:
             'You are LearnMate, an academic study assistant. Analyze the provided page-indexed study material and extract 3 to 6 core study topics strictly grounded in the text. Every topic MUST reference valid page numbers from the input.',
           prompt: `Document Title: ${title || 'Study Material'}\n\nStudy Material Pages:\n${contextText}`,
@@ -1156,6 +1430,15 @@ async function startServer() {
             .join(' | ')
         : 'Standard study session';
 
+      const tutorPersona = `You are LearnMate, an expert JEE Main tutor for Physics, Chemistry and Mathematics (NCERT Class 11-12 syllabus, NTA JEE Main 2027 pattern).
+How to teach:
+- Explain step by step: the key concept first, then the relevant formula, then the worked solution, then a clearly stated final answer with units.
+- For numerical problems, show each substitution and check units and limiting cases.
+- Point out common exam traps and one quick JEE tip where useful.
+- Keep answers focused (about 250 words) unless the student asks for a derivation or more depth.
+- If you are not sure about a fact or a numerical answer, say so plainly instead of guessing.
+${languageInstruction(studentContext?.preferredLanguage)}`;
+
       try {
         const { data: parsed, modelUsed } = await generateStructuredJson<{
           answer: string;
@@ -1170,14 +1453,19 @@ async function startServer() {
         }>({
           operation: `study_ask_${explicitStrictMode ? 'strict' : 'hybrid'}`,
           preferredModel: modelPreference,
+          tier: 'smart',
+          mathFormat: 'latex',
           systemInstruction: explicitStrictMode
-            ? `You are LearnMate's Strict Source-Grounded Study Tutor operating in MATERIAL ONLY mode.
+            ? `${tutorPersona}
+
+You are operating in MATERIAL ONLY mode.
 Student Learning Context: ${studentContextSummary}
 Rules for Material Only Mode:
 1. Answer ONLY if the explanation is directly supported by the provided Study Material Pages.
 2. Every claim MUST include verified page citations (pageNumber, section, verbatim quote).
 3. If the topic is NOT covered in the provided Study Material Pages, set "foundInMaterial": false, "sourceType": "general", "citations": [], and set "answer" to: "This topic is not covered in your uploaded study material. Switch to Extended Knowledge mode if you want a general explanation."`
-            : `You are LearnMate's Context-Aware Hybrid AI Study Tutor.
+            : `${tutorPersona}
+
 Student Learning Context: ${studentContextSummary}
 
 Follow these exact rules for Hybrid Knowledge Answering:
@@ -1365,13 +1653,19 @@ Follow these exact rules for Hybrid Knowledge Answering:
         }>({
           operation: `study_quiz_${mode}_${clampedCount}`,
           bypassCache: Boolean(forceRefresh),
-          systemInstruction: `You are LearnMate's assessment generator.
-Generate ${clampedCount} grounded Multiple-Choice Questions (MCQs) strictly derived from the provided Study Material Pages.
+          tier: 'smart',
+          mathFormat: 'latex',
+          maxOutputTokens: 24000,
+          systemInstruction: `You are LearnMate's JEE Main question writer for Physics, Chemistry and Mathematics.
+Generate ${clampedCount} JEE Main-style single-correct Multiple-Choice Questions based on the concepts in the provided Study Material Pages.
 Rules:
-- Every question MUST have exactly 4 distinct options.
-- "correctIndex" MUST be an integer 0, 1, 2, or 3 corresponding to the single unambiguously correct option in "options".
-- "sourcePage" MUST be an existing page number from the study material.
-- "sourceQuote" MUST be a brief quote or formula from that page supporting the answer.
+- Test understanding and problem solving (numericals, applications, multi-step reasoning), not rote recall of sentences.
+- Every question MUST have exactly 4 distinct options, and exactly one of them correct.
+- Wrong options should come from realistic mistakes (sign errors, wrong formula, unit slips, a missed factor of 2).
+- Solve each question yourself before writing it; "correctIndex" (0-3) must point to the option that matches your solution.
+- "explanation" must show the full worked solution step by step and end with the final answer.
+- Mix difficulty: roughly 30% easy, 50% medium, 20% hard ("difficulty" must be "easy", "medium" or "hard").
+- "sourcePage" MUST be an existing page number from the study material; "sourceQuote" is a short quote or formula from that page.
 - ${focusInstruction}`,
           prompt: `Document: ${title || 'Study Material'}\n\nStudy Material Pages:\n${contextText}`,
           responseSchema: {
@@ -1411,20 +1705,30 @@ Rules:
           },
         });
 
-        const rawQuestions = (parsed.questions || []).slice(0, clampedCount);
-        if (rawQuestions.length < 5) {
+        // Drop malformed items instead of "repairing" them: padding options or defaulting the
+        // answer to option A would grade students against a wrong key.
+        const rawQuestions = (parsed.questions || [])
+          .filter((q) => {
+            const opts = Array.isArray(q.options) ? q.options.map((o) => String(o).trim()) : [];
+            return (
+              typeof q.question === 'string' &&
+              q.question.trim().length > 0 &&
+              opts.length === 4 &&
+              opts.every((o) => o.length > 0) &&
+              new Set(opts).size === 4 &&
+              Number.isInteger(q.correctIndex) &&
+              q.correctIndex >= 0 &&
+              q.correctIndex <= 3
+            );
+          })
+          .slice(0, clampedCount);
+        if (rawQuestions.length < Math.min(5, clampedCount)) {
           throw new Error('INSUFFICIENT_QUESTIONS');
         }
 
         const sanitizedQuestions = rawQuestions.map((q, idx) => {
-          const opts = Array.isArray(q.options) ? q.options.slice(0, 4) : [];
-          while (opts.length < 4) {
-            opts.push(`Option ${opts.length + 1}`);
-          }
-          const safeIndex =
-            typeof q.correctIndex === 'number' && q.correctIndex >= 0 && q.correctIndex <= 3
-              ? q.correctIndex
-              : 0;
+          const opts = q.options.map((o) => String(o).trim());
+          const safeIndex = q.correctIndex;
           const safePage = validPageNumbers.has(q.sourcePage)
             ? q.sourcePage
             : pages[0].pageNumber;
@@ -1561,6 +1865,8 @@ Rules:
           }>;
         }>({
           operation: 'study_mistakes_and_plan',
+          tier: 'fast',
+          mathFormat: 'unicode',
           systemInstruction: `You are LearnMate's Mistake DNA & Personalized Revision Architect.
 Given the study material pages and the exact questions the student answered incorrectly:
 1. For each wrong answer, explain the student's "likelyMisconception" (why they chose their selected option instead of the correct option) and the "coreConceptFix" grounded in the source page.
@@ -1757,6 +2063,8 @@ Given the study material pages and the exact questions the student answered inco
             }>;
           }>({
             operation: 'quick_revise_sticky_flashcards',
+            tier: 'fast',
+            mathFormat: 'unicode',
             bypassCache: Boolean(forceRefresh),
             systemInstruction: `You are LearnMate's Quick Revise generator.
 Extract 5 to 8 key concepts from the provided study material.
@@ -1944,6 +2252,8 @@ For each concept, produce:
           }>;
         }>({
           operation: 'quick_revise_mindmap_revision',
+          tier: 'fast',
+          mathFormat: 'unicode',
           bypassCache: Boolean(forceRefresh),
           systemInstruction: `You are LearnMate's Mind Map and One-Page Revision architect.
 Analyze the provided study material and generate:
@@ -2664,6 +2974,89 @@ Never fabricate content if the video has no educational material.`,
 
       const { ai, provider } = await getTrialEligibleStudyClient();
       let scanFailureNotice = extractAiNotice(new Error('NO_API_KEY')).aiNotice;
+
+      const claudeKey = anthropicPreferred() ? getAnthropicApiKey() : null;
+      if (claudeKey) {
+        if (!CLAUDE_IMAGE_MEDIA_TYPES.has(mimeType)) {
+          res.status(400).json({ error: 'Please upload a JPG, PNG or WebP photo of your notes.' });
+          return;
+        }
+        try {
+          const result = await callClaude({
+            apiKey: claudeKey,
+            baseUrl: process.env.ANTHROPIC_BASE_URL,
+            model: CLAUDE_SMART_MODEL,
+            maxTokens: 12000,
+            effort: 'low',
+            timeoutMs: 90_000,
+            system:
+              'You read handwritten and printed JEE Physics, Chemistry and Mathematics notes accurately. Transcribe only what is visible in the image; never add content that is not there.',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Data } },
+                  {
+                    type: 'text',
+                    text: `Transcribe these notes ("${title}") into clean digital study notes.
+- "extractedTitle": a concise title for the notes
+- "cleanContent": the notes as structured text with headings and bullet points
+- "handwrittenContent": the same content as natural notebook-style lines
+- "uncertainSegments": words or formulas that were blurry or ambiguous (empty if everything is clear)
+- "summary": a 1-2 sentence overview
+- "keyConcepts": 3 to 5 key concepts or formulas found
+Write formulas with Unicode symbols (x², H₂O, √, π, ∫, Δ, →, ≤), not LaTeX.`,
+                  },
+                ],
+              },
+            ],
+            jsonSchema: toClaudeJsonSchema({
+              type: Type.OBJECT,
+              properties: {
+                extractedTitle: { type: Type.STRING },
+                cleanContent: { type: Type.STRING },
+                handwrittenContent: { type: Type.STRING },
+                uncertainSegments: { type: Type.ARRAY, items: { type: Type.STRING } },
+                summary: { type: Type.STRING },
+                keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
+            }),
+          });
+          if (result.stopReason === 'max_tokens') {
+            throw new Error('CLAUDE_OUTPUT_TRUNCATED: the notes are too long to read in one go.');
+          }
+          const parsed = JSON.parse(result.text || '{}') as {
+            extractedTitle?: string;
+            cleanContent?: string;
+            handwrittenContent?: string;
+            uncertainSegments?: string[];
+            summary?: string;
+            keyConcepts?: string[];
+          };
+          if (parsed.cleanContent && parsed.cleanContent.trim()) {
+            res.json({
+              title: parsed.extractedTitle || title,
+              cleanContent: parsed.cleanContent,
+              handwrittenContent: parsed.handwrittenContent || parsed.cleanContent,
+              uncertainSegments: Array.isArray(parsed.uncertainSegments)
+                ? parsed.uncertainSegments
+                : [],
+              summary: parsed.summary || 'Digitized handwritten study notes.',
+              keyConcepts: Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts : [],
+            });
+            return;
+          }
+          scanFailureNotice =
+            'No readable text was found in this image. Try a clearer, well-lit photo.';
+        } catch (err) {
+          console.warn(
+            '[AI] Claude notes scan failed:',
+            err instanceof Error ? err.message.slice(0, 200) : String(err)
+          );
+          scanFailureNotice = extractAiNotice(err).aiNotice;
+        }
+      }
+
       if (ai) {
         try {
           const candidateModels = getOrderedCandidateModels('gemini-3.8-flash');
@@ -2900,6 +3293,8 @@ Return JSON with:
           groundedFeedback: string;
         }>({
           operation: 'study_teach_it_back',
+          tier: 'fast',
+          mathFormat: 'unicode',
           systemInstruction: `You are LearnMate's "Teach It Back" Feynman-method evaluator.
 Compare the student's explanation of "${topic}" against the provided Study Material Pages.
 Evaluate:
@@ -2997,19 +3392,21 @@ Never output markdown fences or commentary outside the JSON.`;
       let modelUsed = 'procedural_engine';
 
       // 1. Attempt Anthropic Claude if key is available
-      if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim()) {
+      const claude3dKey = getAnthropicApiKey();
+      if (claude3dKey) {
         try {
           const claudeText = await callAnthropicMessagesApi({
-            model: 'claude-haiku-4-5-20251001',
+            apiKey: claude3dKey,
+            model: CLAUDE_FAST_MODEL,
             system: systemPrompt,
             prompt: `Concept to visualize in 3D: "${concept}". Academic context: ${contextText.slice(0, 400)}. Style: ${style}. Generate structured 3D scene JSON.`,
-            maxTokens: 2500,
+            maxTokens: 8000,
           });
           if (claudeText) {
             const cleaned = claudeText.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
             sceneSpec = JSON.parse(cleaned);
             provider = 'anthropic_claude';
-            modelUsed = 'claude-haiku-4-5';
+            modelUsed = CLAUDE_FAST_MODEL;
           }
         } catch (err) {
           console.warn('Claude 3D generation failed, falling back to Gemini:', err);
@@ -3083,7 +3480,54 @@ Never output markdown fences or commentary outside the JSON.`;
       let modelNotice: string | undefined;
       let verificationStatus: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' = 'BLOCKED_BY_BILLING';
 
-      if (ai) {
+      const higgsfieldAuth = getHiggsfieldAuth();
+      if (higgsfieldAuth) {
+        const styleKey: keyof typeof HIGGSFIELD_IMAGE_MODELS = /illustrat|cartoon|sketch/i.test(style)
+          ? 'illustration'
+          : /photo|realistic/i.test(style)
+          ? 'photo'
+          : 'diagram';
+        const endpoint = HIGGSFIELD_IMAGE_MODELS[styleKey];
+        const prompt = `Clean educational ${
+          styleKey === 'diagram' ? 'diagram' : 'illustration'
+        } for a JEE Main student explaining "${concept}". White background, clear English labels with correct spelling, arrows where helpful, textbook style, no watermark.${
+          contextText.trim() ? ` Context: ${contextText.slice(0, 300)}` : ''
+        }`;
+        try {
+          const job = await submitHiggsfieldJob({
+            authHeader: higgsfieldAuth,
+            baseUrl: HIGGSFIELD_API_BASE,
+            endpoint,
+            input:
+              styleKey === 'diagram'
+                ? { prompt: prompt.slice(0, 2000), aspect_ratio: '16:9', rendering_speed: 'DEFAULT' }
+                : styleKey === 'photo'
+                ? { prompt, aspect_ratio: '16:9', resolution: '1080p' }
+                : { prompt, aspect_ratio: '16:9' },
+          });
+          const result = await waitForHiggsfieldResult({
+            authHeader: higgsfieldAuth,
+            baseUrl: HIGGSFIELD_API_BASE,
+            requestId: job.request_id,
+            statusUrl: job.status_url,
+            timeoutMs: 150_000,
+          });
+          const url = result.images?.[0]?.url;
+          if (url) {
+            generatedImageUrl = url;
+            verificationStatus = 'WORKING_VERIFIED';
+            modelNotice = `Generated with Higgsfield (${endpoint}). Higgsfield keeps the file for 7 days, so download it to keep it.`;
+          } else {
+            modelNotice = 'Higgsfield finished but returned no image.';
+          }
+        } catch (err) {
+          modelNotice = `Higgsfield image generation failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`;
+        }
+      }
+
+      if (!generatedImageUrl && ai) {
         try {
           const imgResp = await ai.models.generateContent({
             model: 'gemini-nano-banana-2.1',
@@ -3104,11 +3548,12 @@ Never output markdown fences or commentary outside the JSON.`;
             developerApiBillingDepleted = true;
           }
           modelNotice =
-            'AI media generation requires configuration or paid model access. Displaying a deterministic scientific diagram for your topic.';
+            modelNotice ||
+            'AI image generation is unavailable right now. Showing a simple outline instead.';
         }
-      } else {
+      } else if (!generatedImageUrl && !modelNotice) {
         modelNotice =
-          'AI media generation requires configuration or paid model access. Displaying a deterministic scientific diagram for your topic.';
+          'AI image generation is not set up (add HIGGSFIELD_API_KEY to .env). Showing a simple outline instead.';
       }
 
       res.json({
@@ -3118,7 +3563,8 @@ Never output markdown fences or commentary outside the JSON.`;
         verificationStatus,
         generatedImageUrl,
         modelNotice,
-        diagramSteps: [
+        // The generic outline is only a placeholder when no real image could be generated.
+        diagramSteps: generatedImageUrl ? [] : [
           {
             step: 1,
             title: `Input & Foundations: ${concept}`,
@@ -3188,6 +3634,67 @@ Never output markdown fences or commentary outside the JSON.`;
         updatedAt: nowIso,
       };
       videoJobs.set(jobId, jobRecord);
+
+      // Drop settled jobs older than an hour so the in-memory job map cannot grow forever.
+      const pruneBefore = Date.now() - 60 * 60 * 1000;
+      for (const [existingId, existingJob] of videoJobs) {
+        if (existingJob.status !== 'processing' && Date.parse(existingJob.updatedAt) < pruneBefore) {
+          videoJobs.delete(existingId);
+        }
+      }
+
+      const higgsfieldAuth = getHiggsfieldAuth();
+      let higgsfieldError: string | undefined;
+      if (higgsfieldAuth) {
+        try {
+          const videoPrompt = `Short educational animation for a JEE Main student explaining "${topic}". Clean diagram-style visuals, smooth motion, scientifically accurate, no on-screen text.${
+            contextText.trim() ? ` Context: ${contextText.slice(0, 300)}` : ''
+          }`;
+          let submitted: HiggsfieldSubmitResponse;
+          if (mode === 'image_to_video' && sourceImageDataUrl) {
+            const imageUrl = await uploadDataUrlToHiggsfield({
+              authHeader: higgsfieldAuth,
+              baseUrl: HIGGSFIELD_API_BASE,
+              dataUrl: sourceImageDataUrl,
+            });
+            submitted = await submitHiggsfieldJob({
+              authHeader: higgsfieldAuth,
+              baseUrl: HIGGSFIELD_API_BASE,
+              endpoint: HIGGSFIELD_IMAGE_TO_VIDEO_MODEL,
+              input: { prompt: videoPrompt, image_url: imageUrl, duration: 5 },
+            });
+          } else {
+            submitted = await submitHiggsfieldJob({
+              authHeader: higgsfieldAuth,
+              baseUrl: HIGGSFIELD_API_BASE,
+              endpoint: HIGGSFIELD_TEXT_TO_VIDEO_MODEL,
+              input: { prompt: videoPrompt, duration: 5, aspect_ratio: safeAspectRatio, sound: 'off' },
+            });
+          }
+
+          jobRecord.verificationStatus = 'WORKING_WITH_NON_AI_FALLBACK';
+          jobRecord.userFacingNotice =
+            'Higgsfield is generating your video (usually 1-3 minutes). The animated explanation below plays in the meantime.';
+          jobRecord.updatedAt = new Date().toISOString();
+          videoJobs.set(jobId, jobRecord);
+          void trackHiggsfieldVideoJob(jobId, submitted, higgsfieldAuth);
+
+          res.json({
+            jobId,
+            topic,
+            mode,
+            aspectRatio: safeAspectRatio,
+            omniStatus: 'higgsfield_processing',
+            verificationStatus: jobRecord.verificationStatus,
+            fallbackMode: jobRecord.fallbackMode,
+            userFacingNotice: jobRecord.userFacingNotice,
+            scenes,
+          });
+          return;
+        } catch (err) {
+          higgsfieldError = err instanceof Error ? err.message : String(err);
+        }
+      }
 
       let videoUrl: string | undefined;
       let omniStatus = 'animated_explanation_ready';
@@ -3266,6 +3773,9 @@ Never output markdown fences or commentary outside the JSON.`;
         jobRecord.updatedAt = new Date().toISOString();
       }
 
+      if (higgsfieldError && !videoUrl) {
+        jobRecord.userFacingNotice = `Higgsfield video generation failed: ${higgsfieldError}. Playing the animated explanation instead.`;
+      }
       videoJobs.set(jobId, jobRecord);
 
       res.json({
@@ -3613,13 +4123,22 @@ Never output markdown fences or commentary outside the JSON.`;
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`LearnMate full-stack server running on http://localhost:${PORT}`);
-    const vertexMode = resolveVertexConfig({ fallbackProjectId: DEFAULT_GCP_PROJECT_ID }).mode;
-    if (!getDeveloperGenAIClient() && vertexMode !== 'enabled') {
+    if (getAnthropicApiKey()) {
+      console.log(
+        `[LearnMate] AI provider: Anthropic Claude (smart: ${CLAUDE_SMART_MODEL}, fast: ${CLAUDE_FAST_MODEL})` +
+          (hasGeminiConfigured() ? ', with Gemini as fallback.' : '.')
+      );
+    } else if (hasGeminiConfigured()) {
+      console.log('[LearnMate] AI provider: Google Gemini.');
+    } else {
       console.warn(
-        '[LearnMate] WARNING: GEMINI_API_KEY is not set. AI features (tutor, quizzes, OCR, voice) ' +
-          'will report "AI is not set up" until you copy .env.example to .env and add your key.'
+        '[LearnMate] WARNING: No AI key found (ANTHROPIC_API_KEY or GEMINI_API_KEY). AI features ' +
+          '(tutor, quizzes, OCR, voice) will report "AI is not set up" until you add a key to .env.'
       );
     }
+    console.log(
+      `[LearnMate] Higgsfield media generation: ${getHiggsfieldAuth() ? 'enabled' : 'not configured'}.`
+    );
   });
 }
 

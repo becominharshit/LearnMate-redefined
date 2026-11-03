@@ -93,9 +93,32 @@ export function classifyGeminiError(error: unknown): ClassifiedGeminiError {
     };
   }
 
+  // Claude replies that hit max_tokens or were declined: a retry with the same input won't help.
+  if (lower.includes('claude_output_truncated')) {
+    return {
+      category: 'generation_failed',
+      retryable: false,
+      userMessage:
+        "The AI's answer was too long and got cut off. Try a shorter question or a smaller part of your notes.",
+      statusCode,
+      rawReason: rawMessage.slice(0, 180),
+    };
+  }
+  if (lower.includes('claude_refusal')) {
+    return {
+      category: 'generation_failed',
+      retryable: false,
+      userMessage: "The AI couldn't help with this request. Try rephrasing it.",
+      statusCode,
+      rawReason: rawMessage.slice(0, 180),
+    };
+  }
+
   // 1. Daily or per-model quota exhaustion or depleted prepayment credits (do not retry indefinitely; evaluate before auth_config_error so 429/402 messages mentioning 'check your plan and billing details' are not misclassified)
   if (
     statusCode === 402 ||
+    // Anthropic reports an empty prepaid balance as HTTP 400.
+    lower.includes('credit balance is too low') ||
     lower.includes('prepayment credits are depleted') ||
     lower.includes('credits are depleted') ||
     lower.includes('quota_exceeded') ||
@@ -153,14 +176,25 @@ export function classifyGeminiError(error: unknown): ClassifiedGeminiError {
     return {
       category: 'temporarily_busy',
       retryable: true,
-      userMessage: 'Gemini is temporarily busy. Try again shortly.',
+      userMessage: 'The AI is temporarily busy. Try again shortly.',
       retryAfterMs,
       statusCode: statusCode ?? 429,
       rawReason: rawMessage.slice(0, 180),
     };
   }
 
-  // 4. Timeouts or general generation failures
+  // 4. Timeouts: retrying the same long request rarely helps, so say what happened.
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return {
+      category: 'generation_failed',
+      retryable: false,
+      userMessage: 'The AI took too long to respond. Please try again.',
+      statusCode,
+      rawReason: rawMessage.slice(0, 180),
+    };
+  }
+
+  // 5. General generation failures
   return {
     category: 'generation_failed',
     retryable: false,
@@ -227,6 +261,8 @@ export interface GeminiManagerOptions {
     durationMs: number;
     approxInputChars: number;
     errorCategory?: GeminiErrorCategory;
+    /** Raw provider error (for server logs only, never shown to students). */
+    errorReason?: string;
   }) => void;
 }
 
@@ -396,6 +432,7 @@ export class GeminiRequestManager {
                 durationMs: Date.now() - startTime,
                 approxInputChars,
                 errorCategory: classified.category,
+                errorReason: classified.rawReason,
               });
               await this.sleepFn(delayMs);
               continue;
@@ -409,6 +446,7 @@ export class GeminiRequestManager {
               durationMs: Date.now() - startTime,
               approxInputChars,
               errorCategory: classified.category,
+              errorReason: classified.rawReason,
             });
             const enrichedError = new Error(classified.userMessage) as Error & {
               classified?: ClassifiedGeminiError;

@@ -11,9 +11,13 @@ services:
         value: production
       - key: GOOGLE_GENAI_USE_VERTEXAI
         value: "false"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AI_PROVIDER
+        value: auto
       - key: GEMINI_API_KEY
         sync: false
-      - key: ANTHROPIC_API_KEY
+      - key: HIGGSFIELD_API_KEY
         sync: false
       - key: ADMIN_TOKEN
         sync: false

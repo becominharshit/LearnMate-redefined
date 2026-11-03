@@ -102,18 +102,18 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   return (
     <div
       data-testid="student-profile-modal"
-      className="fixed inset-0 z-50 bg-[#121827]/45 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-ink/45 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl border border-[#E8E6E2] shadow-2xl max-w-3xl w-full overflow-hidden my-8">
+      <div className="bg-white rounded-2xl border border-line shadow-2xl max-w-3xl w-full overflow-hidden my-8">
         {/* Modal Header */}
-        <div className="px-6 py-5 bg-[#FCFBF9] border-b border-[#E8E6E2] flex items-center justify-between">
+        <div className="px-6 py-5 bg-canvas border-b border-line flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FBECE6] text-[#C84428] flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-brand-soft text-brand flex items-center justify-center shrink-0">
               <GraduationCap className="w-5 h-5" />
             </div>
             <div>
               <div className="lm-kicker">ACADEMIC PROFILE</div>
-              <h2 className="font-serif-editorial text-xl font-bold text-[#121827]">
+              <h2 className="font-serif-editorial text-xl font-bold text-ink">
                 Student Identity &amp; Exam Goals
               </h2>
             </div>
@@ -122,7 +122,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close modal"
-            className="w-8 h-8 rounded-lg text-[#606B7C] hover:text-[#121827] hover:bg-[#F7F5F0] flex items-center justify-center cursor-pointer transition-colors"
+            className="w-8 h-8 rounded-lg text-muted hover:text-ink hover:bg-soft flex items-center justify-center cursor-pointer transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -132,7 +132,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
         <form onSubmit={handleSave} className="p-6 space-y-6 max-h-[78vh] overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="student-full-name" className="block text-xs font-semibold text-[#121827] mb-1.5">
+              <label htmlFor="student-full-name" className="block text-xs font-semibold text-ink mb-1.5">
                 Full Name
               </label>
               <input
@@ -143,12 +143,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 onChange={(e) => setProfile({ ...profile, fullName: e.target.value })}
                 data-testid="profile-fullname-input"
                 placeholder="e.g. Aarav Sharma"
-                className="w-full h-10 px-3.5 rounded-lg border border-[#E8E6E2] text-xs font-medium text-[#121827] focus:outline-none focus:border-[#C84428]"
+                className="w-full h-10 px-3.5 rounded-lg border border-line text-xs font-medium text-ink focus:outline-none focus:border-brand"
               />
             </div>
 
             <div>
-              <label htmlFor="student-education-stage" className="block text-xs font-semibold text-[#121827] mb-1.5">
+              <label htmlFor="student-education-stage" className="block text-xs font-semibold text-ink mb-1.5">
                 Current Education Stage
               </label>
               <select
@@ -156,7 +156,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 value={profile.educationStage}
                 onChange={(e) => handleStageChange(e.target.value as EducationStage)}
                 data-testid="profile-stage-select"
-                className="w-full h-10 px-3.5 rounded-lg border border-[#E8E6E2] text-xs font-semibold text-[#121827] bg-white focus:outline-none focus:border-[#C84428]"
+                className="w-full h-10 px-3.5 rounded-lg border border-line text-xs font-semibold text-ink bg-white focus:outline-none focus:border-brand"
               >
                 <option value="school">School Student (Class 9-12)</option>
                 <option value="college">Undergraduate / College Student</option>
@@ -167,14 +167,14 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 
           {/* Conditional Academic Fields: School vs College */}
           {isSchoolStage ? (
-            <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[#E8E6E2] space-y-3.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-[#121827]">
-                <School className="w-4 h-4 text-[#C84428]" />
+            <div className="p-4 rounded-xl bg-canvas border border-line space-y-3.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-ink">
+                <School className="w-4 h-4 text-brand" />
                 <span>School Academic Details (Class 9-12)</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
-                  <label htmlFor="profile-school-class" className="block text-xs font-medium text-[#606B7C] mb-1">
+                  <label htmlFor="profile-school-class" className="block text-xs font-medium text-muted mb-1">
                     Class / Grade
                   </label>
                   <select
@@ -187,7 +187,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       })
                     }
                     data-testid="profile-school-class-select"
-                    className="w-full h-9 px-2.5 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
                     <option value="Class 9">Class 9</option>
                     <option value="Class 10">Class 10</option>
@@ -197,7 +197,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </div>
 
                 <div>
-                  <label htmlFor="profile-stream" className="block text-xs font-medium text-[#606B7C] mb-1">
+                  <label htmlFor="profile-stream" className="block text-xs font-medium text-muted mb-1">
                     Academic Stream
                   </label>
                   <select
@@ -209,7 +209,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                         stream: e.target.value as StudentAcademicProfile['stream']
                       })
                     }
-                    className="w-full h-9 px-2.5 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
                     <option value="PCM">Science (PCM)</option>
                     <option value="PCB">Science (PCB)</option>
@@ -221,7 +221,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </div>
 
                 <div>
-                  <label htmlFor="profile-board" className="block text-xs font-medium text-[#606B7C] mb-1">
+                  <label htmlFor="profile-board" className="block text-xs font-medium text-muted mb-1">
                     School Board
                   </label>
                   <select
@@ -233,7 +233,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                         schoolBoard: e.target.value as StudentAcademicProfile['schoolBoard']
                       })
                     }
-                    className="w-full h-9 px-2.5 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
                     <option value="CBSE">CBSE</option>
                     <option value="ICSE / ISC">ICSE / ISC</option>
@@ -244,7 +244,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </div>
 
                 <div>
-                  <label htmlFor="profile-acad-year" className="block text-xs font-medium text-[#606B7C] mb-1">
+                  <label htmlFor="profile-acad-year" className="block text-xs font-medium text-muted mb-1">
                     Academic Year
                   </label>
                   <input
@@ -253,12 +253,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     value={profile.academicYear}
                     onChange={(e) => setProfile({ ...profile, academicYear: e.target.value })}
                     placeholder="2026-2027"
-                    className="w-full h-9 px-2.5 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   />
                 </div>
               </div>
               <div>
-                <label htmlFor="profile-school-name" className="block text-xs font-medium text-[#606B7C] mb-1">
+                <label htmlFor="profile-school-name" className="block text-xs font-medium text-muted mb-1">
                   School Name (Optional)
                 </label>
                 <input
@@ -267,19 +267,19 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   value={profile.schoolName}
                   onChange={(e) => setProfile({ ...profile, schoolName: e.target.value })}
                   placeholder="e.g. Delhi Public School / Kendriya Vidyalaya"
-                  className="w-full h-9 px-3 rounded-lg border border-[#E8E6E2] bg-white text-xs text-[#121827]"
+                  className="w-full h-9 px-3 rounded-lg border border-line bg-white text-xs text-ink"
                 />
               </div>
             </div>
           ) : (
-            <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[#E8E6E2] space-y-3.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-[#121827]">
-                <Building2 className="w-4 h-4 text-[#C84428]" />
+            <div className="p-4 rounded-xl bg-canvas border border-line space-y-3.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-ink">
+                <Building2 className="w-4 h-4 text-brand" />
                 <span>Undergraduate / University Details</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label htmlFor="profile-college-year" className="block text-xs font-medium text-[#606B7C] mb-1">
+                  <label htmlFor="profile-college-year" className="block text-xs font-medium text-muted mb-1">
                     Year of Study
                   </label>
                   <select
@@ -291,7 +291,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                         collegeYear: e.target.value as StudentAcademicProfile['collegeYear']
                       })
                     }
-                    className="w-full h-9 px-2.5 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
                     <option value="1st Year">1st Year</option>
                     <option value="2nd Year">2nd Year</option>
@@ -301,7 +301,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="profile-degree-course" className="block text-xs font-medium text-[#606B7C] mb-1">
+                  <label htmlFor="profile-degree-course" className="block text-xs font-medium text-muted mb-1">
                     Degree Program
                   </label>
                   <input
@@ -310,11 +310,11 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     value={profile.degreeCourse}
                     onChange={(e) => setProfile({ ...profile, degreeCourse: e.target.value })}
                     placeholder="e.g. B.Tech Computer Science, B.Sc, MBBS"
-                    className="w-full h-9 px-2.5 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   />
                 </div>
                 <div>
-                  <label htmlFor="profile-university-name" className="block text-xs font-medium text-[#606B7C] mb-1">
+                  <label htmlFor="profile-university-name" className="block text-xs font-medium text-muted mb-1">
                     College / University
                   </label>
                   <input
@@ -323,7 +323,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     value={profile.universityName}
                     onChange={(e) => setProfile({ ...profile, universityName: e.target.value })}
                     placeholder="e.g. IIT / NIT / Delhi University"
-                    className="w-full h-9 px-2.5 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   />
                 </div>
               </div>
@@ -332,14 +332,14 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 
           {/* Target Examination & Learning Goals */}
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-xs font-bold text-[#121827]">
-              <Target className="w-4 h-4 text-[#C84428]" />
+            <div className="flex items-center gap-2 text-xs font-bold text-ink">
+              <Target className="w-4 h-4 text-brand" />
               <span>Target Examination &amp; Preparation Focus</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="sm:col-span-2">
-                <label htmlFor="profile-target-exam" className="block text-xs font-medium text-[#606B7C] mb-1">
+                <label htmlFor="profile-target-exam" className="block text-xs font-medium text-muted mb-1">
                   Target Examination (Calibrates Practice Simulator)
                 </label>
                 <select
@@ -349,7 +349,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     setProfile({ ...profile, targetExam: e.target.value as ExamTypeId })
                   }
                   data-testid="profile-target-exam-select"
-                  className="w-full h-10 px-3 rounded-lg border border-[#E8E6E2] bg-white text-xs font-bold text-[#121827]"
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-bold text-ink"
                 >
                   {EXAM_OPTIONS.map((exam) => (
                     <option key={exam.id} value={exam.id}>
@@ -360,7 +360,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
               </div>
 
               <div>
-                <label htmlFor="profile-target-year" className="block text-xs font-medium text-[#606B7C] mb-1">
+                <label htmlFor="profile-target-year" className="block text-xs font-medium text-muted mb-1">
                   Target Exam Year
                 </label>
                 <input
@@ -369,14 +369,14 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   value={profile.targetExamYear}
                   onChange={(e) => setProfile({ ...profile, targetExamYear: e.target.value })}
                   placeholder="2027"
-                  className="w-full h-10 px-3 rounded-lg border border-[#E8E6E2] text-xs font-bold text-[#121827]"
+                  className="w-full h-10 px-3 rounded-lg border border-line text-xs font-bold text-ink"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label htmlFor="profile-subjects" className="block text-xs font-medium text-[#606B7C] mb-1">
+                <label htmlFor="profile-subjects" className="block text-xs font-medium text-muted mb-1">
                   Subjects Studied (comma-separated)
                 </label>
                 <input
@@ -385,12 +385,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   value={subjectsInput}
                   onChange={(e) => setSubjectsInput(e.target.value)}
                   placeholder="Physics, Mathematics, Chemistry"
-                  className="w-full h-10 px-3 rounded-lg border border-[#E8E6E2] text-xs text-[#121827]"
+                  className="w-full h-10 px-3 rounded-lg border border-line text-xs text-ink"
                 />
               </div>
 
               <div>
-                <label htmlFor="profile-weak-areas" className="block text-xs font-medium text-[#606B7C] mb-1">
+                <label htmlFor="profile-weak-areas" className="block text-xs font-medium text-muted mb-1">
                   Weak Topics to Target (comma-separated)
                 </label>
                 <input
@@ -399,15 +399,15 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   value={weakAreasInput}
                   onChange={(e) => setWeakAreasInput(e.target.value)}
                   placeholder="Conditional Probability, Bayes Theorem, Integration"
-                  className="w-full h-10 px-3 rounded-lg border border-[#E8E6E2] text-xs text-[#121827]"
+                  className="w-full h-10 px-3 rounded-lg border border-line text-xs text-ink"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label htmlFor="profile-language" className="block text-xs font-medium text-[#606B7C] mb-1 flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-[#606B7C]" />
+                <label htmlFor="profile-language" className="block text-xs font-medium text-muted mb-1 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-muted" />
                   Preferred Study Language
                 </label>
                 <select
@@ -419,7 +419,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       preferredLanguage: e.target.value as StudentAcademicProfile['preferredLanguage']
                     })
                   }
-                  className="w-full h-10 px-3 rounded-lg border border-[#E8E6E2] bg-white text-xs font-semibold text-[#121827]"
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                 >
                   <option value="English">English</option>
                   <option value="Hindi + English (Hinglish)">Hindi + English (Hinglish)</option>
@@ -431,8 +431,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
               </div>
 
               <div>
-                <label htmlFor="profile-daily-goal" className="block text-xs font-medium text-[#606B7C] mb-1 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-[#606B7C]" />
+                <label htmlFor="profile-daily-goal" className="block text-xs font-medium text-muted mb-1 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-muted" />
                   Daily Study Goal (Minutes)
                 </label>
                 <input
@@ -447,13 +447,13 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       dailyStudyMinutesGoal: Number(e.target.value) || 90
                     })
                   }
-                  className="w-full h-10 px-3 rounded-lg border border-[#E8E6E2] text-xs font-semibold text-[#121827]"
+                  className="w-full h-10 px-3 rounded-lg border border-line text-xs font-semibold text-ink"
                 />
               </div>
             </div>
 
             <div>
-              <label htmlFor="profile-goal-statement" className="block text-xs font-medium text-[#606B7C] mb-1">
+              <label htmlFor="profile-goal-statement" className="block text-xs font-medium text-muted mb-1">
                 Semester or Exam Goal Note
               </label>
               <textarea
@@ -464,7 +464,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   setProfile({ ...profile, personalGoalStatement: e.target.value })
                 }
                 placeholder="Target score, rank goal, or conceptual milestones for this term..."
-                className="w-full p-3 rounded-lg border border-[#E8E6E2] text-xs text-[#121827] focus:outline-none focus:border-[#C84428]"
+                className="w-full p-3 rounded-lg border border-line text-xs text-ink focus:outline-none focus:border-brand"
               />
             </div>
           </div>
@@ -476,11 +476,11 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
             </div>
           )}
 
-          <div className="pt-3 border-t border-[#E8E6E2] flex items-center justify-end gap-2.5">
+          <div className="pt-3 border-t border-line flex items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}
-              className="h-10 px-4 rounded-lg border border-[#E8E6E2] text-xs font-semibold text-[#606B7C] hover:bg-[#F7F5F0] cursor-pointer transition-colors"
+              className="h-10 px-4 rounded-lg border border-line text-xs font-semibold text-muted hover:bg-soft cursor-pointer transition-colors"
             >
               Cancel
             </button>

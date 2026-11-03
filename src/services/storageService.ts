@@ -1453,32 +1453,24 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
 
 export const STARTER_NOTIFICATIONS: LearnMateNotification[] = [
   {
-    id: 'notif-starter-1',
-    title: 'Revision Reminder: Conditional Probability',
-    message: 'Review Bayes Theorem and Independence in Probability Notes.pdf to lock in retention.',
-    category: 'revision',
+    id: 'notif-starter-welcome',
+    title: 'Welcome to LearnMate JEE',
+    message:
+      'Upload a chapter, your coaching module or your notes, then ask the AI tutor your doubts step by step.',
+    category: 'resource',
     read: false,
-    createdAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
-    actionTab: 'study',
-    documentId: 'doc-probability-notes',
+    createdAt: new Date().toISOString(),
+    actionTab: 'home',
   },
   {
-    id: 'notif-starter-2',
-    title: 'Multi-Exam Simulator Ready',
-    message: 'Practice JEE Main, JEE Advanced, NEET UG, CUET, Board & University exams in Practice.',
+    id: 'notif-starter-registration',
+    title: 'JEE Main Session 1 registration closes 22 Nov',
+    message:
+      'Apply on jeemain.nta.nic.in before 22 Nov 2026 (late fee window until 26 Nov). Exams run 20 to 28 Jan 2027.',
     category: 'goal',
     read: false,
-    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    actionTab: 'practice',
-  },
-  {
-    id: 'notif-starter-3',
-    title: 'PDF Workspace & Annotation Tools Unlocked',
-    message: 'Highlight, draw, underline, add sticky text notes, and export annotated PDFs in PDF Workspace.',
-    category: 'resource',
-    read: true,
-    createdAt: new Date(Date.now() - 8 * 3600 * 1000).toISOString(),
-    actionTab: 'pdf-workspace',
+    createdAt: new Date().toISOString(),
+    actionTab: 'dashboard',
   },
 ];
 

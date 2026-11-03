@@ -50,6 +50,7 @@ import {
   buildGroundedMindMapAndRevisionSheet,
 } from '../utils/quizGrading';
 import { computeNextSpacedRepetitionState } from '../utils/learnmate2Engine';
+import { classifyJeeSubject } from '../utils/jeeSubjects';
 import {
   buildRevisionPdfFilename,
   generateRevisionNotesPdfBytes,
@@ -274,7 +275,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : '';
       if (
-        errMsg.includes('Gemini is temporarily busy') ||
+        errMsg.includes('temporarily busy') ||
         errMsg.includes('quota has been reached')
       ) {
         setAiNotice(
@@ -556,38 +557,41 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   const knowItCount = flashcards.filter((c) => c.status === 'know_it').length;
   const reviewAgainCount = flashcards.filter((c) => c.status === 'review_again').length;
 
-  const currentPageNum = typeof selectedPageFilter === 'number' ? selectedPageFilter : 2;
-  const totalPagesCount = Math.max(4, activeDocument.pages.length || 4);
+  const currentPageNum = typeof selectedPageFilter === 'number' ? selectedPageFilter : 1;
+  const totalPagesCount = Math.max(1, activeDocument.pages.length || 1);
 
+  // The document's own topics, or its page titles when it has not been analysed into topics yet.
   const canonicalTopicsList =
-    activeDocument.topics.length >= 3
+    activeDocument.topics.length > 0
       ? activeDocument.topics.map((t, idx) => ({
           id: t.id,
-          code: `2.${idx + 1}`,
+          code: `${idx + 1}`,
           name: t.name.replace(/^\d+\.\d+\s*/, ''),
           page: t.sourcePages[0] || idx + 1,
         }))
-      : [
-          { id: 't-1', code: '2.1', name: 'Sample Spaces and Events', page: 1 },
-          { id: 't-2', code: '2.2', name: 'Conditional Probability', page: 2 },
-          { id: 't-3', code: '2.3', name: 'Independent Events', page: 3 },
-          { id: 't-4', code: '2.4', name: "Total Probability & Bayes'", page: 4 },
-        ];
+      : activeDocument.pages.slice(0, 8).map((p, idx) => ({
+          id: `page-${p.pageNumber}`,
+          code: `${idx + 1}`,
+          name: p.title || `Page ${p.pageNumber}`,
+          page: p.pageNumber,
+        }));
+  const subjectLabel =
+    classifyJeeSubject(`${activeDocument.title} ${activeDocument.topics.map((t) => t.name).join(' ')}`) ||
+    'Revise';
 
   return (
     <div className="space-y-6 flex-1 flex flex-col">
       {/* Editorial Header matching Image 1 ("Revise with clarity.") */}
-      <div className="space-y-4 border-b border-[#E8E6E2] pb-0 no-print">
+      <div className="space-y-4 border-b border-line pb-0 no-print">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-2">
           <div className="space-y-1.5">
             <div className="lm-kicker">
-              MATHEMATICS &nbsp;/&nbsp;{' '}
-              {activeDocument.title.replace(/\.pdf$/i, '').toUpperCase()}
+              {subjectLabel} &nbsp;/&nbsp; {activeDocument.title.replace(/\.pdf$/i, '')}
             </div>
             <h1 className="lm-editorial-title text-4xl sm:text-5xl">
               Revise with clarity.
             </h1>
-            <p className="lm-editorial-subtitle text-base sm:text-lg text-[#4B5563]">
+            <p className="lm-editorial-subtitle text-base sm:text-lg text-body">
               Turn your notes into concise, visual reminders.
             </p>
           </div>
@@ -598,9 +602,9 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               type="button"
               data-testid="preview-revision-pdf-btn"
               onClick={handleOpenPreviewModal}
-              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#121827] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink transition-colors cursor-pointer"
             >
-              <Eye className="w-3.5 h-3.5 text-[#C84428]" />
+              <Eye className="w-3.5 h-3.5 text-brand" />
               <span>Preview Notes</span>
             </button>
 
@@ -628,10 +632,10 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               type="button"
               data-testid="download-revision-txt-btn"
               onClick={handleDownloadOnePageRevisionTxt}
-              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#606B7C] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-muted transition-colors cursor-pointer"
               title="Download plain text (.txt) version"
             >
-              <FileText className="w-3.5 h-3.5 text-[#606B7C]" />
+              <FileText className="w-3.5 h-3.5 text-muted" />
               <span>Download TXT</span>
             </button>
           </div>
@@ -643,8 +647,8 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             data-testid="revision-pdf-status"
             className={`flex items-center justify-between gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold border ${
               pdfStatusMessage.type === 'success'
-                ? 'bg-[#E2F5EA] border-[#2E7D52]/30 text-[#2E7D52]'
-                : 'bg-[#FBECE6] border-[#C84428]/30 text-[#C84428]'
+                ? 'bg-success-soft border-success/30 text-success'
+                : 'bg-brand-soft border-brand/30 text-brand'
             }`}
           >
             <span className="flex items-center gap-2">
@@ -689,13 +693,13 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 aria-selected={active}
                 onClick={() => setSubTab(tabItem.id)}
                 className={`relative pb-3 pt-1 flex items-center gap-2 text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                  active ? 'text-[#C84428] font-semibold' : 'text-[#606B7C] hover:text-[#121827]'
+                  active ? 'text-brand font-semibold' : 'text-muted hover:text-ink'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${active ? 'text-[#C84428]' : 'text-[#9CA3AF]'}`} />
+                <Icon className={`w-4 h-4 ${active ? 'text-brand' : 'text-[#9CA3AF]'}`} />
                 <span>{tabItem.label}</span>
                 {active && (
-                  <span className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-[#C84428]" />
+                  <span className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-brand" />
                 )}
               </button>
             );
@@ -706,10 +710,10 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       {aiNotice && (
         <div
           role="status"
-          className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#FCFBF9] border border-[#E8E6E2] text-xs font-medium text-[#606B7C] no-print"
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-canvas border border-line text-xs font-medium text-muted no-print"
         >
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-[#C84428] shrink-0" />
+            <AlertCircle className="w-4 h-4 text-brand shrink-0" />
             <span>{aiNotice}</span>
           </div>
           <button
@@ -722,7 +726,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 void handleGenerateMindMapAndRevision(true);
               }
             }}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white border border-[#E8E6E2] hover:bg-[#FCFBF9] text-[#121827] font-semibold shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white border border-line hover:bg-canvas text-ink font-semibold shrink-0 cursor-pointer"
           >
             <RefreshCw className="w-3 h-3" />
             <span>Retry</span>
@@ -737,23 +741,23 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1">
           {/* Left Chapter & Page Navigation Sidebar matching Image 1 */}
           <aside className="lg:col-span-3 lm-card-editorial p-4 space-y-4 no-print">
-            <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#F2F0EC]">
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-soft">
               <div className="flex items-center gap-2 min-w-0">
-                <FileText className="w-4 h-4 text-[#C84428] shrink-0" />
-                <span className="text-xs font-semibold text-[#121827] truncate">
+                <FileText className="w-4 h-4 text-brand shrink-0" />
+                <span className="text-xs font-semibold text-ink truncate">
                   {activeDocument.title}
                 </span>
               </div>
             </div>
 
             {/* Page Switcher `< 2 / 4 >` */}
-            <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-[#FCFBF9] border border-[#E8E6E2] text-xs font-medium text-[#121827]">
+            <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-canvas border border-line text-xs font-medium text-ink">
               <button
                 type="button"
                 onClick={() =>
                   setSelectedPageFilter(Math.max(1, currentPageNum - 1))
                 }
-                className="p-1 rounded hover:bg-[#F2EAE4] text-[#606B7C] hover:text-[#121827] cursor-pointer"
+                className="p-1 rounded hover:bg-brand-soft text-muted hover:text-ink cursor-pointer"
                 aria-label="Previous page"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
@@ -773,7 +777,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 onClick={() =>
                   setSelectedPageFilter(Math.min(totalPagesCount, currentPageNum + 1))
                 }
-                className="p-1 rounded hover:bg-[#F2EAE4] text-[#606B7C] hover:text-[#121827] cursor-pointer"
+                className="p-1 rounded hover:bg-brand-soft text-muted hover:text-ink cursor-pointer"
                 aria-label="Next page"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -798,8 +802,8 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     }
                     className={`w-full text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-start gap-2 cursor-pointer ${
                       isSelected
-                        ? 'bg-[#FBECE6] text-[#C84428] font-semibold border-l-2 border-[#C84428]'
-                        : 'text-[#606B7C] hover:bg-[#FCFBF9] hover:text-[#121827]'
+                        ? 'bg-brand-soft text-brand font-semibold border-l-2 border-brand'
+                        : 'text-muted hover:bg-canvas hover:text-ink'
                     }`}
                   >
                     <span className="tabular-nums opacity-80">{topic.code}</span>
@@ -813,25 +817,25 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           {/* Right 9 Columns: Sticky Notes Action Bar + 3-Column Kalam Sticky Grid */}
           <div className="lg:col-span-9 space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-2 no-print">
-              <span className="text-xs font-medium text-[#606B7C]">
-                <strong className="text-[#121827]">{stickyNotes.length} notes</strong> from{' '}
+              <span className="text-xs font-medium text-muted">
+                <strong className="text-ink">{stickyNotes.length} notes</strong> from{' '}
                 {activeDocument.title.replace(/\.pdf$/i, '')}
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleAddBlankNote}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#121827] cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
                 >
-                  <Plus className="w-3.5 h-3.5 text-[#606B7C]" />
+                  <Plus className="w-3.5 h-3.5 text-muted" />
                   <span>Add Note</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#121827] cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
                 >
-                  <Printer className="w-3.5 h-3.5 text-[#606B7C]" />
+                  <Printer className="w-3.5 h-3.5 text-muted" />
                   <span>Print</span>
                 </button>
                 <button
@@ -848,8 +852,8 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
             {isLoadingNotes ? (
               <div className="py-16 text-center space-y-3">
-                <Loader2 className="w-7 h-7 animate-spin text-[#C84428] mx-auto" />
-                <p className="text-sm font-medium text-[#121827]">
+                <Loader2 className="w-7 h-7 animate-spin text-brand mx-auto" />
+                <p className="text-sm font-medium text-ink">
                   Distilling concise sticky notes from {activeDocument.title}...
                 </p>
               </div>
@@ -881,27 +885,27 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             value={editTitle}
                             onChange={(e) => setEditTitle(e.target.value)}
                             placeholder="Short title"
-                            className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-sm font-bold text-[#121827]"
+                            className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-sm font-bold text-ink"
                           />
                           <textarea
                             rows={3}
                             value={editContent}
                             onChange={(e) => setEditContent(e.target.value)}
                             placeholder="10-30 words concise note"
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-black/15 text-sm text-[#121827]"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-black/15 text-sm text-ink"
                           />
                           <input
                             type="text"
                             value={editFormula}
                             onChange={(e) => setEditFormula(e.target.value)}
                             placeholder="Optional formula (e.g. P(A|B) = P(A∩B)/P(B))"
-                            className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-xs text-[#121827]"
+                            className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-xs text-ink"
                           />
                           <div className="flex justify-end gap-1.5 pt-1">
                             <button
                               type="button"
                               onClick={() => setEditingNoteId(null)}
-                              className="px-2.5 py-1 rounded-md bg-white/70 text-xs font-semibold text-[#606B7C] cursor-pointer"
+                              className="px-2.5 py-1 rounded-md bg-white/70 text-xs font-semibold text-muted cursor-pointer"
                             >
                               Cancel
                             </button>
@@ -918,7 +922,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                         <>
                           <div className="space-y-2.5">
                             <div className="flex items-start justify-between gap-2">
-                              <h3 className="lm-sticky-font text-xl font-bold leading-snug text-[#121827]">
+                              <h3 className="lm-sticky-font text-xl font-bold leading-snug text-ink">
                                 {note.title}
                               </h3>
                               <button
@@ -926,7 +930,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                 onClick={() =>
                                   onNavigateToCitation(note.sourcePage, note.content)
                                 }
-                                className="px-2 py-0.5 rounded bg-black/5 hover:bg-black/10 text-[11px] font-medium text-[#606B7C] shrink-0 cursor-pointer"
+                                className="px-2 py-0.5 rounded bg-black/5 hover:bg-black/10 text-[11px] font-medium text-muted shrink-0 cursor-pointer"
                                 title="Jump to source in material"
                               >
                                 {note.sourceLabel}
@@ -962,7 +966,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                   <text x="102" y="42" fontSize="11" fill="#854D0E" fontWeight="bold">
                                     B
                                   </text>
-                                  <text x="67" y="41" fontSize="9" fill="#121827" fontWeight="bold">
+                                  <text x="67" y="41" fontSize="9" fill="#0F172A" fontWeight="bold">
                                     A∩B
                                   </text>
                                 </svg>
@@ -970,14 +974,14 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             )}
 
                             {note.formula && (
-                              <div className="px-3 py-1.5 rounded-lg bg-white/60 border border-black/10 text-sm font-serif-editorial italic text-[#121827]">
+                              <div className="px-3 py-1.5 rounded-lg bg-white/60 border border-black/10 text-sm font-serif-editorial italic text-ink">
                                 {note.formula}
                               </div>
                             )}
                           </div>
 
                           <div className="pt-3 mt-2 border-t border-black/5 flex items-center justify-between gap-1 no-print">
-                            <span className="text-[11px] text-[#606B7C]">{note.sourceLabel}</span>
+                            <span className="text-[11px] text-muted">{note.sourceLabel}</span>
 
                             <div className="flex items-center gap-1">
                               <button
@@ -985,7 +989,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                 onClick={() => handleStartEditNote(note)}
                                 aria-label={`Edit sticky note ${note.title}`}
                                 title="Edit Sticky Note"
-                                className="p-1.5 rounded-lg hover:bg-black/10 text-[#606B7C] hover:text-[#121827] transition-colors cursor-pointer"
+                                className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
                               </button>
@@ -994,10 +998,10 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                 onClick={() => void handleCopyNote(note)}
                                 aria-label={`Copy sticky note ${note.title}`}
                                 title="Copy Note"
-                                className="p-1.5 rounded-lg hover:bg-black/10 text-[#606B7C] hover:text-[#121827] transition-colors cursor-pointer"
+                                className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
                               >
                                 {copiedNoteId === note.id ? (
-                                  <Check className="w-3.5 h-3.5 text-[#2E7D52]" />
+                                  <Check className="w-3.5 h-3.5 text-success" />
                                 ) : (
                                   <Copy className="w-3.5 h-3.5" />
                                 )}
@@ -1007,7 +1011,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                 onClick={() => handleDeleteNote(note.id)}
                                 aria-label={`Delete sticky note ${note.title}`}
                                 title="Delete Note"
-                                className="p-1.5 rounded-lg hover:bg-black/10 text-[#606B7C] hover:text-[#121827] transition-colors cursor-pointer"
+                                className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -1074,24 +1078,24 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
           {isLoadingNotes ? (
             <div className="py-16 text-center space-y-3">
-              <Loader2 className="w-7 h-7 animate-spin text-[#4285F4] mx-auto" />
+              <Loader2 className="w-7 h-7 animate-spin text-brand mx-auto" />
               <p className="text-sm font-medium text-slate-700">
                 Preparing active-recall flashcards...
               </p>
             </div>
           ) : !activeFlashcard ? (
-            <div className="p-8 rounded-2xl bg-[#F8FAFC] border border-slate-200 text-center space-y-3">
-              <CheckCircle2 className="w-8 h-8 text-[#34A853] mx-auto" />
-              <h3 className="text-base font-bold text-[#172033]">
+            <div className="p-8 rounded-2xl bg-canvas border border-slate-200 text-center space-y-3">
+              <CheckCircle2 className="w-8 h-8 text-success mx-auto" />
+              <h3 className="text-base font-bold text-ink">
                 No cards in &ldquo;Review again&rdquo;
               </h3>
-              <p className="text-xs text-[#64748B]">
+              <p className="text-xs text-muted">
                 All flashcards are marked as known or unreviewed.
               </p>
               <button
                 type="button"
                 onClick={() => setFlashcardFilter('all')}
-                className="px-4 py-2 rounded-full bg-[#1A73E8] text-white text-xs font-semibold cursor-pointer"
+                className="px-4 py-2 rounded-full bg-brand text-white text-xs font-semibold cursor-pointer"
               >
                 Show All Flashcards ({flashcards.length})
               </button>
@@ -1117,16 +1121,16 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 }}
                 className={`relative rounded-3xl border-2 p-7 sm:p-9 min-h-[250px] flex flex-col justify-between transition-all cursor-pointer select-none shadow-sm ${
                   isCardFlipped
-                    ? 'bg-[#F2FBF6] border-[#34A853]/50'
-                    : 'bg-[#F8FAFF] border-[#4285F4]/40 hover:border-[#4285F4]'
+                    ? 'bg-success-soft border-success/50'
+                    : 'bg-brand-soft border-brand/40 hover:border-brand'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span
                     className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[11px] ${
                       isCardFlipped
-                        ? 'bg-[#34A853] text-white'
-                        : 'bg-[#4285F4] text-white'
+                        ? 'bg-success text-white'
+                        : 'bg-brand text-white'
                     }`}
                   >
                     {isCardFlipped ? 'Back · Explanation' : 'Front · Question'}
@@ -1149,7 +1153,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                           activeFlashcard.backAnswer
                         );
                       }}
-                      className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[#1A73E8] font-semibold hover:underline cursor-pointer"
+                      className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-brand font-semibold hover:underline cursor-pointer"
                     >
                       {activeFlashcard.sourceLabel}
                     </button>
@@ -1157,18 +1161,18 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 </div>
 
                 <div className="my-6 text-center px-2">
-                  <p className="text-lg sm:text-xl font-semibold text-[#172033] leading-relaxed">
+                  <p className="text-lg sm:text-xl font-semibold text-ink leading-relaxed">
                     {isCardFlipped
                       ? activeFlashcard.backAnswer
                       : activeFlashcard.frontQuestion}
                   </p>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-[#64748B]">
+                <div className="flex items-center justify-between text-xs text-muted">
                   <span className="tabular-nums font-semibold">
                     Card {currentCardIdx + 1} of {visibleFlashcards.length}
                   </span>
-                  <span className="inline-flex items-center gap-1 font-medium text-[#1A73E8]">
+                  <span className="inline-flex items-center gap-1 font-medium text-brand">
                     <RotateCw className="w-3.5 h-3.5" />
                     <span>Click or press Space to flip</span>
                   </span>
@@ -1196,7 +1200,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     onClick={() => handleMarkFlashcard('review_again')}
                     className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
                       activeFlashcard.status === 'review_again'
-                        ? 'bg-[#FBBC05] text-[#172033]'
+                        ? 'bg-warning text-ink'
                         : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200'
                     }`}
                   >
@@ -1209,7 +1213,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     onClick={() => handleMarkFlashcard('know_it')}
                     className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
                       activeFlashcard.status === 'know_it'
-                        ? 'bg-[#34A853] text-white'
+                        ? 'bg-success text-white'
                         : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200'
                     }`}
                   >
@@ -1244,7 +1248,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       {subTab === 'mindmap' && (
         <div className="space-y-4 flex-1 flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2 no-print">
-            <span className="text-xs font-medium text-[#64748B]">
+            <span className="text-xs font-medium text-muted">
               Click any concept node to view its explanation and source reference.
             </span>
 
@@ -1291,7 +1295,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 type="button"
                 disabled={isLoadingMindMap}
                 onClick={() => void handleGenerateMindMapAndRevision(true)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#1A73E8] text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMindMap ? 'animate-spin' : ''}`} />
                 <span>Regenerate</span>
@@ -1301,7 +1305,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
           {isLoadingMindMap || !mindMap ? (
             <div className="py-16 text-center space-y-3">
-              <Loader2 className="w-7 h-7 animate-spin text-[#34A853] mx-auto" />
+              <Loader2 className="w-7 h-7 animate-spin text-success mx-auto" />
               <p className="text-sm font-medium text-slate-700">
                 Mapping grounded concept relationships from {activeDocument.title}...
               </p>
@@ -1309,7 +1313,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
               {/* Interactive SVG Canvas */}
-              <div className="xl:col-span-8 rounded-2xl bg-[#F8FAFC] border border-slate-200/90 overflow-hidden relative min-h-[420px] flex items-center justify-center">
+              <div className="xl:col-span-8 rounded-2xl bg-canvas border border-slate-200/90 overflow-hidden relative min-h-[420px] flex items-center justify-center">
                 {(() => {
                   const width = 980;
                   const height = 560;
@@ -1450,7 +1454,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 {selectedNode ? (
                   <>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#1A73E8] bg-[#E8F0FE] px-2.5 py-0.5 rounded-full">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-brand bg-brand-soft px-2.5 py-0.5 rounded-full">
                         {selectedNode.level === 'central'
                           ? 'Central Topic'
                           : selectedNode.level === 'branch'
@@ -1465,14 +1469,14 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             selectedNode.label
                           )
                         }
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#F8FAFC] border border-slate-200 text-xs font-semibold text-[#1A73E8] hover:bg-[#E8F0FE] cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-canvas border border-slate-200 text-xs font-semibold text-brand hover:bg-brand-soft cursor-pointer"
                       >
                         <ExternalLink className="w-3 h-3" />
                         <span>{selectedNode.sourceLabel}</span>
                       </button>
                     </div>
 
-                    <h3 className="text-base font-bold text-[#172033]">
+                    <h3 className="text-base font-bold text-ink">
                       {selectedNode.label}
                     </h3>
 
@@ -1488,7 +1492,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             `Explain "${selectedNode.label}" (${selectedNode.sourceLabel}) and how it connects to the rest of ${activeDocument.title}.`
                           )
                         }
-                        className="w-full py-2 px-3 rounded-xl bg-[#E8F0FE] hover:bg-[#D2E3FC] text-[#1A73E8] text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="w-full py-2 px-3 rounded-xl bg-brand-soft hover:bg-brand-200 text-brand text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
                         <span>Ask AI Tutor about this node</span>
@@ -1496,7 +1500,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     )}
                   </>
                 ) : (
-                  <p className="text-xs text-[#64748B]">
+                  <p className="text-xs text-muted">
                     Select any node in the mind map to inspect its grounded explanation and source page/timestamp.
                   </p>
                 )}
@@ -1512,7 +1516,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       {subTab === 'onepage' && (
         <div className="space-y-4 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2 no-print">
-            <span className="text-xs font-medium text-[#64748B]">
+            <span className="text-xs font-medium text-muted">
               Multi-page formatted PDF revision sheet &amp; A4 print-ready study summary.
             </span>
 
@@ -1522,7 +1526,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 onClick={handleOpenPreviewModal}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
               >
-                <Eye className="w-3.5 h-3.5 text-[#4285F4]" />
+                <Eye className="w-3.5 h-3.5 text-brand" />
                 <span>Preview Formatted Notes</span>
               </button>
               <button
@@ -1546,7 +1550,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 data-testid="onepage-download-pdf-btn"
                 disabled={isGeneratingPdf}
                 onClick={() => void handleDownloadRevisionPdf()}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1A73E8] hover:bg-[#1557B0] text-white text-xs font-bold shadow-2xs cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold shadow-2xs cursor-pointer disabled:opacity-60"
               >
                 <FileDown className="w-3.5 h-3.5" />
                 <span>{isGeneratingPdf ? 'Generating PDF...' : 'Download PDF'}</span>
@@ -1556,7 +1560,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
           {isLoadingMindMap || !onePageRevision ? (
             <div className="py-16 text-center space-y-3">
-              <Loader2 className="w-7 h-7 animate-spin text-[#EA4335] mx-auto" />
+              <Loader2 className="w-7 h-7 animate-spin text-danger mx-auto" />
               <p className="text-sm font-medium text-slate-700">
                 Compiling one-page revision sheet for {activeDocument.title}...
               </p>
@@ -1569,13 +1573,13 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               {/* Sheet Header */}
               <div className="border-b border-slate-200 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#1A73E8]">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-brand">
                     LearnMate One-Page Revision Sheet
                   </span>
-                  <h3 className="text-xl font-bold text-[#172033] mt-0.5">
+                  <h3 className="text-xl font-bold text-ink mt-0.5">
                     {onePageRevision.chapterTitle}
                   </h3>
-                  <p className="text-xs text-[#64748B] mt-1 max-w-3xl">
+                  <p className="text-xs text-muted mt-1 max-w-3xl">
                     {onePageRevision.overview}
                   </p>
                 </div>
@@ -1585,17 +1589,17 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Essential Concepts */}
                 <div className="space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#172033] border-l-4 border-[#4285F4] pl-2.5">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-ink border-l-4 border-brand pl-2.5">
                     Essential Concepts
                   </h4>
                   <div className="space-y-2.5">
                     {onePageRevision.essentialConcepts.map((item, idx) => (
                       <div
                         key={idx}
-                        className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200/80 space-y-1"
+                        className="p-3 rounded-xl bg-canvas border border-slate-200/80 space-y-1"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[#172033]">
+                          <span className="text-xs font-bold text-ink">
                             {item.title}
                           </span>
                           <button
@@ -1603,7 +1607,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             onClick={() =>
                               onNavigateToCitation(item.sourcePage, item.title)
                             }
-                            className="text-[11px] font-semibold text-[#1A73E8] hover:underline cursor-pointer"
+                            className="text-[11px] font-semibold text-brand hover:underline cursor-pointer"
                           >
                             {item.sourceLabel}
                           </button>
@@ -1618,17 +1622,17 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
                 {/* Key Formulas & Definitions */}
                 <div className="space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#172033] border-l-4 border-[#34A853] pl-2.5">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-ink border-l-4 border-success pl-2.5">
                     Important Formulas & Definitions
                   </h4>
                   <div className="space-y-2.5">
                     {onePageRevision.formulasAndDefinitions.map((f, idx) => (
                       <div
                         key={idx}
-                        className="p-3 rounded-xl bg-[#F2FBF6] border border-emerald-100 space-y-1"
+                        className="p-3 rounded-xl bg-success-soft border border-emerald-100 space-y-1"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[#172033]">
+                          <span className="text-xs font-bold text-ink">
                             {f.term}
                           </span>
                           <span className="text-[11px] font-semibold text-emerald-800">
@@ -1647,7 +1651,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               {/* Key Relationships & Common Mistakes */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-2.5">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#172033] border-l-4 border-[#FBBC05] pl-2.5">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-ink border-l-4 border-warning pl-2.5">
                     Key Concept Relationships
                   </h4>
                   <ul className="space-y-1.5 text-xs text-slate-700 list-disc pl-4">
@@ -1660,7 +1664,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 </div>
 
                 <div className="space-y-2.5">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#172033] border-l-4 border-[#EA4335] pl-2.5">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-ink border-l-4 border-danger pl-2.5">
                     Common Mistakes to Avoid
                   </h4>
                   <ul className="space-y-1.5 text-xs text-slate-700 list-disc pl-4">
@@ -1675,16 +1679,16 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
               {/* Short Self-Check Recall Questions */}
               <div className="space-y-2.5 pt-2 border-t border-slate-100">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-[#172033]">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-ink">
                   Quick Recall Questions
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {onePageRevision.quickRecallQuestions.map((q, idx) => (
                     <div
                       key={idx}
-                      className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200/80 space-y-1 text-xs"
+                      className="p-3 rounded-xl bg-canvas border border-slate-200/80 space-y-1 text-xs"
                     >
-                      <p className="font-bold text-[#172033]">
+                      <p className="font-bold text-ink">
                         Q{idx + 1}: {q.question}
                       </p>
                       <p className="text-slate-600 leading-relaxed">
@@ -1715,12 +1719,12 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
         >
           <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[88vh] flex flex-col overflow-hidden">
             {/* Modal Header */}
-            <div className="px-6 py-4 bg-[#F8FAFC] border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="px-6 py-4 bg-canvas border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#1A73E8]">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand">
                   PDF Document Preview • {buildRevisionPdfFilename(activeDocument.title)}
                 </span>
-                <h3 className="text-base font-bold text-[#172033]">
+                <h3 className="text-base font-bold text-ink">
                   {onePageRevision.chapterTitle}
                 </h3>
               </div>
@@ -1738,7 +1742,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                   type="button"
                   disabled={isGeneratingPdf}
                   onClick={() => void handleDownloadRevisionPdf()}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-[#1A73E8] hover:bg-[#1557B0] text-white text-xs font-bold cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
                 >
                   <FileDown className="w-3.5 h-3.5" />
                   <span>{isGeneratingPdf ? 'Generating...' : 'Download .PDF Now'}</span>
@@ -1757,11 +1761,11 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             {/* Simulated Multi-Page A4 Preview Body */}
             <div className="p-6 overflow-y-auto space-y-6 bg-slate-100/70 flex-1">
               <div className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-8 shadow-sm max-w-3xl mx-auto space-y-5">
-                <div className="p-4 rounded-xl bg-[#E8F0FE]/70 border border-[#4285F4]/30">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#1A73E8]">
+                <div className="p-4 rounded-xl bg-brand-soft/70 border border-brand/30">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-brand">
                     LEARNMATE STRUCTURED REVISION NOTES
                   </div>
-                  <div className="text-lg font-bold text-[#172033] mt-0.5">
+                  <div className="text-lg font-bold text-ink mt-0.5">
                     {onePageRevision.chapterTitle}
                   </div>
                   <p className="text-xs text-slate-600 mt-1">
@@ -1770,14 +1774,14 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#1A73E8]">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-brand">
                     1. Essential Concepts ({onePageRevision.essentialConcepts.length})
                   </h4>
                   <div className="space-y-2">
                     {onePageRevision.essentialConcepts.map((c, idx) => (
                       <div key={idx} className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
-                        <div className="font-bold text-[#172033]">
-                          {idx + 1}. {c.title} <span className="text-[#1A73E8]">[{c.sourceLabel}]</span>
+                        <div className="font-bold text-ink">
+                          {idx + 1}. {c.title} <span className="text-brand">[{c.sourceLabel}]</span>
                         </div>
                         <p className="text-slate-600 mt-0.5">{c.summary}</p>
                       </div>
@@ -1786,10 +1790,10 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#137333]">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-success">
                     2. Key Formulas &amp; Definitions ({onePageRevision.formulasAndDefinitions.length})
                   </h4>
-                  <div className="divide-y divide-emerald-100 rounded-xl border border-emerald-200/80 bg-[#F2FBF6] overflow-hidden text-xs">
+                  <div className="divide-y divide-emerald-100 rounded-xl border border-emerald-200/80 bg-success-soft overflow-hidden text-xs">
                     {onePageRevision.formulasAndDefinitions.map((f, idx) => (
                       <div key={idx} className="p-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <div className="font-bold text-emerald-900">
@@ -1805,13 +1809,13 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
                 {stickyNotes.length > 0 && (
                   <div className="space-y-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#D97706]">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-warning">
                       3. Highlighted Sticky Notes ({stickyNotes.length})
                     </h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                       {stickyNotes.map((n) => (
                         <div key={n.id} className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80">
-                          <div className="font-bold text-[#172033]">{n.title}</div>
+                          <div className="font-bold text-ink">{n.title}</div>
                           <p className="text-slate-700 mt-0.5">{n.content}</p>
                         </div>
                       ))}

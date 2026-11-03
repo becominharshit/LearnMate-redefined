@@ -514,14 +514,14 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
         data-testid="floating-dynamic-timer"
         className="relative z-30 lm-no-print"
       >
-        <div className="rounded-xl bg-[#172033] text-white shadow-sm border border-slate-700/80 transition-all">
+        <div className="rounded-xl bg-ink text-white shadow-sm border border-slate-700/80 transition-all">
           <div className="flex items-center gap-1.5 px-2.5 py-1">
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
                 timerState.isRunning
-                  ? 'bg-[#34A853]'
+                  ? 'bg-success'
                   : lofiPlaying
-                  ? 'bg-[#4285F4]'
+                  ? 'bg-brand'
                   : 'bg-slate-400'
               }`}
             />
@@ -549,7 +549,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
               title={lofiPlaying ? 'Pause Focus Radio' : 'Play Focus Radio (Instrumental Synth)'}
               className={`p-1 rounded-lg transition-colors cursor-pointer ${
                 lofiPlaying
-                  ? 'bg-[#4285F4] text-white'
+                  ? 'bg-brand text-white'
                   : 'bg-white/10 hover:bg-white/20 text-slate-200'
               }`}
             >
@@ -571,7 +571,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
         </div>
 
         {islandExpanded && (
-          <div className="absolute right-0 top-full mt-2 px-4 pb-3.5 pt-3 rounded-2xl bg-[#172033] text-white border border-slate-700/80 shadow-2xl w-76 sm:w-80 space-y-3 text-xs z-50">
+          <div className="absolute right-0 top-full mt-2 px-4 pb-3.5 pt-3 rounded-2xl bg-ink text-white border border-slate-700/80 shadow-2xl w-76 sm:w-80 space-y-3 text-xs z-50">
             <div className="flex items-center justify-between">
               <span className="text-slate-300 font-medium truncate">
                 {activeDocumentTitle || 'Study Session'}
@@ -587,7 +587,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
                 <button
                   type="button"
                   onClick={onToggleFocusMode}
-                  className="px-2 py-1 rounded-md bg-[#4285F4] hover:bg-[#1A73E8] text-[11px] font-semibold cursor-pointer"
+                  className="px-2 py-1 rounded-md bg-brand hover:bg-brand text-[11px] font-semibold cursor-pointer"
                 >
                   {focusMode ? 'Exit Focus' : 'Focus Mode'}
                 </button>
@@ -597,7 +597,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
             <div className="pt-1 border-t border-slate-700/60 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                  <Music className="w-3.5 h-3.5 text-[#FBBC05]" />
+                  <Music className="w-3.5 h-3.5 text-warning" />
                   <span>Focus Radio (Deterministic Synth)</span>
                 </span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
@@ -618,7 +618,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
                     }}
                     className={`text-left px-2 py-1.5 rounded-lg text-[11px] transition-colors cursor-pointer ${
                       activePresetId === preset.id
-                        ? 'bg-[#4285F4]/30 border border-[#4285F4] text-white font-semibold'
+                        ? 'bg-brand/30 border border-brand text-white font-semibold'
                         : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-transparent'
                     }`}
                   >
@@ -636,7 +636,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
                   value={lofiVolume}
                   onChange={(e) => setLofiVolume(Number(e.target.value))}
                   aria-label="Lo-Fi radio volume"
-                  className="w-full accent-[#4285F4] cursor-pointer"
+                  className="w-full accent-brand cursor-pointer"
                 />
               </div>
             </div>
@@ -649,12 +649,12 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
   return (
     <div ref={containerRef} className="relative flex flex-wrap items-center gap-2">
       {/* Compact Pomodoro Study Timer Pill */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8FAFC] border border-slate-200/90 text-xs">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-canvas border border-slate-200/90 text-xs">
         <span
           className={`inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-md ${
             timerState.mode === 'study'
-              ? 'bg-[#E8F0FE] text-[#1A73E8]'
-              : 'bg-[#E6F4EA] text-[#137333]'
+              ? 'bg-brand-soft text-brand'
+              : 'bg-success-soft text-success'
           }`}
         >
           <Timer className="w-3.5 h-3.5" />
@@ -664,7 +664,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
         <span
           aria-live="off"
           data-testid="study-timer-readout"
-          className="font-bold text-sm text-[#172033] tabular-nums px-1"
+          className="font-bold text-sm text-ink tabular-nums px-1"
         >
           {formatTimestamp(timerState.remainingSeconds)}
         </span>
@@ -677,7 +677,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
           className={`p-1.5 rounded-lg font-semibold transition-colors cursor-pointer ${
             timerState.isRunning
               ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-              : 'bg-[#1A73E8] text-white hover:bg-[#1557B0]'
+              : 'bg-brand text-white hover:bg-brand-strong'
           }`}
         >
           {timerState.isRunning ? (
@@ -692,7 +692,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
           onClick={handleReset}
           aria-label="Reset study timer"
           title="Reset Timer"
-          className="p-1.5 rounded-lg text-slate-600 hover:text-[#172033] hover:bg-slate-200/60 transition-colors cursor-pointer"
+          className="p-1.5 rounded-lg text-slate-600 hover:text-ink hover:bg-slate-200/60 transition-colors cursor-pointer"
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
@@ -714,10 +714,10 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
           onClick={handleToggleSound}
           aria-label={timerState.soundEnabled ? 'Mute timer chime' : 'Enable timer chime'}
           title={timerState.soundEnabled ? 'Timer Chime On' : 'Timer Chime Muted'}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-[#172033] hover:bg-slate-200/60 transition-colors cursor-pointer"
+          className="p-1.5 rounded-lg text-slate-500 hover:text-ink hover:bg-slate-200/60 transition-colors cursor-pointer"
         >
           {timerState.soundEnabled ? (
-            <Volume2 className="w-3.5 h-3.5 text-[#34A853]" />
+            <Volume2 className="w-3.5 h-3.5 text-success" />
           ) : (
             <VolumeX className="w-3.5 h-3.5" />
           )}
@@ -733,7 +733,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
           }}
           aria-label="Customize timer durations"
           title="Timer Settings (25/5 Pomodoro or Custom)"
-          className="p-1.5 rounded-lg text-slate-500 hover:text-[#172033] hover:bg-slate-200/60 transition-colors cursor-pointer"
+          className="p-1.5 rounded-lg text-slate-500 hover:text-ink hover:bg-slate-200/60 transition-colors cursor-pointer"
         >
           <Settings2 className="w-3.5 h-3.5" />
         </button>
@@ -749,11 +749,11 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
         data-testid="lofi-radio-trigger"
         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
           lofiPlaying
-            ? 'bg-[#E8F0FE] border-[#4285F4]/40 text-[#1A73E8]'
-            : 'bg-[#F8FAFC] hover:bg-slate-100 border-slate-200/90 text-[#172033]'
+            ? 'bg-brand-soft border-brand/40 text-brand'
+            : 'bg-canvas hover:bg-slate-100 border-slate-200/90 text-ink'
         }`}
       >
-        <Headphones className="w-3.5 h-3.5 text-[#4285F4]" />
+        <Headphones className="w-3.5 h-3.5 text-brand" />
         <span>{lofiPlaying ? activePreset.name : 'Lo-Fi Radio'}</span>
       </button>
 
@@ -764,8 +764,8 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
         aria-pressed={focusMode}
         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
           focusMode
-            ? 'bg-[#EA4335] hover:bg-red-700 text-white shadow-2xs'
-            : 'bg-[#F8FAFC] hover:bg-slate-100 border border-slate-200/90 text-[#172033]'
+            ? 'bg-danger hover:bg-red-700 text-white shadow-2xs'
+            : 'bg-canvas hover:bg-slate-100 border border-slate-200/90 text-ink'
         }`}
       >
         {focusMode ? (
@@ -775,7 +775,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
           </>
         ) : (
           <>
-            <Eye className="w-3.5 h-3.5 text-[#4285F4]" />
+            <Eye className="w-3.5 h-3.5 text-brand" />
             <span>Focus Mode</span>
           </>
         )}
@@ -823,7 +823,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
           role="status"
           className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900"
         >
-          <CheckCircle2 className="w-3.5 h-3.5 text-[#34A853] shrink-0" />
+          <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
           <span>{sessionBanner}</span>
           <button
             type="button"
@@ -843,11 +843,11 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
         >
           <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
             <div>
-              <div className="text-xs font-bold text-[#172033] flex items-center gap-1.5">
-                <Headphones className="w-3.5 h-3.5 text-[#4285F4]" />
+              <div className="text-xs font-bold text-ink flex items-center gap-1.5">
+                <Headphones className="w-3.5 h-3.5 text-brand" />
                 <span>Lo-Fi Focus Radio</span>
               </div>
-              <p className="text-[11px] text-[#64748B]">
+              <p className="text-[11px] text-muted">
                 Strictly instrumental ambient study audio
               </p>
             </div>
@@ -856,8 +856,8 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
               onClick={() => setLofiPlaying((p) => !p)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
                 lofiPlaying
-                  ? 'bg-red-50 text-[#EA4335] border border-red-200'
-                  : 'bg-[#1A73E8] text-white hover:bg-[#1557B0]'
+                  ? 'bg-red-50 text-danger border border-red-200'
+                  : 'bg-brand text-white hover:bg-brand-strong'
               }`}
             >
               {lofiPlaying ? 'Pause' : 'Play'}
@@ -877,13 +877,13 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
                   }}
                   className={`flex items-center justify-between px-3 py-2 rounded-xl border text-left transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-[#E8F0FE]/70 border-[#4285F4] text-[#172033]'
-                      : 'bg-slate-50/70 hover:bg-slate-100 border-slate-200/70 text-[#172033]'
+                      ? 'bg-brand-soft/70 border-brand text-ink'
+                      : 'bg-slate-50/70 hover:bg-slate-100 border-slate-200/70 text-ink'
                   }`}
                 >
                   <div>
                     <div className="text-xs font-semibold">{preset.name}</div>
-                    <div className="text-[11px] text-[#64748B]">{preset.subtitle}</div>
+                    <div className="text-[11px] text-muted">{preset.subtitle}</div>
                   </div>
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600">
                     {preset.bpm} BPM
@@ -903,7 +903,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
               value={lofiVolume}
               onChange={(e) => setLofiVolume(Number(e.target.value))}
               aria-label="Lo-Fi focus radio volume"
-              className="w-full accent-[#1A73E8] cursor-pointer"
+              className="w-full accent-brand cursor-pointer"
             />
             <button
               type="button"
@@ -920,8 +920,8 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
       {showTimerSettings && (
         <div className="absolute right-0 top-11 z-40 w-72 rounded-2xl bg-white border border-slate-200 shadow-xl p-4 space-y-3">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <span className="text-xs font-bold text-[#172033]">Study Timer Settings</span>
-            <span className="text-[11px] text-[#64748B] tabular-nums">
+            <span className="text-xs font-bold text-ink">Study Timer Settings</span>
+            <span className="text-[11px] text-muted tabular-nums">
               {timerState.completedSessionsCount} session(s) done
             </span>
           </div>
@@ -942,7 +942,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
                   max={120}
                   value={customStudyMins}
                   onChange={(e) => setCustomStudyMins(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-[#172033]"
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-ink"
                 />
               </div>
               <div>
@@ -959,7 +959,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
                   max={60}
                   value={customBreakMins}
                   onChange={(e) => setCustomBreakMins(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-[#172033]"
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-ink"
                 />
               </div>
             </div>
@@ -994,7 +994,7 @@ export const StudyTimerFocusBar: React.FC<StudyTimerFocusBarProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-3 py-1 rounded-lg bg-[#1A73E8] text-white text-xs font-semibold hover:bg-[#1557B0] cursor-pointer"
+                className="px-3 py-1 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-strong cursor-pointer"
               >
                 Apply
               </button>

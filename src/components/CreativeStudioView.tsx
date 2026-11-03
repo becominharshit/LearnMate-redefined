@@ -840,8 +840,53 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         style: visualStyle,
       });
       setVisualResult(res);
+    } catch (err) {
+      setVisualResult({
+        concept: visualConceptInput,
+        style: visualStyle,
+        isAiGenerated: false,
+        modelNotice: err instanceof Error ? err.message : 'Could not generate the visual.',
+        diagramSteps: [],
+      });
     } finally {
       setIsVisualizing(false);
+    }
+  };
+
+  // Higgsfield videos finish in the background; poll until the job settles.
+  const videoPollRef = useRef(0);
+  useEffect(() => {
+    return () => {
+      videoPollRef.current += 1;
+    };
+  }, []);
+
+  const pollVideoJob = async (jobId: string) => {
+    const pollId = ++videoPollRef.current;
+    const deadline = Date.now() + 15 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000));
+      if (videoPollRef.current !== pollId) return;
+      try {
+        const job = await aiStudyClient.getVideoJob(jobId);
+        if (videoPollRef.current !== pollId) return;
+        if (job.status === 'completed' || job.status === 'failed') {
+          setVideoResult((prev) =>
+            prev && prev.jobId === jobId
+              ? {
+                  ...prev,
+                  videoUrl: job.videoUrl || prev.videoUrl,
+                  userFacingNotice: job.userFacingNotice || prev.userFacingNotice,
+                  verificationStatus: job.verificationStatus || prev.verificationStatus,
+                  omniStatus: job.status === 'completed' ? 'video_ready' : 'video_failed',
+                }
+              : prev
+          );
+          return;
+        }
+      } catch {
+        // Transient network error: keep polling until the deadline.
+      }
     }
   };
 
@@ -861,6 +906,16 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
       });
       setVideoResult(res);
       setAnimationProgress(0.65);
+      if (res.jobId && res.omniStatus === 'higgsfield_processing') {
+        void pollVideoJob(res.jobId);
+      }
+    } catch (err) {
+      setVideoResult({
+        topic: videoTopicInput,
+        omniStatus: 'video_failed',
+        userFacingNotice: err instanceof Error ? err.message : 'Could not generate the video.',
+        scenes: [],
+      });
     } finally {
       setIsGeneratingVideo(false);
     }
@@ -883,14 +938,14 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
   return (
     <div className="max-w-[1340px] mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-6">
       {/* Editorial Header matching Image 6 ("Turn handwritten notes into clean study material.") */}
-      <div className="space-y-4 border-b border-[#E8E6E2] pb-0">
+      <div className="space-y-4 border-b border-line pb-0">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-2">
           <div className="space-y-1.5">
             <div className="lm-kicker">NOTEBOOK &amp; SCANNER</div>
             <h1 className="lm-editorial-title text-4xl sm:text-5xl">
               Turn handwritten notes into clean study material.
             </h1>
-            <p className="lm-editorial-subtitle text-base sm:text-lg text-[#4B5563]">
+            <p className="lm-editorial-subtitle text-base sm:text-lg text-body">
               Scan handwritten pages, record voice notes, build interactive simulations, and keep everything organized in one place.
             </p>
           </div>
@@ -901,7 +956,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               aria-label="Select active study document for studio"
               value={activeDocument.id}
               onChange={(e) => onSelectDocument(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-[#E8E6E2] bg-white text-xs font-medium text-[#121827]"
+              className="px-3 py-2 rounded-lg border border-line bg-white text-xs font-medium text-ink"
             >
               {documents.map((doc) => (
                 <option key={doc.id} value={doc.id}>
@@ -914,7 +969,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               aria-label="Select topic for studio creation"
               value={selectedTopic}
               onChange={(e) => setSelectedTopic(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-[#E8E6E2] bg-white text-xs font-medium text-[#121827]"
+              className="px-3 py-2 rounded-lg border border-line bg-white text-xs font-medium text-ink"
             >
               {activeDocument.topics.map((t) => (
                 <option key={t.id} value={t.name}>
@@ -958,12 +1013,12 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 }}
                 data-testid={`studio-tab-${item.id}`}
                 className={`relative pb-3 pt-1 text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                  active ? 'text-[#C84428] font-semibold' : 'text-[#606B7C] hover:text-[#121827]'
+                  active ? 'text-brand font-semibold' : 'text-muted hover:text-ink'
                 }`}
               >
                 <span>{item.label}</span>
                 {active && (
-                  <span className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-[#C84428]" />
+                  <span className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-brand" />
                 )}
               </button>
             );
@@ -972,7 +1027,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
       </div>
 
       {saveToast && (
-        <div className="p-3 rounded-xl bg-[#E2F5EA] border border-[#2E7D52]/30 text-[#2E7D52] text-xs font-semibold flex items-center gap-2">
+        <div className="p-3 rounded-xl bg-success-soft border border-success/30 text-success text-xs font-semibold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>{saveToast}</span>
         </div>
@@ -986,11 +1041,11 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           {/* Left Panel: 1. Original Note (Scanned) matching Image 6 */}
           <div className="lg:col-span-5 lm-card-editorial p-6 flex flex-col justify-between space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-[#121827]">
+              <h2 className="text-sm font-semibold text-ink">
                 1. Original Note (Scanned)
               </h2>
-              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#606B7C] hover:text-[#121827] cursor-pointer">
-                <Upload className="w-3.5 h-3.5 text-[#C84428]" />
+              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-ink cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-brand" />
                 <span>Replace image</span>
                 <input
                   type="file"
@@ -1010,16 +1065,16 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   className="max-h-[420px] w-auto rounded-lg shadow-sm object-contain"
                 />
               ) : (
-                <div className="py-16 text-center text-sm text-[#606B7C] max-w-[300px]">
+                <div className="py-16 text-center text-sm text-muted max-w-[300px]">
                   Upload a clear photo of your handwritten notes to extract them as editable text.
                 </div>
               )}
             </div>
 
-            <div className="flex items-center justify-between text-xs text-[#606B7C] pt-1">
+            <div className="flex items-center justify-between text-xs text-muted pt-1">
               <span>{scannedUploadedPreview ? 'Uploaded image' : 'No image uploaded yet'}</span>
               {isScanningOcr && (
-                <span className="text-[#C84428] font-medium">Running Gemini Vision OCR...</span>
+                <span className="text-brand font-medium">Running Gemini Vision OCR...</span>
               )}
             </div>
           </div>
@@ -1029,11 +1084,11 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
-                  <h2 className="text-sm font-semibold text-[#121827]">
+                  <h2 className="text-sm font-semibold text-ink">
                     2. Cleaned Digital Output
                   </h2>
                   {cleanedNotesSections.length > 0 && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-[#E2F5EA] text-[#2E7D52] text-[11px] font-semibold">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-success-soft text-success text-[11px] font-semibold">
                       <span>Extracted</span>
                       <CheckCircle2 className="w-3 h-3" />
                     </span>
@@ -1047,9 +1102,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                       setSaveToast('Formatted equations and headings for study export.');
                       setTimeout(() => setSaveToast(null), 2500);
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E8E6E2] bg-[#FCFBF9] hover:bg-[#F2EAE4] text-xs font-medium text-[#121827] cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-canvas hover:bg-brand-soft text-xs font-medium text-ink cursor-pointer"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-[#C84428]" />
+                    <Sparkles className="w-3.5 h-3.5 text-brand" />
                     <span>Clean Notes</span>
                   </button>
                   <button
@@ -1061,7 +1116,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         handleSaveScannedToNotebook();
                       }
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#121827] cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
                   >
                     <span>Generate Flashcards</span>
                   </button>
@@ -1069,16 +1124,16 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               </div>
 
               {/* Structured Digital Output Document Card */}
-              <div className="rounded-xl border border-[#E8E6E2] bg-[#FCFBF9]/60 p-6 space-y-5">
-                <div className="flex items-center justify-between border-b border-[#E8E6E2] pb-3">
-                  <h3 className="font-serif-editorial text-2xl font-bold text-[#121827]">
+              <div className="rounded-xl border border-line bg-canvas/60 p-6 space-y-5">
+                <div className="flex items-center justify-between border-b border-line pb-3">
+                  <h3 className="font-serif-editorial text-2xl font-bold text-ink">
                     {scannedDocTitle || 'No scan yet'}
                   </h3>
                 </div>
 
                 {cleanedNotesSections.length === 0 && (
                   <p
-                    className={`text-sm ${scanError ? 'text-[#B3261E]' : 'text-[#606B7C]'}`}
+                    className={`text-sm ${scanError ? 'text-[#B3261E]' : 'text-muted'}`}
                     role={scanError ? 'alert' : undefined}
                   >
                     {isScanningOcr
@@ -1090,17 +1145,17 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 <div className="space-y-5">
                   {cleanedNotesSections.map((sec, idx) => (
                     <div key={idx} className="space-y-2">
-                      <h4 className="font-serif-editorial text-base font-bold text-[#121827]">
+                      <h4 className="font-serif-editorial text-base font-bold text-ink">
                         {sec.heading}
                       </h4>
                       {sec.formula && (
-                        <div className="px-4 py-2.5 rounded-lg bg-[#F5F2EB] border border-[#E8E6E2] font-serif-editorial italic text-base text-[#121827]">
+                        <div className="px-4 py-2.5 rounded-lg bg-soft border border-line font-serif-editorial italic text-base text-ink">
                           {sec.formula}
                         </div>
                       )}
-                      <p className="text-sm text-[#3D4655] leading-relaxed">{sec.body}</p>
+                      <p className="text-sm text-body leading-relaxed">{sec.body}</p>
                       {sec.example && (
-                        <div className="p-3.5 rounded-lg bg-white border border-[#E8E6E2] text-xs text-[#121827] whitespace-pre-line leading-relaxed">
+                        <div className="p-3.5 rounded-lg bg-white border border-line text-xs text-ink whitespace-pre-line leading-relaxed">
                           {sec.example}
                         </div>
                       )}
@@ -1111,7 +1166,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
             </div>
 
             {/* Bottom Action Bar matching Image 6 */}
-            <div className="pt-3 border-t border-[#F2F0EC] flex flex-wrap items-center justify-between gap-3">
+            <div className="pt-3 border-t border-soft flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -1123,9 +1178,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     setSaveToast('Copied cleaned notes to clipboard.');
                     setTimeout(() => setSaveToast(null), 2200);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#121827] cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
                 >
-                  <Copy className="w-3.5 h-3.5 text-[#606B7C]" />
+                  <Copy className="w-3.5 h-3.5 text-muted" />
                   <span>Copy Text</span>
                 </button>
                 <button
@@ -1142,9 +1197,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[#E8E6E2] bg-white hover:bg-[#FCFBF9] text-xs font-medium text-[#121827] cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5 text-[#606B7C]" />
+                  <Download className="w-3.5 h-3.5 text-muted" />
                   <span>Export</span>
                 </button>
               </div>
@@ -1170,8 +1225,8 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 space-y-5 shadow-2xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold text-[#172033]">{gameSpec.title}</h2>
-              <p className="text-xs text-[#64748B]">{gameSpec.learningObjective}</p>
+              <h2 className="text-lg font-bold text-ink">{gameSpec.title}</h2>
+              <p className="text-xs text-muted">{gameSpec.learningObjective}</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1184,7 +1239,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   onClick={() => setSelectedGameSubject(subj)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
                     selectedGameSubject === subj
-                      ? 'bg-[#1A73E8] text-white'
+                      ? 'bg-brand text-white'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200/70'
                   }`}
                 >
@@ -1201,7 +1256,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 onClick={() => setGamePlayMode('rounds')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
                   gamePlayMode === 'rounds'
-                    ? 'bg-[#172033] text-white'
+                    ? 'bg-ink text-white'
                     : 'bg-white border border-slate-200 text-slate-700'
                 }`}
               >
@@ -1212,7 +1267,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 onClick={() => setGamePlayMode('matching')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
                   gamePlayMode === 'matching'
-                    ? 'bg-[#172033] text-white'
+                    ? 'bg-ink text-white'
                     : 'bg-white border border-slate-200 text-slate-700'
                 }`}
               >
@@ -1249,7 +1304,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     topic: selectedTopic,
                   })
                 }
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#E8F0FE] text-[#1A73E8] text-xs font-semibold cursor-pointer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-brand-soft text-brand text-xs font-semibold cursor-pointer"
               >
                 <Bookmark className="w-3.5 h-3.5" />
                 <span>Save Game</span>
@@ -1260,9 +1315,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           {gamePlayMode === 'rounds' && currentRound ? (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               {/* Left: Question & Options */}
-              <div className="lg:col-span-7 p-5 rounded-2xl bg-[#F8FAFC] border border-slate-200/80 space-y-4">
+              <div className="lg:col-span-7 p-5 rounded-2xl bg-canvas border border-slate-200/80 space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#1A73E8]">
+                  <span className="text-xs font-bold uppercase tracking-wider text-brand">
                     Round {activeRoundIdx + 1} of {gameSpec.rounds.length} • {gameSpec.subject}
                   </span>
                   <div className="flex items-center gap-1.5">
@@ -1277,7 +1332,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         }}
                         className={`w-7 h-7 rounded-lg text-xs font-bold cursor-pointer ${
                           activeRoundIdx === idx
-                            ? 'bg-[#1A73E8] text-white'
+                            ? 'bg-brand text-white'
                             : 'bg-white border border-slate-200 text-slate-600'
                         }`}
                       >
@@ -1287,7 +1342,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   </div>
                 </div>
 
-                <p className="text-sm sm:text-base font-bold text-[#172033] leading-snug">
+                <p className="text-sm sm:text-base font-bold text-ink leading-snug">
                   {currentRound.prompt}
                 </p>
 
@@ -1325,7 +1380,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                               : isPicked
                               ? 'bg-red-50 border-red-300 text-red-800'
                               : 'bg-white border-slate-200 text-slate-500'
-                            : 'bg-white border-slate-200 hover:border-[#4285F4] text-[#172033]'
+                            : 'bg-white border-slate-200 hover:border-brand text-ink'
                         }`}
                       >
                         {opt}
@@ -1337,7 +1392,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 {selectedOptionIdx !== null && (
                   <div className="p-4 rounded-xl bg-blue-50/90 border border-blue-200 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-[#1A73E8]">
+                      <span className="text-xs font-bold text-brand">
                         {selectedOptionIdx === currentRound.correctIndex
                           ? '✓ Correct! +100 XP'
                           : 'Review Step-by-Step Solution:'}
@@ -1350,13 +1405,13 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                             setSelectedOptionIdx(null);
                             setShowRoundHint(false);
                           }}
-                          className="px-3 py-1 rounded-lg bg-[#1A73E8] text-white text-xs font-semibold cursor-pointer"
+                          className="px-3 py-1 rounded-lg bg-brand text-white text-xs font-semibold cursor-pointer"
                         >
                           Next Round →
                         </button>
                       )}
                     </div>
-                    <p className="text-xs text-[#172033] leading-relaxed">
+                    <p className="text-xs text-ink leading-relaxed">
                       {currentRound.stepByStepExplanation}
                     </p>
                   </div>
@@ -1457,7 +1512,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
             /* Matching Grid Mode */
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2.5">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#64748B] block">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted block">
                   1. Select Concept / Theorem
                 </span>
                 {gameSpec.matchingPairs.map((pair) => {
@@ -1473,8 +1528,8 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         isMatched
                           ? 'bg-emerald-50 border-emerald-200 text-emerald-800 opacity-75'
                           : isSelected
-                          ? 'bg-[#E8F0FE] border-[#4285F4] text-[#1A73E8] ring-2 ring-[#4285F4]/20'
-                          : 'bg-[#F8FAFC] border-slate-200 hover:border-slate-300 text-[#172033]'
+                          ? 'bg-brand-soft border-brand text-brand ring-2 ring-brand/20'
+                          : 'bg-canvas border-slate-200 hover:border-slate-300 text-ink'
                       }`}
                     >
                       <span>{pair.term}</span>
@@ -1485,7 +1540,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#64748B] block">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted block">
                   2. Match Verified Formula / Mechanism
                 </span>
                 {[...gameSpec.matchingPairs].reverse().map((pair) => {
@@ -1499,7 +1554,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                       className={`w-full p-3.5 rounded-2xl border text-left text-xs transition-all cursor-pointer ${
                         isMatched
                           ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-semibold opacity-75'
-                          : 'bg-white border-slate-200 hover:border-[#4285F4] text-[#334155]'
+                          : 'bg-white border-slate-200 hover:border-brand text-body'
                       }`}
                     >
                       {pair.match}
@@ -1519,8 +1574,8 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 space-y-5 shadow-2xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold text-[#172033]">{sceneSpec.title}</h2>
-              <p className="text-xs text-[#64748B]">{sceneSpec.summary}</p>
+              <h2 className="text-lg font-bold text-ink">{sceneSpec.title}</h2>
+              <p className="text-xs text-muted">{sceneSpec.summary}</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1544,7 +1599,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
                     sceneCategory === preset.id
-                      ? 'bg-[#1A73E8] text-white'
+                      ? 'bg-brand text-white'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200/70'
                   }`}
                 >
@@ -1627,7 +1682,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 onClick={() => setLabViewMode('3d')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
                   labViewMode === '3d'
-                    ? 'bg-[#172033] text-white'
+                    ? 'bg-ink text-white'
                     : 'bg-white border border-slate-200 text-slate-700'
                 }`}
               >
@@ -1638,7 +1693,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 onClick={() => setLabViewMode('2d')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer ${
                   labViewMode === '2d'
-                    ? 'bg-[#172033] text-white'
+                    ? 'bg-ink text-white'
                     : 'bg-white border border-slate-200 text-slate-700'
                 }`}
               >
@@ -1717,7 +1772,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     }
                   )
                 }
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#E8F0FE] text-[#1A73E8] text-xs font-semibold cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-soft text-brand text-xs font-semibold cursor-pointer"
               >
                 <Bookmark className="w-3.5 h-3.5" />
                 <span>Save Lab</span>
@@ -1877,8 +1932,8 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
             </div>
 
             {/* Right: Real-Time Parameter Controls & Calculated Readouts */}
-            <div className="lg:col-span-4 p-5 rounded-2xl bg-[#F8FAFC] border border-slate-200/80 space-y-4">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#1A73E8]">
+            <div className="lg:col-span-4 p-5 rounded-2xl bg-canvas border border-slate-200/80 space-y-4">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-brand">
                 <Sliders className="w-4 h-4" />
                 <span>Real-Time Parameter Controls</span>
               </div>
@@ -1888,9 +1943,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   const val = sceneParams[ctrl.id] ?? ctrl.defaultValue;
                   return (
                     <label key={ctrl.id} className="block space-y-1">
-                      <div className="flex items-center justify-between text-xs font-semibold text-[#172033]">
+                      <div className="flex items-center justify-between text-xs font-semibold text-ink">
                         <span>{ctrl.label}</span>
-                        <span className="font-mono text-[#1A73E8]">
+                        <span className="font-mono text-brand">
                           {val} {ctrl.unit}
                         </span>
                       </div>
@@ -1906,7 +1961,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                             [ctrl.id]: Number(e.target.value),
                           }))
                         }
-                        className="w-full accent-[#1A73E8]"
+                        className="w-full accent-brand"
                       />
                     </label>
                   );
@@ -1916,21 +1971,21 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               {/* Live Mathematical Readout Card */}
               {sceneCategory === 'physics_projectile_3d' && (
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-1.5 text-xs">
-                  <div className="font-bold text-[#172033]">Live Kinematics Readout</div>
+                  <div className="font-bold text-ink">Live Kinematics Readout</div>
                   <div className="flex justify-between">
-                    <span className="text-[#64748B]">Horizontal Range R:</span>
+                    <span className="text-muted">Horizontal Range R:</span>
                     <span className="font-mono font-bold text-emerald-700">
                       {liveProjectile.rangeMeters} m
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-[#64748B]">Max Height H_max:</span>
-                    <span className="font-mono font-bold text-[#1A73E8]">
+                    <span className="text-muted">Max Height H_max:</span>
+                    <span className="font-mono font-bold text-brand">
                       {liveProjectile.maxHeightMeters} m
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-[#64748B]">Flight Time T:</span>
+                    <span className="text-muted">Flight Time T:</span>
                     <span className="font-mono font-bold text-amber-700">
                       {liveProjectile.flightTimeSeconds} s
                     </span>
@@ -1940,20 +1995,20 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
 
               {sceneCategory === 'math_surface_3d' && (
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-1.5 text-xs">
-                  <div className="font-bold text-[#172033]">Live Quadratic & Surface Readout</div>
+                  <div className="font-bold text-ink">Live Quadratic & Surface Readout</div>
                   <div className="flex justify-between">
-                    <span className="text-[#64748B]">2D Vertex (h, k):</span>
-                    <span className="font-mono font-bold text-[#1A73E8]">
+                    <span className="text-muted">2D Vertex (h, k):</span>
+                    <span className="font-mono font-bold text-brand">
                       ({liveQuadratic.vertexX}, {liveQuadratic.vertexY})
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-[#64748B]">Discriminant Δ:</span>
+                    <span className="text-muted">Discriminant Δ:</span>
                     <span className="font-mono font-bold text-emerald-700">
                       {liveQuadratic.discriminant}
                     </span>
                   </div>
-                  <div className="text-[11px] text-[#64748B] pt-1">
+                  <div className="text-[11px] text-muted pt-1">
                     {liveQuadratic.rootsDescription}
                   </div>
                 </div>
@@ -1961,17 +2016,17 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
 
               {sceneCategory === 'chemistry_vsepr_3d' && (
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-1.5 text-xs">
-                  <div className="font-bold text-[#172033]">
+                  <div className="font-bold text-ink">
                     {activeVseprMolecule.name} ({activeVseprMolecule.formula})
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-[#64748B]">VSEPR Geometry:</span>
-                    <span className="font-semibold text-[#1A73E8]">
+                    <span className="text-muted">VSEPR Geometry:</span>
+                    <span className="font-semibold text-brand">
                       {activeVseprMolecule.geometryName}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-[#64748B]">Verified Bond Angle:</span>
+                    <span className="text-muted">Verified Bond Angle:</span>
                     <span className="font-mono font-bold text-emerald-700">
                       {activeVseprMolecule.bondAngleDeg}°
                     </span>
@@ -1980,7 +2035,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               )}
 
               <div className="space-y-1.5 pt-2 border-t border-slate-200">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B] block">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted block">
                   Key Equations & Study Notes
                 </span>
                 {sceneSpec.learningNotes.map((note, i) => (
@@ -2001,10 +2056,10 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 space-y-6 shadow-2xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold text-[#172033]">
+              <h2 className="text-lg font-bold text-ink">
                 No-Code Student Mini App Builder
               </h2>
-              <p className="text-xs text-[#64748B]">
+              <p className="text-xs text-muted">
                 Describe a calculator, solver, quiz app, or revision planner in plain English, or pick a template below, customize it, and save it to your library.
               </p>
             </div>
@@ -2013,9 +2068,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setMiniAppEditMode((e) => !e)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-[#172033] cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-ink cursor-pointer"
               >
-                <Edit3 className="w-3.5 h-3.5 text-[#1A73E8]" />
+                <Edit3 className="w-3.5 h-3.5 text-brand" />
                 <span>{miniAppEditMode ? 'Done Editing' : 'Customize App'}</span>
               </button>
               <button
@@ -2029,7 +2084,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   setCurrentMiniApp(duplicated);
                   handleSaveCreativeAsset('mini_app', duplicated.title, duplicated);
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-[#172033] cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-ink cursor-pointer"
               >
                 <Copy className="w-3.5 h-3.5" />
                 <span>Duplicate</span>
@@ -2039,7 +2094,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 onClick={() =>
                   handleSaveCreativeAsset('mini_app', currentMiniApp.title, currentMiniApp)
                 }
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#1A73E8] text-white text-xs font-semibold cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer"
               >
                 <Bookmark className="w-3.5 h-3.5" />
                 <span>Save Mini App</span>
@@ -2048,26 +2103,26 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           </div>
 
           {/* Prompt Bar + 5 Instant Templates */}
-          <div className="p-4 rounded-2xl bg-[#F8FAFC] border border-slate-200/80 space-y-3">
+          <div className="p-4 rounded-2xl bg-canvas border border-slate-200/80 space-y-3">
             <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 value={miniAppPrompt}
                 onChange={(e) => setMiniAppPrompt(e.target.value)}
                 placeholder="e.g., Build a projectile range calculator, quadratic root solver, or Bayes theorem calculator..."
-                className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-[#172033]"
+                className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-ink"
               />
               <button
                 type="button"
                 onClick={() => handleGenerateMiniApp(undefined, miniAppPrompt)}
-                className="px-4 py-2 rounded-xl bg-[#172033] hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer shrink-0"
+                className="px-4 py-2 rounded-xl bg-ink hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer shrink-0"
               >
                 Generate Mini App
               </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B] mr-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted mr-1">
                 Templates:
               </span>
               {(
@@ -2088,8 +2143,8 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   }}
                   className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
                     currentMiniApp.templateId === tpl.id
-                      ? 'bg-[#E8F0FE] text-[#1A73E8] border border-[#4285F4]/40'
-                      : 'bg-white border border-slate-200 text-slate-600 hover:text-[#172033]'
+                      ? 'bg-brand-soft text-brand border border-brand/40'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:text-ink'
                   }`}
                 >
                   {tpl.label}
@@ -2132,16 +2187,16 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           )}
 
           {/* Live Functional Mini App Preview */}
-          <div className="p-6 rounded-3xl bg-[#F8FAFC] border border-slate-200/90 space-y-5">
+          <div className="p-6 rounded-3xl bg-canvas border border-slate-200/90 space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#E8F0FE] text-[#1A73E8]">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-brand-soft text-brand">
                   {currentMiniApp.subject} Mini App • Live Preview
                 </span>
-                <h3 className="text-base font-bold text-[#172033] mt-1">
+                <h3 className="text-base font-bold text-ink mt-1">
                   {currentMiniApp.title}
                 </h3>
-                <p className="text-xs text-[#64748B]">{currentMiniApp.subtitle}</p>
+                <p className="text-xs text-muted">{currentMiniApp.subtitle}</p>
               </div>
             </div>
 
@@ -2152,9 +2207,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     const val = miniAppInputs[inp.id] ?? inp.defaultValue;
                     return (
                       <label key={inp.id} className="block space-y-1">
-                        <div className="flex justify-between text-xs font-semibold text-[#172033]">
+                        <div className="flex justify-between text-xs font-semibold text-ink">
                           <span>{inp.label}</span>
-                          <span className="font-mono text-[#1A73E8]">
+                          <span className="font-mono text-brand">
                             {val} {inp.unit}
                           </span>
                         </div>
@@ -2170,7 +2225,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                               [inp.id]: Number(e.target.value),
                             }))
                           }
-                          className="w-full accent-[#1A73E8]"
+                          className="w-full accent-brand"
                         />
                       </label>
                     );
@@ -2186,13 +2241,13 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-between gap-3"
                       >
                         <div>
-                          <div className="text-xs font-bold text-[#172033]">{out.label}</div>
-                          <div className="text-[11px] font-mono text-[#64748B]">
+                          <div className="text-xs font-bold text-ink">{out.label}</div>
+                          <div className="text-[11px] font-mono text-muted">
                             Formula: {out.expression}
                           </div>
-                          <p className="text-[11px] text-[#64748B] mt-0.5">{out.description}</p>
+                          <p className="text-[11px] text-muted mt-0.5">{out.description}</p>
                         </div>
-                        <div className="text-lg font-extrabold text-[#1A73E8] font-mono shrink-0">
+                        <div className="text-lg font-extrabold text-brand font-mono shrink-0">
                           {computed ? computed.formatted : 'N/A'}
                         </div>
                       </div>
@@ -2211,7 +2266,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                       key={q.id}
                       className="p-4 rounded-2xl bg-white border border-slate-200 space-y-2.5"
                     >
-                      <p className="text-xs font-bold text-[#172033]">
+                      <p className="text-xs font-bold text-ink">
                         Q{qIdx + 1}. {q.question}
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -2224,7 +2279,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                             }
                             className={`p-2.5 rounded-xl border text-left text-xs font-semibold cursor-pointer ${
                               picked === undefined
-                                ? 'bg-slate-50 border-slate-200 hover:border-[#4285F4]'
+                                ? 'bg-slate-50 border-slate-200 hover:border-brand'
                                 : oIdx === q.correctIndex
                                 ? 'bg-emerald-50 border-emerald-400 text-emerald-900'
                                 : picked === oIdx
@@ -2237,7 +2292,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         ))}
                       </div>
                       {picked !== undefined && (
-                        <p className="text-xs text-[#1A73E8] font-medium">{q.explanation}</p>
+                        <p className="text-xs text-brand font-medium">{q.explanation}</p>
                       )}
                     </div>
                   );
@@ -2264,23 +2319,23 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                             ),
                           })
                         }
-                        className="w-4 h-4 accent-[#34A853]"
+                        className="w-4 h-4 accent-success"
                       />
                       <span
                         className={`text-xs font-semibold ${
-                          item.completed ? 'line-through text-slate-400' : 'text-[#172033]'
+                          item.completed ? 'line-through text-slate-400' : 'text-ink'
                         }`}
                       >
                         {item.task}
                       </span>
                     </div>
-                    <span className="text-xs font-mono text-[#64748B]">{item.minutes} min</span>
+                    <span className="text-xs font-mono text-muted">{item.minutes} min</span>
                   </label>
                 ))}
               </div>
             )}
 
-            <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs text-[#172033]">
+            <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs text-ink">
               <strong>Key Study Takeaway:</strong> {currentMiniApp.studyTakeaway}
             </div>
           </div>
@@ -2288,7 +2343,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           {/* Saved Mini Apps Quick Reopen Bar */}
           {savedMiniApps.length > 0 && (
             <div className="space-y-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#64748B] block">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted block">
                 Your Saved Mini Apps ({savedMiniApps.length})
               </span>
               <div className="flex flex-wrap gap-2">
@@ -2301,7 +2356,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         setCurrentMiniApp(asset.payload as MiniAppSpec);
                       }
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-[#E8F0FE] text-xs font-semibold text-[#172033] cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-brand-soft text-xs font-semibold text-ink cursor-pointer"
                   >
                     Open: {asset.title}
                   </button>
@@ -2319,10 +2374,10 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 space-y-5 shadow-2xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold text-[#172033]">
+              <h2 className="text-lg font-bold text-ink">
                 Visualize Concept: Scientific Diagrams & Renderings
               </h2>
-              <p className="text-xs text-[#64748B]">
+              <p className="text-xs text-muted">
                 Generates grounded educational diagrams for your chapter concepts.
               </p>
             </div>
@@ -2331,14 +2386,14 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 type="text"
                 value={visualConceptInput}
                 onChange={(e) => setVisualConceptInput(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-[#172033] min-w-[200px]"
+                className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-ink min-w-[200px]"
                 placeholder="Enter concept to visualize..."
               />
               <select
                 aria-label="Visual style"
                 value={visualStyle}
                 onChange={(e) => setVisualStyle(e.target.value as any)}
-                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-[#172033]"
+                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-ink"
               >
                 <option value="educational_diagram">Scientific Diagram</option>
                 <option value="flowchart">Process Flowchart</option>
@@ -2349,7 +2404,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 disabled={isVisualizing}
                 onClick={() => void handleRunVisualize()}
                 data-testid="generate-visual-btn"
-                className="px-4 py-2 rounded-xl bg-[#1A73E8] hover:bg-[#1557B0] text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                className="px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
               >
                 {isVisualizing ? 'Generating...' : 'Generate Visual'}
               </button>
@@ -2456,7 +2511,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 {visualResult.diagramSteps.map((step) => (
                   <div
                     key={step.step}
-                    className="p-5 rounded-2xl border border-slate-200 bg-[#F8FAFC] space-y-2 relative"
+                    className="p-5 rounded-2xl border border-slate-200 bg-canvas space-y-2 relative"
                   >
                     <div
                       className="w-7 h-7 rounded-lg text-white text-xs font-bold flex items-center justify-center"
@@ -2464,8 +2519,8 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     >
                       {step.step}
                     </div>
-                    <h3 className="text-sm font-bold text-[#172033]">{step.title}</h3>
-                    <p className="text-xs text-[#64748B] leading-relaxed">{step.detail}</p>
+                    <h3 className="text-sm font-bold text-ink">{step.title}</h3>
+                    <p className="text-xs text-muted leading-relaxed">{step.detail}</p>
                   </div>
                 ))}
               </div>
@@ -2480,7 +2535,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                       visualResult
                     )
                   }
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#E8F0FE] text-[#1A73E8] text-xs font-semibold cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-soft text-brand text-xs font-semibold cursor-pointer"
                 >
                   <Bookmark className="w-3.5 h-3.5" />
                   <span>Save Visual to Studio Library</span>
@@ -2488,9 +2543,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               </div>
             </div>
           ) : (
-            <div className="p-8 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-[#64748B]">
+            <div className="p-8 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-muted">
               Click &quot;Generate Visual&quot; above to build a grounded diagram for{' '}
-              <span className="font-semibold text-[#172033]">{visualConceptInput}</span>.
+              <span className="font-semibold text-ink">{visualConceptInput}</span>.
             </div>
           )}
         </div>
@@ -2503,10 +2558,10 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 space-y-5 shadow-2xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold text-[#172033]">
+              <h2 className="text-lg font-bold text-ink">
                 AI Video Lessons & Animated Concept Explanations
               </h2>
-              <p className="text-xs text-[#64748B]">
+              <p className="text-xs text-muted">
                 Supports Text-to-Video & Image-to-Video via Omni 1.1 Flash, plus an interactive HTML5/SVG Animated Explanation player.
               </p>
             </div>
@@ -2515,19 +2570,19 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 type="text"
                 value={videoTopicInput}
                 onChange={(e) => setVideoTopicInput(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-[#172033] min-w-[200px]"
+                className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-ink min-w-[200px]"
               />
               <select
                 aria-label="Video aspect ratio"
                 value={videoAspectRatio}
                 onChange={(e) => setVideoAspectRatio(e.target.value as '16:9' | '9:16')}
-                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-[#172033]"
+                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-ink"
               >
                 <option value="16:9">16:9 Landscape</option>
                 <option value="9:16">9:16 Vertical</option>
               </select>
-              <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-[#172033] cursor-pointer">
-                <Upload className="w-3.5 h-3.5 text-[#1A73E8]" />
+              <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-ink cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-brand" />
                 <span>{videoSourceImage ? 'Image Attached ✓' : 'Animate Image'}</span>
                 <input
                   type="file"
@@ -2541,7 +2596,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 disabled={isGeneratingVideo}
                 onClick={() => void handleRunVideoLesson()}
                 data-testid="generate-video-lesson-btn"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1A73E8] hover:bg-[#1557B0] text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
               >
                 <Video className="w-3.5 h-3.5" />
                 <span>{isGeneratingVideo ? 'Building Lesson...' : 'Generate Video Lesson'}</span>
@@ -2572,7 +2627,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   className="w-full max-h-96 rounded-2xl bg-slate-900"
                 />
               ) : (
-                <div className="p-6 rounded-3xl bg-[#172033] text-white space-y-4">
+                <div className="p-6 rounded-3xl bg-ink text-white space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-sky-400">
                       Animated Explanation • Scene{' '}
@@ -2596,7 +2651,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                             window.speechSynthesis.cancel();
                           }
                         }}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#4285F4] text-white text-xs font-semibold cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer"
                       >
                         {isPlayingStoryboard ? (
                           <>
@@ -2675,7 +2730,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                       <div className="text-base font-bold text-white">
                         {videoResult.scenes[activeSceneIdx]?.heading}
                       </div>
-                      <span className="px-3 py-1 rounded-lg bg-[#4285F4]/20 border border-[#4285F4]/40 font-mono text-xs text-blue-200">
+                      <span className="px-3 py-1 rounded-lg bg-brand/20 border border-brand/40 font-mono text-xs text-blue-200">
                         {videoResult.scenes[activeSceneIdx]?.keyFormula}
                       </span>
                     </div>
@@ -2692,7 +2747,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         onClick={() => setActiveSceneIdx(i)}
                         className={`p-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
                           activeSceneIdx === i
-                            ? 'bg-[#4285F4] text-white font-semibold'
+                            ? 'bg-brand text-white font-semibold'
                             : 'bg-white/5 hover:bg-white/10 text-slate-300'
                         }`}
                       >
@@ -2704,9 +2759,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               )}
             </div>
           ) : (
-            <div className="p-8 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-[#64748B]">
+            <div className="p-8 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-muted">
               Click &quot;Generate Video Lesson&quot; to synthesize a grounded script and animated explanation for{' '}
-              <span className="font-semibold text-[#172033]">{videoTopicInput}</span>.
+              <span className="font-semibold text-ink">{videoTopicInput}</span>.
             </div>
           )}
         </div>
@@ -2717,11 +2772,11 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
        * ===================================================================== */}
       {subTab === 'saved' && (
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 space-y-4 shadow-2xs">
-          <h2 className="text-lg font-bold text-[#172033]">
+          <h2 className="text-lg font-bold text-ink">
             Saved Creative Studio Assets ({savedAssets.length})
           </h2>
           {savedAssets.length === 0 ? (
-            <p className="text-xs text-[#64748B]">
+            <p className="text-xs text-muted">
               No saved games, 3D scenes, mini-apps, or diagrams yet. Save any creation from the studio tabs above!
             </p>
           ) : (
@@ -2732,13 +2787,13 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-3"
                 >
                   <div>
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-[#E8F0FE] text-[#1A73E8]">
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-brand-soft text-brand">
                       {asset.type.replace('_', ' ')}
                     </span>
-                    <h3 className="text-sm font-bold text-[#172033] mt-1.5">
+                    <h3 className="text-sm font-bold text-ink mt-1.5">
                       {asset.title}
                     </h3>
-                    <p className="text-xs text-[#64748B]">
+                    <p className="text-xs text-muted">
                       Topic: {asset.topic} • Difficulty: {asset.difficulty}
                     </p>
                   </div>
@@ -2750,7 +2805,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                           setCurrentMiniApp(asset.payload as MiniAppSpec);
                           setSubTab('miniapp');
                         }}
-                        className="text-xs font-semibold text-[#1A73E8] hover:underline cursor-pointer"
+                        className="text-xs font-semibold text-brand hover:underline cursor-pointer"
                       >
                         Open Mini App →
                       </button>

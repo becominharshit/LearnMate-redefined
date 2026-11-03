@@ -296,6 +296,22 @@ export const aiStudyClient = {
     return postJson<VideoLessonResponse>('/api/create/video-lesson', params);
   },
 
+  /** Status of a background video job (Higgsfield generations take minutes). */
+  async getVideoJob(jobId: string): Promise<{
+    jobId: string;
+    status: 'queued' | 'processing' | 'completed' | 'failed';
+    videoUrl?: string;
+    userFacingNotice?: string;
+    errorReason?: string;
+    verificationStatus?: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' | 'WORKING_WITH_NON_AI_FALLBACK';
+  }> {
+    const resp = await fetch(`/api/create/video-jobs/${encodeURIComponent(jobId)}`);
+    if (!resp.ok) {
+      throw new Error(resp.status === 404 ? 'Video job not found.' : 'Could not check the video status.');
+    }
+    return resp.json();
+  },
+
   async prepareLofiMusic(params: {
     presetId: string;
     prompt: string;
