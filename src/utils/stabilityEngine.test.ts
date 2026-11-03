@@ -44,6 +44,11 @@ test('classifyGeminiError distinguishes transient 429, daily quota exhaustion, a
   assert.equal(authErr.retryable, false);
   assert.equal(authErr.userMessage, 'Generation failed. Your existing notes are safe.');
 
+  const missingKey = classifyGeminiError(new Error('NO_API_KEY'));
+  assert.equal(missingKey.category, 'auth_config_error');
+  assert.equal(missingKey.retryable, false);
+  assert.match(missingKey.userMessage, /not set up on this server/);
+
   const prepayDepleted = classifyGeminiError(
     Object.assign(
       new Error(

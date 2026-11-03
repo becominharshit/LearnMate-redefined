@@ -2,6 +2,8 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
   inMemoryPersistence,
   browserPopupRedirectResolver,
   GoogleAuthProvider,
@@ -20,9 +22,9 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 
 /**
- * Purges any stale or expired persisted Firebase Auth tokens from localStorage,
- * sessionStorage, and IndexedDB so that expired tokens from prior sessions never
- * trigger failing securetoken.googleapis.com refresh calls on startup.
+ * Removes leftover Firebase Auth keys from localStorage and sessionStorage after sign-out.
+ * The IndexedDB session store is cleared by Firebase's own signOut() and must not be
+ * deleted while the Auth SDK still holds it open.
  */
 function clearStaleFirebaseAuthStorage(): void {
   if (typeof window === 'undefined') return;
@@ -40,23 +42,20 @@ function clearStaleFirebaseAuthStorage(): void {
         storage.removeItem(key);
       }
     }
-    if (window.indexedDB && typeof window.indexedDB.deleteDatabase === 'function') {
-      window.indexedDB.deleteDatabase('firebaseLocalStorageDb');
-    }
   } catch {
     // ignore in restricted storage environments
   }
 }
-
-clearStaleFirebaseAuthStorage();
 
 const app = initializeApp(firebaseConfig);
 
 function createSafeAuth(): Auth {
   if (typeof window !== 'undefined') {
     try {
+      // Keep students signed in across reloads. Firebase uses the first persistence that is
+      // available and falls back to memory in restricted environments (e.g. sandboxed iframes).
       return initializeAuth(app, {
-        persistence: inMemoryPersistence,
+        persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
         popupRedirectResolver: browserPopupRedirectResolver,
       });
     } catch {
@@ -181,8 +180,8 @@ export async function signInWithGoogle(): Promise<User | null> {
 }
 
 export async function signOutUser(): Promise<void> {
-  clearStaleFirebaseAuthStorage();
   await firebaseSignOut(auth);
+  clearStaleFirebaseAuthStorage();
 }
 
 export { onAuthStateChanged, type User };

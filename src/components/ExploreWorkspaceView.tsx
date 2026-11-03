@@ -185,12 +185,35 @@ export const ExploreWorkspaceView: React.FC<ExploreWorkspaceViewProps> = ({
   // LearnMate Daily News state
   const [newsArticles, setNewsArticles] = useState<DailyNewsArticle[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
+  const [newsMessage, setNewsMessage] = useState<string | null>(null);
   const [selectedNewsAnswers, setSelectedNewsAnswers] = useState<Record<string, number>>({});
 
   // Educational Maps state
   const [cityInput, setCityInput] = useState('Bengaluru');
   const [places, setPlaces] = useState<EducationalPlaceItem[]>([]);
   const [placesLoading, setPlacesLoading] = useState(false);
+  const [placesMessage, setPlacesMessage] = useState<string | null>(null);
+  const [mapsSearchUri, setMapsSearchUri] = useState<string | null>(null);
+
+  const loadEducationalPlaces = () => {
+    setPlacesLoading(true);
+    void aiStudyClient
+      .fetchEducationalPlaces({
+        city: cityInput,
+        studyTopic: activeDoc?.title || 'Science & Mathematics',
+      })
+      .then((res) => {
+        setPlaces(res.places || []);
+        setPlacesMessage(res.message || null);
+        setMapsSearchUri(res.mapsSearchUri || null);
+      })
+      .catch((err) => {
+        setPlaces([]);
+        setPlacesMessage(err instanceof Error ? err.message : 'Could not load places.');
+        setMapsSearchUri(null);
+      })
+      .finally(() => setPlacesLoading(false));
+  };
 
   useEffect(() => {
     if (!activeDoc) return;
@@ -212,20 +235,17 @@ export const ExploreWorkspaceView: React.FC<ExploreWorkspaceViewProps> = ({
       setNewsLoading(true);
       void aiStudyClient
         .fetchDailyNews('All')
-        .then((res) => setNewsArticles(res.articles || []))
-        .catch(() => {})
+        .then((res) => {
+          setNewsArticles(res.articles || []);
+          setNewsMessage(res.message || null);
+        })
+        .catch((err) => {
+          setNewsMessage(err instanceof Error ? err.message : "Today's digest is unavailable.");
+        })
         .finally(() => setNewsLoading(false));
     }
     if (activeExperience === 'maps' && places.length === 0) {
-      setPlacesLoading(true);
-      void aiStudyClient
-        .fetchEducationalPlaces({
-          city: cityInput,
-          studyTopic: activeDoc?.title || 'Probability & Mathematics',
-        })
-        .then((res) => setPlaces(res.places || []))
-        .catch(() => {})
-        .finally(() => setPlacesLoading(false));
+      loadEducationalPlaces();
     }
   }, [activeExperience]);
 
@@ -798,7 +818,11 @@ export const ExploreWorkspaceView: React.FC<ExploreWorkspaceViewProps> = ({
             {newsLoading ? (
               <div className="py-12 flex items-center justify-center gap-2 text-sm text-[#606B7C]">
                 <Loader2 className="w-4 h-4 animate-spin text-[#C84428]" />
-                <span>Loading verified current affairs digest...</span>
+                <span>Loading today&apos;s digest...</span>
+              </div>
+            ) : newsArticles.length === 0 ? (
+              <div className="py-12 text-center text-sm text-[#606B7C]">
+                {newsMessage || "Today's digest is unavailable right now. Please try again later."}
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -938,16 +962,7 @@ export const ExploreWorkspaceView: React.FC<ExploreWorkspaceViewProps> = ({
               />
               <button
                 type="button"
-                onClick={() => {
-                  setPlacesLoading(true);
-                  void aiStudyClient
-                    .fetchEducationalPlaces({
-                      city: cityInput,
-                      studyTopic: activeDoc?.title || 'Probability & Mathematics',
-                    })
-                    .then((res) => setPlaces(res.places || []))
-                    .finally(() => setPlacesLoading(false));
-                }}
+                onClick={loadEducationalPlaces}
                 className="px-3.5 py-1.5 rounded-lg lm-btn-accent text-xs cursor-pointer"
               >
                 Find Places
@@ -956,8 +971,22 @@ export const ExploreWorkspaceView: React.FC<ExploreWorkspaceViewProps> = ({
           </div>
 
           {placesLoading ? (
-            <div className="py-10 text-center text-xs text-[#606B7C]">
-              Searching verified educational institutions...
+            <div className="py-10 text-center text-xs text-[#606B7C]">Searching...</div>
+          ) : places.length === 0 ? (
+            <div className="py-10 text-center space-y-3">
+              <p className="text-sm text-[#606B7C]">
+                {placesMessage || 'No places found.'}
+              </p>
+              {mapsSearchUri && (
+                <a
+                  href={mapsSearchUri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex px-3.5 py-1.5 rounded-lg lm-btn-accent text-xs"
+                >
+                  Search Google Maps for {cityInput.trim() || 'your city'}
+                </a>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

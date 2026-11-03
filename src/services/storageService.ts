@@ -136,6 +136,8 @@ const KEYS = {
   PDF_ANNOTATIONS_PREFIX: 'learnmate_pdf_annotations_v1_',
   STUDENT_PROFILE: 'learnmate_student_profile_v1',
   SEEDED: 'learnmate_seeded_materials_v1',
+  // UID of the signed-in account that owns the private data currently in localStorage.
+  OWNER_UID: 'learnmate_owner_uid_v1',
 };
 
 const DEFAULT_TIMER_STATE: StudyTimerState = {
@@ -536,6 +538,24 @@ function safeWriteJson<T>(key: string, value: T): void {
   }
 }
 
+function readOwnerUid(): string | null {
+  try {
+    return localStorage.getItem(KEYS.OWNER_UID);
+  } catch {
+    return null;
+  }
+}
+
+function writeOwnerUid(uid: string): void {
+  try {
+    localStorage.setItem(KEYS.OWNER_UID, uid);
+  } catch {
+    // ignore in restricted storage
+  }
+}
+
+const STARTER_DOCUMENT_IDS = new Set(STARTER_DOCUMENTS.map((d) => d.id));
+
 export class HybridCloudStudyRepository implements IStudyStorageRepository {
   private currentUser: User | null = null;
   private previousUid: string | null = null;
@@ -582,29 +602,19 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
    */
   private clearPrivateUserCaches(): void {
     try {
+      // Device preferences survive; everything else under the learnmate_ prefix is private
+      // (documents, attempts, chats, profile, annotations, notebook, saved resources, caches).
+      const preservedKeys = new Set<string>([
+        KEYS.THEME,
+        KEYS.ACCESSIBILITY,
+        KEYS.SOURCE_CONTROL_MODE,
+      ]);
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (!key) continue;
-        if (key === KEYS.THEME) continue;
-        if (
-          key === KEYS.DOCUMENTS ||
-          key === KEYS.ACTIVE_DOC_ID ||
-          key === KEYS.ATTEMPTS ||
-          key === KEYS.FOCUS_SESSIONS ||
-          key === KEYS.TIMER_STATE ||
-          key === KEYS.NOTIFICATIONS ||
-          key === KEYS.NOTEBOOK ||
-          key === KEYS.CREATIVE_ASSETS ||
-          key === KEYS.STUDY_PLANNER ||
-          key === KEYS.SEEDED ||
-          key.startsWith(KEYS.TUTOR_PREFIX) ||
-          key.startsWith(KEYS.QUIZ_CACHE_PREFIX) ||
-          key.startsWith(KEYS.MISTAKES_PREFIX) ||
-          key.startsWith(KEYS.REVISION_PREFIX) ||
-          key.startsWith(KEYS.QUICK_REVISE_PREFIX) ||
-          key.startsWith(KEYS.YT_REC_PREFIX)
-        ) {
+        if (preservedKeys.has(key)) continue;
+        if (key.startsWith('learnmate_')) {
           keysToRemove.push(key);
         }
       }
@@ -674,6 +684,8 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
 
   private async persistDocumentToCloud(studyDoc: StudyDocument): Promise<void> {
     if (!this.currentUser) return;
+    // Built-in sample documents are seeded locally on every device; they are not user data.
+    if (STARTER_DOCUMENT_IDS.has(studyDoc.id)) return;
     const uid = this.currentUser.uid;
     const docPath = `users/${uid}/documents/${studyDoc.id}`;
     try {
@@ -730,8 +742,13 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   async syncWithCloudUser(user: User | null): Promise<void> {
     this.unsubscribeCloudListeners();
 
+    const storedOwnerUid = readOwnerUid();
+
     if (!user) {
-      const wasSignedIn = this.previousUid !== null;
+      // Local data that belongs to an account must not stay visible to whoever uses the
+      // browser next (shared family laptops, coaching-lab PCs). The owner UID survives
+      // page reloads, unlike previousUid.
+      const wasSignedIn = this.previousUid !== null || storedOwnerUid !== null;
       this.currentUser = null;
       this.previousUid = null;
       if (wasSignedIn) {
@@ -743,13 +760,17 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
       return;
     }
 
-    // If switching directly from User A to User B, clear User A's private local cache first
-    if (this.previousUid !== null && this.previousUid !== user.uid) {
+    // Never merge (and upload) another account's local data into this account.
+    const belongsToAnotherAccount =
+      (this.previousUid !== null && this.previousUid !== user.uid) ||
+      (storedOwnerUid !== null && storedOwnerUid !== user.uid);
+    if (belongsToAnotherAccount) {
       this.clearPrivateUserCaches();
     }
 
     this.currentUser = user;
     this.previousUid = user.uid;
+    writeOwnerUid(user.uid);
 
     const uid = user.uid;
     try {
@@ -1385,10 +1406,12 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   }
 
   getStudentProfile(): StudentAcademicProfile {
-    return safeReadJson<StudentAcademicProfile>(
+    // Merge with defaults so profiles saved by an older schema never miss newer fields.
+    const stored = safeReadJson<Partial<StudentAcademicProfile> | null>(
       KEYS.STUDENT_PROFILE,
-      DEFAULT_STUDENT_PROFILE
+      null
     );
+    return { ...DEFAULT_STUDENT_PROFILE, ...(stored || {}) };
   }
 
   saveStudentProfile(profile: StudentAcademicProfile): void {

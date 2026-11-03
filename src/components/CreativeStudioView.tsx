@@ -84,35 +84,23 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
   // Image 6 Scan Notes state
-  const [scannedDocTitle, setScannedDocTitle] = useState('Probability Notes: Lecture 3');
+  const [scannedDocTitle, setScannedDocTitle] = useState('');
   const [scannedUploadedPreview, setScannedUploadedPreview] = useState<string | null>(null);
   const [isScanningOcr, setIsScanningOcr] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scannedKeyConcepts, setScannedKeyConcepts] = useState<string[]>([]);
+  // Starts empty: only text actually extracted from the student's image is ever shown or saved.
   const [cleanedNotesSections, setCleanedNotesSections] = useState<
     Array<{ heading: string; formula?: string; body: string; example?: string }>
-  >([
-    {
-      heading: '1. Conditional Probability',
-      formula: 'P(A | B) = P(A ∩ B) / P(B),   P(B) > 0',
-      body: 'Probability of A occurring given that B has already occurred.',
-      example:
-        'Example: Rolling a fair die\nLet A = {roll is 2}, B = {roll is even} = {2, 4, 6}\nThen P(A | B) = 1/3',
-    },
-    {
-      heading: '2. Multiplication Rule',
-      formula: 'P(A ∩ B) = P(A | B) P(B)',
-      body: 'Follows directly from the definition of conditional probability.',
-    },
-    {
-      heading: '3. Independent Events',
-      formula: 'P(A | B) = P(A)   or   P(A ∩ B) = P(A) P(B)',
-      body: 'Two events A and B are independent if the occurrence of one does not affect the probability of the other.',
-    },
-  ]);
+  >([]);
 
   const handleScanUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsScanningOcr(true);
+    setScanError(null);
+    setCleanedNotesSections([]);
+    setScannedKeyConcepts([]);
     setScannedDocTitle(file.name.replace(/\.[^.]+$/, ''));
     const reader = new FileReader();
     reader.onload = async () => {
@@ -132,18 +120,30 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 example: ocrRes.summary ? `Summary: ${ocrRes.summary}` : undefined,
               },
             ]);
+            setScannedKeyConcepts(ocrRes.keyConcepts || []);
+          } else {
+            setScanError('No readable text was found in this image.');
           }
         }
-      } catch {
-        // Keep clean structured notes if offline
+      } catch (err) {
+        setScanError(err instanceof Error ? err.message : 'Could not scan these notes.');
       } finally {
         setIsScanningOcr(false);
       }
+    };
+    reader.onerror = () => {
+      setIsScanningOcr(false);
+      setScanError('Could not read this image file.');
     };
     reader.readAsDataURL(file);
   };
 
   const handleSaveScannedToNotebook = () => {
+    if (cleanedNotesSections.length === 0) {
+      setSaveToast('Scan a photo of your notes first.');
+      setTimeout(() => setSaveToast(null), 2200);
+      return;
+    }
     const nowIso = new Date().toISOString();
     const combinedText = cleanedNotesSections
       .map(
@@ -161,7 +161,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
       handwrittenContent: combinedText,
       uncertainSegments: [],
       summary: 'Cleaned digital study notes from handwritten scan.',
-      keyConcepts: ['Conditional Probability', 'Multiplication Rule', 'Independent Events'],
+      keyConcepts: scannedKeyConcepts,
       createdAt: nowIso,
       updatedAt: nowIso,
       linkedDocumentId: activeDocument.id,
@@ -1010,54 +1010,14 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   className="max-h-[420px] w-auto rounded-lg shadow-sm object-contain"
                 />
               ) : (
-                <div
-                  className="w-full max-w-[360px] rounded-lg bg-[#FBF7EE] border border-[#DFD5C3] p-5 shadow-sm space-y-3 text-[#2B303A]"
-                  style={{
-                    backgroundImage:
-                      'repeating-linear-gradient(to bottom, transparent 0px, transparent 25px, rgba(180, 168, 148, 0.28) 26px)',
-                  }}
-                >
-                  <div className="lm-sticky-font text-xl font-bold underline decoration-[#2B303A]/50">
-                    Probability Notes - Lecture 3
-                  </div>
-
-                  <div className="lm-sticky-font text-[15px] leading-snug space-y-1">
-                    <div className="font-bold">1) Conditional Probability</div>
-                    <div className="pl-3 font-semibold">
-                      P(A | B) = P(A ∩ B) / P(B), &nbsp; P(B) &gt; 0
-                    </div>
-                    <div className="text-xs text-[#4B5563]">
-                      → Probability of A given B has occurred.
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-[#C7BCA8] bg-[#F6EFE2]/80 p-2.5 lm-sticky-font text-[14px] leading-snug space-y-0.5">
-                    <div className="font-bold">Ex: Rolling a fair die</div>
-                    <div>A = &#123;roll is 2&#125;</div>
-                    <div>B = &#123;roll is even&#125; = &#123;2, 4, 6&#125;</div>
-                    <div className="font-bold">P(A | B) = 1 / 3</div>
-                  </div>
-
-                  <div className="lm-sticky-font text-[15px] leading-snug space-y-1 pt-1">
-                    <div className="font-bold">2) Multiplication Rule</div>
-                    <div className="pl-3 font-semibold">P(A ∩ B) = P(A | B) · P(B)</div>
-                  </div>
-
-                  <div className="lm-sticky-font text-[15px] leading-snug space-y-1 pt-1">
-                    <div className="font-bold">3) Independent Events</div>
-                    <div className="pl-3">
-                      P(A | B) = P(A) &nbsp;or&nbsp; P(A ∩ B) = P(A)P(B)
-                    </div>
-                    <div className="text-xs text-[#4B5563]">
-                      • Occurrence of one does not affect the other.
-                    </div>
-                  </div>
+                <div className="py-16 text-center text-sm text-[#606B7C] max-w-[300px]">
+                  Upload a clear photo of your handwritten notes to extract them as editable text.
                 </div>
               )}
             </div>
 
             <div className="flex items-center justify-between text-xs text-[#606B7C] pt-1">
-              <span>Page 1 of 1 &nbsp;·&nbsp; Scanned today, 3:15 PM</span>
+              <span>{scannedUploadedPreview ? 'Uploaded image' : 'No image uploaded yet'}</span>
               {isScanningOcr && (
                 <span className="text-[#C84428] font-medium">Running Gemini Vision OCR...</span>
               )}
@@ -1072,10 +1032,12 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   <h2 className="text-sm font-semibold text-[#121827]">
                     2. Cleaned Digital Output
                   </h2>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-[#E2F5EA] text-[#2E7D52] text-[11px] font-semibold">
-                    <span>Extracted</span>
-                    <CheckCircle2 className="w-3 h-3" />
-                  </span>
+                  {cleanedNotesSections.length > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-[#E2F5EA] text-[#2E7D52] text-[11px] font-semibold">
+                      <span>Extracted</span>
+                      <CheckCircle2 className="w-3 h-3" />
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1110,10 +1072,20 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               <div className="rounded-xl border border-[#E8E6E2] bg-[#FCFBF9]/60 p-6 space-y-5">
                 <div className="flex items-center justify-between border-b border-[#E8E6E2] pb-3">
                   <h3 className="font-serif-editorial text-2xl font-bold text-[#121827]">
-                    {scannedDocTitle}
+                    {scannedDocTitle || 'No scan yet'}
                   </h3>
-                  <span className="text-xs text-[#606B7C]">Edit</span>
                 </div>
+
+                {cleanedNotesSections.length === 0 && (
+                  <p
+                    className={`text-sm ${scanError ? 'text-[#B3261E]' : 'text-[#606B7C]'}`}
+                    role={scanError ? 'alert' : undefined}
+                  >
+                    {isScanningOcr
+                      ? 'Reading your notes...'
+                      : scanError || 'Your extracted notes will appear here after you upload a photo.'}
+                  </p>
+                )}
 
                 <div className="space-y-5">
                   {cleanedNotesSections.map((sec, idx) => (
@@ -1166,7 +1138,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `${scannedDocTitle.replace(/\s+/g, '_')}.txt`;
+                    a.download = `${(scannedDocTitle || 'scanned_notes').replace(/\s+/g, '_')}.txt`;
                     a.click();
                     URL.revokeObjectURL(url);
                   }}

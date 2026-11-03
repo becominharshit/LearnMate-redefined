@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
 import express from 'express';
@@ -621,60 +622,11 @@ function buildGroundedFallbackAnalysis(title: string, pages: PageInput[]) {
 }
 
 /**
- * Generates helpful general-knowledge educational explanations for common academic questions
- * or arbitrary topics when the topic is not in the uploaded PDF (or when no PDF is uploaded).
+ * Used only when the AI call fails. It never pretends to be an explanation: it returns the
+ * passages from the student's own material that best match the question, clearly labelled
+ * as excerpts, or null when nothing matches (the caller then reports the AI error honestly).
  */
-function buildGeneralKnowledgeExplanation(question: string): string {
-  const qLower = question.toLowerCase();
-
-  if (qLower.includes('krebs') || qLower.includes('citric acid') || qLower.includes('respiration')) {
-    return `The **Krebs Cycle** (also known as the Citric Acid Cycle or TCA cycle) is a central metabolic pathway in cellular respiration that takes place in the mitochondrial matrix of eukaryotic cells:
-1. **Entry Step**: Acetyl-CoA (2 carbons, derived from pyruvate) combines with oxaloacetate (4 carbons) to form citrate (6 carbons).
-2. **Energy Harvesting**: Through an 8-step enzymatic loop, citrate is oxidized, releasing 2 molecules of CO₂ and generating high-energy electron carriers (**3 NADH** and **1 FADH₂**) plus **1 ATP (or GTP)** per turn.
-3. **Why It Matters**: Those NADH and FADH₂ molecules donate electrons to the Electron Transport Chain (oxidative phosphorylation) to drive the synthesis of the majority of cellular ATP.`;
-  }
-
-  if (qLower.includes('photosynthesis') || qLower.includes('chloroplast')) {
-    return `**Photosynthesis** is the biochemical process by which plants, algae, and cyanobacteria convert light energy into chemical energy stored in glucose (6CO₂ + 6H₂O + light → C₆H₁₂O₆ + 6O₂):
-• **Light-Dependent Reactions** (in the thylakoid membranes): Capture photons to split water, release O₂, and produce ATP and NADPH.
-• **Calvin Cycle / Light-Independent Reactions** (in the stroma): Uses ATP and NADPH to fix carbon dioxide (CO₂) into three-carbon sugars (G3P) via the enzyme RuBisCO.`;
-  }
-
-  if (qLower.includes('newton') || qLower.includes('motion') || qLower.includes('force')) {
-    return `**Newton's Three Laws of Motion** form the foundation of classical mechanics:
-1. **First Law (Inertia)**: An object remains at rest or in uniform straight-line motion unless acted upon by a net external force.
-2. **Second Law (F = ma)**: The net force on an object equals its mass multiplied by its acceleration.
-3. **Third Law (Action–Reaction)**: Whenever object A exerts a force on object B, object B simultaneously exerts an equal and opposite force on object A.`;
-  }
-
-  if (qLower.includes('machine learning') || qLower.includes('neural network') || qLower.includes('spam')) {
-    return `In **Machine Learning**, probabilistic and statistical principles are used to learn patterns from data and make predictions:
-• **Naive Bayes Classifiers** apply Bayes' Theorem directly by multiplying the likelihood of individual features (such as words in an email) given a class (Spam vs. Inbox) with the prior probability of that class.
-• **Step-by-step intuition**: Start with a prior belief, multiply by the likelihood of the observed features, and normalize across all possible classes to pick the highest posterior probability.`;
-  }
-
-  const cleanedTopic = question
-    .replace(/^(what|how|why|explain|define|tell me about|can you explain|give me an example of)\s+(is|are|does|do|the|a|an)?\s*/i, '')
-    .replace(/[?.!]+$/, '')
-    .trim();
-
-  return `Here is a clear general-knowledge overview of **${cleanedTopic || 'this concept'}**:
-1. **Core Definition**: This concept addresses how key variables, principles, or mechanisms interact within its domain to produce predictable outcomes.
-2. **Step-by-Step Breakdown**:
-   • First, identify the baseline assumptions or inputs involved in ${cleanedTopic || 'the problem'}.
-   • Second, apply the governing rule or relationship connecting the inputs to the output.
-   • Third, verify the result with a concrete example or boundary check.
-3. **Study Tip**: Compare how this general concept relates to the core definitions in your primary course syllabus.`;
-}
-
-/**
- * Hybrid Knowledge Answering fallback that handles:
- * 1. Fully in material -> "material" with verified citations
- * 2. Partially covered / expansion / extra examples -> "both" distinguishing document facts vs general knowledge
- * 3. Absent from material -> "general" starting with "Not covered in your material" + general explanation
- * 4. No document uploaded -> "general" normal educational explanation
- */
-function buildHybridTutorFallbackAnswer(
+function buildMaterialExcerptFallback(
   question: string,
   pages: PageInput[],
   history?: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -685,16 +637,8 @@ function buildHybridTutorFallbackAnswer(
   sourceType: TutorSourceType;
   citations: Array<{ pageNumber: number; section: string; quote: string }>;
   relatedTopics: string[];
-} {
-  if (!pages || pages.length === 0) {
-    return {
-      answer: buildGeneralKnowledgeExplanation(question),
-      foundInMaterial: false,
-      sourceType: 'general',
-      citations: [],
-      relatedTopics: [],
-    };
-  }
+} | null {
+  if (!pages || pages.length === 0) return null;
 
   const stopWords = new Set([
     'what', 'when', 'where', 'which', 'who', 'whom', 'whose', 'why', 'how',
@@ -705,16 +649,8 @@ function buildHybridTutorFallbackAnswer(
     'step', 'simple', 'simply', 'example', 'examples', 'relate', 'related',
   ]);
 
-  const qLower = question.toLowerCase();
-
   const isFollowUpRequest =
     /\b(more simply|simpler|simplify|deeper|greater depth|derivation|step-by-step|step by step|another example|extra example|real-world|real world|analogy|follow up|elaborate|break it down)\b/i.test(
-      question
-    );
-
-  const asksHybridExtension =
-    isFollowUpRequest ||
-    /\b(real-world|real world|machine learning|application|beyond|outside|analogy|step-by-step|step by step|extra example)\b/i.test(
       question
     );
 
@@ -725,16 +661,24 @@ function buildHybridTutorFallbackAnswer(
       .map((h) => h.content)
       .join(' ');
     searchContext = `${question} ${recentText}`;
-  } else if (studentContext?.currentTopic && qLower.includes('this topic')) {
+  } else if (studentContext?.currentTopic && /this topic/i.test(question)) {
     searchContext = `${question} ${studentContext.currentTopic}`;
   }
 
-  const queryTokens = searchContext
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length >= 3 && !stopWords.has(w));
+  const queryTokens = Array.from(
+    new Set(
+      searchContext
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !stopWords.has(w))
+    )
+  );
+  if (queryTokens.length === 0) return null;
 
+  // Require at least half of the meaningful words to appear, so one shared word like
+  // "law" does not pass off an unrelated page as an answer.
+  const minMatches = Math.max(1, Math.ceil(queryTokens.length / 2));
   const scoredPages = pages
     .map((p) => {
       const lower = `${p.title} ${p.content}`.toLowerCase();
@@ -744,19 +688,10 @@ function buildHybridTutorFallbackAnswer(
       }
       return { page: p, matches };
     })
-    .filter((item) => item.matches > 0)
+    .filter((item) => item.matches >= minMatches)
     .sort((a, b) => b.matches - a.matches);
 
-  if (scoredPages.length === 0) {
-    const generalExplanation = buildGeneralKnowledgeExplanation(question);
-    return {
-      answer: `Not covered in your material.\n\n**General Knowledge Explanation:**\n\n${generalExplanation}`,
-      foundInMaterial: false,
-      sourceType: 'general',
-      citations: [],
-      relatedTopics: [],
-    };
-  }
+  if (scoredPages.length === 0) return null;
 
   const topPages = scoredPages.slice(0, 2);
   const citations = topPages.map(({ page }) => {
@@ -778,7 +713,7 @@ function buildHybridTutorFallbackAnswer(
     };
   });
 
-  const materialParts = topPages.map(({ page }) => {
+  const excerpts = topPages.map(({ page }) => {
     const lines = page.content
       .split('\n')
       .map((l) => l.trim())
@@ -787,193 +722,16 @@ function buildHybridTutorFallbackAnswer(
       queryTokens.some((tok) => line.toLowerCase().includes(tok))
     );
     const snippet = (relevant.length > 0 ? relevant.slice(0, 3) : lines.slice(0, 3)).join(' ');
-    return `**Page ${page.pageNumber} (${page.title}):** ${snippet}`;
+    return `**Page ${page.pageNumber} (${page.title || `Page ${page.pageNumber}`}):** ${snippet}`;
   });
 
-  const unmachedTokens = queryTokens.filter(
-    (tok) =>
-      !topPages.some(({ page }) =>
-        `${page.title} ${page.content}`.toLowerCase().includes(tok)
-      )
-  );
-
-  const weakTopicNote =
-    studentContext?.weakTopics &&
-    studentContext.weakTopics.some((wt) =>
-      topPages.some((tp) => tp.page.title.toLowerCase().includes(wt.toLowerCase()))
-    )
-      ? `\n\n**Personalized Study Note:** Because **${studentContext.weakTopics[0]}** is one of your current focus areas from the quiz, pay extra attention to the condition on Page ${topPages[0].page.pageNumber}.`
-      : '';
-
-  if (asksHybridExtension || (unmachedTokens.length > 0 && scoredPages[0].matches < queryTokens.length)) {
-    const primaryTopic = topPages[0].page.title;
-    let generalAddendum: string;
-    if (qLower.includes('simplify') || qLower.includes('simpler')) {
-      generalAddendum = `In plain terms, think of ${primaryTopic} as organizing all possible outcomes into a clear map before calculating any chance.\n\nStep 1: List the complete set of outcomes (the sample space Ω).\nStep 2: Identify the specific outcome you care about (event E).\nStep 3: Compare the size or weight of event E against the whole space Ω, keeping the result between 0 and 1.`;
-    } else if (qLower.includes('machine learning') || qLower.includes('spam')) {
-      generalAddendum = buildGeneralKnowledgeExplanation(question);
-    } else {
-      generalAddendum = `Think of ${primaryTopic} as narrowing down possibilities step-by-step whenever you observe new evidence.\n\nWorked Example:\n• Step 1: Write down the known quantities from the problem statement.\n• Step 2: Substitute them directly into the formula on Page ${topPages[0].page.pageNumber}.\n• Step 3: Verify that all resulting probabilities remain between 0 and 1.`;
-    }
-
-    return {
-      answer: `**From your material:**\n\n${materialParts.join('\n\n')}\n\n**General knowledge expansion:**\n\n${generalAddendum}${weakTopicNote}`,
-      foundInMaterial: true,
-      sourceType: 'both',
-      citations,
-      relatedTopics: topPages.map((t) => t.page.title),
-    };
-  }
-
   return {
-    answer: `**From your material:**\n\n${materialParts.join('\n\n')}${weakTopicNote}`,
+    answer: `**The AI tutor is unavailable right now, so this is not an explanation.** These are the passages from your material that best match your question:\n\n${excerpts.join('\n\n')}\n\nAsk again in a minute for a full explanation.`,
     foundInMaterial: true,
     sourceType: 'material',
     citations,
-    relatedTopics: topPages.map((t) => t.page.title),
+    relatedTopics: topPages.map((t) => t.page.title).filter(Boolean),
   };
-}
-
-function buildGroundedFallbackQuiz(
-  pages: PageInput[],
-  topics: TopicInput[],
-  mode: 'diagnostic' | 'adaptive',
-  focusTopics?: string[],
-  questionCount = 6
-) {
-  const validPageSet = new Set(pages.map((p) => p.pageNumber));
-  const targetCount = Math.max(5, Math.min(30, questionCount));
-
-  let candidatePages = pages;
-  if (mode === 'adaptive' && focusTopics && focusTopics.length > 0) {
-    const matched = pages.filter((p) =>
-      focusTopics.some(
-        (ft) =>
-          p.title.toLowerCase().includes(ft.toLowerCase()) ||
-          p.content.toLowerCase().includes(ft.toLowerCase())
-      )
-    );
-    if (matched.length > 0) candidatePages = matched;
-  }
-
-  const perPageStatements: Array<
-    Array<{
-      pageNumber: number;
-      topic: string;
-      fact: string;
-      term: string;
-    }>
-  > = [];
-
-  for (const page of candidatePages) {
-    const matchedTopic =
-      topics.find((t) => t.sourcePages.includes(page.pageNumber))?.name ||
-      (focusTopics && focusTopics[0]) ||
-      page.title ||
-      `Page ${page.pageNumber} Concepts`;
-
-    const lines = page.content
-      .split('\n')
-      .map((l) => l.replace(/^[•\-*\d.)\s]+/, '').trim())
-      .filter((l) => l.length >= 35 && l.length <= 210);
-
-    const pageItems = lines.map((line) => {
-      const colonParts = line.split(':');
-      const term =
-        colonParts.length > 1 && colonParts[0].length <= 45
-          ? colonParts[0].trim()
-          : matchedTopic;
-      return {
-        pageNumber: validPageSet.has(page.pageNumber) ? page.pageNumber : 1,
-        topic: matchedTopic,
-        fact: line,
-        term,
-      };
-    });
-
-    if (pageItems.length > 0) {
-      perPageStatements.push(pageItems);
-    }
-  }
-
-  const statements: Array<{
-    pageNumber: number;
-    topic: string;
-    fact: string;
-    term: string;
-  }> = [];
-
-  let round = 0;
-  while (statements.length < targetCount * 2 && round < 10) {
-    let addedInRound = false;
-    for (const bucket of perPageStatements) {
-      if (round < bucket.length) {
-        statements.push(bucket[round]);
-        addedInRound = true;
-      }
-    }
-    if (!addedInRound) break;
-    round++;
-  }
-
-  while (statements.length < targetCount) {
-    const fallbackPage = candidatePages[statements.length % candidatePages.length] || pages[0];
-    statements.push({
-      pageNumber: fallbackPage.pageNumber,
-      topic: fallbackPage.title || `Page ${fallbackPage.pageNumber}`,
-      fact: fallbackPage.content.slice(0, 140).replace(/\s+/g, ' ').trim(),
-      term: fallbackPage.title || `Section ${fallbackPage.pageNumber}`,
-    });
-  }
-
-  const questions = [];
-  for (let i = 0; i < targetCount; i++) {
-    const item = statements[i % statements.length];
-    const otherFacts = statements
-      .filter((s) => s.fact !== item.fact)
-      .map((s) => s.fact);
-
-    const distractor1 =
-      otherFacts[i % Math.max(1, otherFacts.length)] ||
-      `It only applies when the sample space is empty and probability is zero.`;
-    const distractor2 =
-      otherFacts[(i + 1) % Math.max(1, otherFacts.length)] ||
-      `It reverses the relationship by multiplying unrelated constants without normalization.`;
-    const distractor3 =
-      `It assumes ${item.term} is always constant and independent of the conditions on Page ${item.pageNumber}.`;
-
-    const correctOption = item.fact;
-    const correctIndex = i % 4;
-    const options: [string, string, string, string] = ['', '', '', ''];
-    options[correctIndex] = correctOption;
-    let dIdx = 0;
-    const distractors = [distractor1, distractor2, distractor3];
-    for (let slot = 0; slot < 4; slot++) {
-      if (slot !== correctIndex) {
-        options[slot] = distractors[dIdx++];
-      }
-    }
-
-    questions.push({
-      id: `q-${mode}-${Date.now()}-${i + 1}`,
-      topic: item.topic,
-      question:
-        mode === 'adaptive'
-          ? `[Adaptive Focus: ${item.topic}] Based on Page ${item.pageNumber}, which statement accurately describes ${item.term}?`
-          : `According to Page ${item.pageNumber} (${item.topic}), which of the following statements is accurate?`,
-      options,
-      correctIndex,
-      explanation: `Page ${item.pageNumber} explicitly states: "${item.fact}"`,
-      sourcePage: item.pageNumber,
-      sourceQuote: item.fact.slice(0, 160),
-      difficulty: (i % 3 === 0 ? 'easy' : i % 3 === 1 ? 'medium' : 'hard') as
-        | 'easy'
-        | 'medium'
-        | 'hard',
-    });
-  }
-
-  return { questions };
 }
 
 /**
@@ -1031,7 +789,7 @@ function attachGeminiLiveWebSocketServer(httpServer: http.Server) {
               type: 'status',
               state: 'fallback_ready',
               message:
-                'Gemini Live API key not configured; interactive voice tutoring is active using grounded speech synthesis.',
+                'Live voice AI is not set up on this server (missing API key). Voice answers can only read out matching lines from your notes.',
             });
             return;
           }
@@ -1181,14 +939,20 @@ Rules for Voice Tutoring:
             }
           }
 
-          // Grounded voice tutor response (ensures immediate spoken tutoring even if raw PCM Live stream is unavailable)
-          const grounded = buildHybridTutorFallbackAnswer(
-            qText,
-            sessionPages,
-            [],
-            { weakTopics: sessionWeakTopics }
-          );
-          const cleanSpoken = grounded.answer
+          // Live AI unavailable: read out matching lines from the notes, never a made-up answer.
+          const excerpt = buildMaterialExcerptFallback(qText, sessionPages, [], {
+            weakTopics: sessionWeakTopics,
+          });
+          if (!excerpt) {
+            safeSend({
+              type: 'voice_response',
+              text: 'Sorry, the live AI tutor is not available right now, and I could not find this topic in your notes. Please try again later.',
+              citations: [],
+              sourceType: 'general',
+            });
+            return;
+          }
+          const cleanSpoken = excerpt.answer
             .replace(/\*\*/g, '')
             .replace(/•/g, '')
             .replace(/\n+/g, ' ')
@@ -1197,8 +961,8 @@ Rules for Voice Tutoring:
           safeSend({
             type: 'voice_response',
             text: cleanSpoken,
-            citations: grounded.citations,
-            sourceType: grounded.sourceType,
+            citations: excerpt.citations,
+            sourceType: excerpt.sourceType,
           });
         }
       } catch {
@@ -1222,6 +986,26 @@ Rules for Voice Tutoring:
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '15mb' }));
+
+  // Internal diagnostics reveal the cloud project ID and service-account identity, and
+  // /api/vertex/probe triggers a billed model call. In production they require ADMIN_TOKEN.
+  app.use(['/api/usage', '/api/capabilities', '/api/vertex'], (req, res, next) => {
+    if (process.env.NODE_ENV !== 'production') {
+      next();
+      return;
+    }
+    const expected = process.env.ADMIN_TOKEN || '';
+    const provided = req.get('x-admin-token') || '';
+    const allowed =
+      expected.length > 0 &&
+      provided.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+    if (!allowed) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    next();
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -1501,37 +1285,25 @@ Follow these exact rules for Hybrid Knowledge Answering:
         });
       } catch (err) {
         const notice = extractAiNotice(err);
-        const fallback = buildHybridTutorFallbackAnswer(
+        const excerptFallback = buildMaterialExcerptFallback(
           question,
           pages,
           history,
           studentContext
         );
-        if (explicitStrictMode) {
-          const policyResult = enforceSourceControlPolicy({
-            mode: 'material_only',
-            rawAnswer: fallback.answer,
-            foundInMaterial: fallback.foundInMaterial,
-            citations: fallback.citations,
-            validPageNumbers,
-          });
-          res.json({
-            answer: policyResult.answer,
-            foundInMaterial: policyResult.foundInMaterial,
-            sourceType: policyResult.sourceType,
-            sourceControlMode: 'material_only',
-            citations: policyResult.citations,
-            relatedTopics: policyResult.foundInMaterial ? fallback.relatedTopics : [],
-            modelUsed: modelPreference || 'gemini-3.8-flash',
+        if (!excerptFallback) {
+          // Nothing honest to show: report the failure so the UI offers a retry.
+          res.status(503).json({
+            error: notice.aiNotice,
             aiStatus: notice.aiStatus,
             aiNotice: notice.aiNotice,
           });
           return;
         }
         res.json({
-          ...fallback,
-          sourceControlMode: 'extended_knowledge',
-          modelUsed: modelPreference || 'gemini-3.8-flash',
+          ...excerptFallback,
+          sourceControlMode: explicitStrictMode ? 'material_only' : 'extended_knowledge',
+          modelUsed: 'none',
           aiStatus: notice.aiStatus,
           aiNotice: notice.aiNotice,
         });
@@ -1676,16 +1448,11 @@ Rules:
 
         res.json({ questions: sanitizedQuestions });
       } catch (err) {
+        // No template quiz: a question bank built from raw lines had several "correct" options
+        // and a fixed answer pattern, which grades students wrongly. Report the failure instead.
         const notice = extractAiNotice(err);
-        const fallback = buildGroundedFallbackQuiz(
-          pages,
-          topics,
-          mode,
-          focusTopics,
-          clampedCount
-        );
-        res.json({
-          ...fallback,
+        res.status(503).json({
+          error: `Could not generate quiz questions right now. ${notice.aiNotice}`,
           aiStatus: notice.aiStatus,
           aiNotice: notice.aiNotice,
         });
@@ -1851,7 +1618,7 @@ Given the study material pages and the exact questions the student answered inco
             correctOption: w.correctOption,
             likelyMisconception:
               aiMatch?.likelyMisconception ||
-              `Confused "${w.selectedOption}" with the core rule on Page ${w.sourcePage}.`,
+              'No specific misconception was identified for this question. Compare your answer with the explanation below.',
             coreConceptFix: aiMatch?.coreConceptFix || w.explanation,
             sourcePage: validPageNumbers.has(w.sourcePage) ? w.sourcePage : 1,
             sourceQuote: w.sourceQuote,
@@ -1891,7 +1658,8 @@ Given the study material pages and the exact questions the student answered inco
           question: w.question,
           selectedOption: w.selectedOption,
           correctOption: w.correctOption,
-          likelyMisconception: `Selecting "${w.selectedOption}" overlooks the key condition stated on Page ${w.sourcePage}.`,
+          likelyMisconception:
+            'AI mistake analysis is unavailable right now. Compare your answer with the explanation below.',
           coreConceptFix: w.explanation,
           sourcePage: w.sourcePage,
           sourceQuote: w.sourceQuote,
@@ -2895,6 +2663,7 @@ Never fabricate content if the video has no educational material.`,
       const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
 
       const { ai, provider } = await getTrialEligibleStudyClient();
+      let scanFailureNotice = extractAiNotice(new Error('NO_API_KEY')).aiNotice;
       if (ai) {
         try {
           const candidateModels = getOrderedCandidateModels('gemini-3.8-flash');
@@ -2959,26 +2728,16 @@ Return JSON with:
             });
             return;
           }
-        } catch {
-          // Fall through to structured OCR fallback
+          scanFailureNotice =
+            'No readable text was found in this image. Try a clearer, well-lit photo (PNG or JPEG).';
+        } catch (err) {
+          scanFailureNotice = extractAiNotice(err).aiNotice;
         }
       }
 
-      const fallbackClean = `1. Core Concept & Formula Summary (${title})
-• Key Definition: The relationship captured in your scanned sheet links the primary variables through conservation and proportionality rules.
-• Governing Equation: P(A | B) = P(A ∩ B) / P(B)  |  E[X] = Σ x · P(X = x)
-• Worked Steps from Scan:
-  1) Identify boundary conditions and known constants from the diagram.
-  2) Substitute values into the primary equation and simplify units.
-  3) Verify limiting cases for consistency.`;
-
-      res.json({
-        title,
-        cleanContent: fallbackClean,
-        handwrittenContent: fallbackClean,
-        uncertainSegments: ['Check subscript notation on line 2 if handwriting was angled'],
-        summary: `Digitized study notes from "${title}" ready for editing, flashcards, and tutor Q&A.`,
-        keyConcepts: ['Core Formula Derivation', 'Worked Problem Steps', 'Boundary Conditions'],
+      // Never return invented "OCR" text: students would save it as their own notes.
+      res.status(503).json({
+        error: `Could not scan these notes. ${scanFailureNotice}`,
       });
     } catch (err) {
       res.status(500).json({
@@ -3001,7 +2760,11 @@ Return JSON with:
       };
 
       const { ai, provider } = await getTrialEligibleStudyClient();
-      if (ai && audioDataUrl && audioDataUrl.includes('base64,')) {
+      const hasAudio = Boolean(audioDataUrl && audioDataUrl.includes('base64,'));
+      let transcribeFailureNotice = ai
+        ? 'No audio was recorded.'
+        : extractAiNotice(new Error('NO_API_KEY')).aiNotice;
+      if (ai && audioDataUrl && hasAudio) {
         try {
           const [header, base64Data] = audioDataUrl.split('base64,');
           const mimeMatch = header.match(/data:([^;]+);/);
@@ -3059,24 +2822,35 @@ Return JSON with:
             });
             return;
           }
+          transcribeFailureNotice = 'No speech could be recognised in this recording.';
         } catch (err) {
           const classified = classifyGeminiError(err);
           if (classified.statusCode === 402 || classified.category === 'quota_exhausted') {
             developerApiBillingDepleted = true;
           }
+          transcribeFailureNotice = extractAiNotice(err).aiNotice;
         }
       }
 
-      const baseText =
-        manualTranscript.trim() ||
-        `Voice Lecture Summary (${title}): Reviewed core definitions, key formulas, and exam problem-solving steps for active recall.`;
+      const typedTranscript = manualTranscript.trim();
+      if (!typedTranscript) {
+        // Never invent a transcript for audio that was not actually transcribed.
+        res.status(503).json({
+          error: `Could not transcribe this recording. ${transcribeFailureNotice}`,
+        });
+        return;
+      }
 
+      // AI transcription unavailable: keep the student's own typed text unchanged.
       res.json({
         title,
-        transcript: baseText,
-        structuredNotes: `1. Spoken Lecture Key Points (${title})\n• ${baseText}\n• Action Item: Convert key formulas into active recall flashcards and test understanding in Practice.`,
-        summary: `Transcribed voice note "${title}" converted into structured study blocks.`,
-        keyConcepts: ['Spoken Concept Summary', 'Key Formula Recall', 'Exam Application'],
+        transcript: typedTranscript,
+        structuredNotes: typedTranscript,
+        summary: typedTranscript.slice(0, 160),
+        keyConcepts: [],
+        aiNotice: hasAudio
+          ? `The recording was not transcribed (${transcribeFailureNotice}). Saved your typed transcript instead.`
+          : undefined,
       });
     } catch (err) {
       res.status(500).json({
@@ -3161,18 +2935,21 @@ Evaluate:
         });
 
         res.json(parsed);
-      } catch {
+      } catch (err) {
+        const notice = extractAiNotice(err);
         res.json({
           scorePct: deterministic.scorePct,
           verdict: deterministic.verdict,
-          strengths:
-            deterministic.coveredConcepts.length > 0
-              ? deterministic.coveredConcepts.map((c) => `Mentioned core concept: ${c}`)
-              : ['Good effort articulating the intuition in your own words.'],
+          strengths: deterministic.coveredConcepts.map((c) => `Mentioned key term: ${c}`),
           missingConcepts: deterministic.missingConcepts,
           inaccuracies: [],
-          suggestedFollowUpQuestion: `How does ${topic} behave in a boundary or edge case according to Page ${pages[0]?.pageNumber || 1}?`,
-          groundedFeedback: deterministic.feedbackSummary,
+          suggestedFollowUpQuestion:
+            deterministic.missingConcepts.length > 0
+              ? `Can you explain ${topic} again and include: ${deterministic.missingConcepts.join(', ')}?`
+              : `Can you explain ${topic} again using a worked example?`,
+          groundedFeedback: `AI evaluation is unavailable right now (${notice.aiNotice}) This score is only a keyword check of your explanation, not a real assessment. ${deterministic.feedbackSummary}`,
+          aiStatus: notice.aiStatus,
+          aiNotice: notice.aiNotice,
         });
       }
     } catch (err) {
@@ -3594,6 +3371,7 @@ Never output markdown fences or commentary outside the JSON.`;
     try {
       const { category = 'All' } = req.body as { category?: string };
       const { ai, provider } = await getTrialEligibleStudyClient();
+      let newsFailureNotice = extractAiNotice(new Error('NO_API_KEY')).aiNotice;
 
       if (ai) {
         try {
@@ -3617,141 +3395,39 @@ Never output markdown fences or commentary outside the JSON.`;
               setTimeout(() => reject(new Error('NEWS_TIMEOUT')), 8000)
             ),
           ]);
-          const parsed = JSON.parse(resp.text || '[]');
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          const parsedRaw = JSON.parse(resp.text || '[]') as unknown;
+          const parsedArticles: unknown[] = Array.isArray(parsedRaw)
+            ? parsedRaw
+            : Array.isArray((parsedRaw as { articles?: unknown[] } | null)?.articles)
+            ? (parsedRaw as { articles: unknown[] }).articles
+            : [];
+          if (parsedArticles.length > 0) {
             res.json({
               updatedAt: new Date().toISOString(),
-              articles: parsed,
-              groundedWithSearch: true,
+              articles: parsedArticles.map((article, idx) => {
+                const record = (article || {}) as Record<string, unknown>;
+                return {
+                  ...record,
+                  id: typeof record.id === 'string' && record.id ? record.id : `news-${idx + 1}`,
+                };
+              }),
+              // Only true when the Google Search tool was actually attached to the request.
+              groundedWithSearch: provider === 'developer_api',
             });
             return;
           }
-        } catch {
-          // Fall through to curated daily edition
+          newsFailureNotice = 'The AI returned no articles.';
+        } catch (err) {
+          newsFailureNotice = extractAiNotice(err).aiNotice;
         }
       }
 
-      const curatedArticles = [
-        {
-          id: 'news-quantum-error',
-          headline: 'Breakthrough in Fault-Tolerant Logical Qubits Accelerates Quantum Computing Roadmaps',
-          category: 'Science',
-          summary:
-            'Researchers demonstrated exponential error suppression as surface-code lattice sizes scaled, marking a critical milestone toward fault-tolerant quantum processors capable of molecular simulation.',
-          examRelevance: 'High relevance for Physics, Computer Science, and Science & Technology Prelim/Mains sections.',
-          keyTakeaways: [
-            'Surface codes distribute quantum information across multiple physical qubits to form 1 logical qubit.',
-            'Below the fault-tolerance threshold, adding physical qubits reduces logical error rates exponentially.',
-          ],
-          sourceName: 'Science & Technology Digest',
-          sourceUrl: 'https://ai.google.dev',
-          publishedAt: new Date().toISOString(),
-          quizQuestion: {
-            question: 'What is the primary purpose of quantum error-correcting surface codes?',
-            options: [
-              'To cool superconducting circuits to absolute zero without liquid helium',
-              'To encode one logical qubit across multiple physical qubits to suppress decoherence errors',
-              'To replace binary logic gates with analog optical amplifiers',
-              'To increase clock frequency of classical silicon transistors',
-            ],
-            correctIndex: 1,
-            explanation:
-              'Quantum error correction spreads quantum states across entangled physical qubits so syndrome measurements can detect and fix errors without destroying the superposition.',
-          },
-        },
-        {
-          id: 'news-india-semiconductor-ecosystem',
-          headline: 'National Semiconductor & Clean-Tech Manufacturing Corridors Expand University R&D Partnerships',
-          category: 'India',
-          summary:
-            'New academic-industrial clusters are training undergraduate engineers in VLSI design, compound semiconductors, and grid-scale battery storage across major technical institutes.',
-          examRelevance: 'Key topic for Indian Economy, Infrastructure, and National Education & Innovation initiatives.',
-          keyTakeaways: [
-            'Focuses on indigenous chip packaging (ATMP), fabless RISC-V design, and power electronics.',
-            'Links university cleanrooms directly with domestic supply-chain apprenticeships.',
-          ],
-          sourceName: 'Economic & Policy Review',
-          publishedAt: new Date().toISOString(),
-          quizQuestion: {
-            question: 'In semiconductor manufacturing, what does VLSI stand for?',
-            options: [
-              'Variable Logic System Architecture',
-              'Very Large Scale Integration',
-              'Voltage-Limited Silicon Inductor',
-              'Virtual Lattice Semiconductor Interface',
-            ],
-            correctIndex: 1,
-            explanation:
-              'VLSI (Very Large Scale Integration) is the process of integrating millions or billions of MOS transistors onto a single silicon microchip.',
-          },
-        },
-        {
-          id: 'news-climate-ocean-albedo',
-          headline: 'Satellite Ocean-Color Radiometry Reveals Shifts in Marine Phytoplankton Carbon Uptake',
-          category: 'Environment',
-          summary:
-            'Hyperspectral Earth-observation satellites mapped seasonal chlorophyll-a gradients, improving global carbon-cycle models and marine ecosystem forecasts.',
-          examRelevance: 'Essential for Ecology, Carbon Cycle, Remote Sensing, and Competitive Exam General Studies.',
-          keyTakeaways: [
-            'Marine phytoplankton perform roughly half of global photosynthetic carbon fixation.',
-            'Hyperspectral sensors distinguish phytoplankton functional types from space.',
-          ],
-          sourceName: 'Earth Observatory Journal',
-          publishedAt: new Date().toISOString(),
-          quizQuestion: {
-            question: 'Through which biological mechanism do marine phytoplankton sequester atmospheric carbon dioxide?',
-            options: [
-              'Biological carbon pump via oxygenic photosynthesis',
-              'Reverse methanogenesis in deep hydrothermal vents',
-              'Abiotic silicate weathering in the stratosphere',
-              'Anaerobic fermentation in surface waters',
-            ],
-            correctIndex: 0,
-            explanation:
-              'Phytoplankton fix dissolved CO₂ via oxygenic photosynthesis in the sunlit euphotic zone, driving the oceans biological carbon pump.',
-          },
-        },
-        {
-          id: 'news-monetary-inflation-targeting',
-          headline: 'Global Central Banks Balance Disinflation Progress Against Supply-Chain Resilience Investments',
-          category: 'Economy',
-          summary:
-            'Macroeconomic reports highlight how real interest rates, core CPI moderation, and capital expenditure in green infrastructure shape medium-term GDP growth.',
-          examRelevance: 'Directly connects to Macroeconomics syllabus: Monetary Policy, CPI vs WPI, and Fiscal Multipliers.',
-          keyTakeaways: [
-            'Core inflation excludes volatile food and fuel components to measure underlying price pressures.',
-            'Real interest rate approximately equals Nominal Interest Rate minus Expected Inflation (Fisher Equation).',
-          ],
-          sourceName: 'Global Macro Briefing',
-          publishedAt: new Date().toISOString(),
-          quizQuestion: {
-            question: 'According to the Fisher Equation, how is the real interest rate approximated?',
-            options: [
-              'Nominal interest rate multiplied by the GDP deflator',
-              'Nominal interest rate minus the inflation rate',
-              ' statutory liquidity ratio divided by the repo rate',
-              'Fiscal deficit plus net exports',
-            ],
-            correctIndex: 1,
-            explanation:
-              'The Fisher relation states that the real interest rate r ≈ i − π, where i is the nominal interest rate and π is the inflation rate.',
-          },
-        },
-      ];
-
-      const filtered =
-        category && category !== 'All'
-          ? curatedArticles.filter(
-              (a) =>
-                a.category.toLowerCase() === category.toLowerCase() ||
-                category === 'Competitive Exam Current Affairs'
-            )
-          : curatedArticles;
-
+      // No invented articles: an empty edition with the reason is returned instead.
       res.json({
         updatedAt: new Date().toISOString(),
-        articles: filtered.length > 0 ? filtered : curatedArticles,
-        groundedWithSearch: true,
+        articles: [],
+        groundedWithSearch: false,
+        message: `Today's digest is unavailable. ${newsFailureNotice}`,
       });
     } catch (err) {
       res.status(500).json({
@@ -3768,47 +3444,17 @@ Never output markdown fences or commentary outside the JSON.`;
         studyTopic?: string;
       };
 
-      const cleanCity = city.trim() || 'your city';
-      const places = [
-        {
-          id: 'place-science-center',
-          name: `Regional Science & Planetarium Center (${cleanCity})`,
-          category: 'Science Center',
-          address: `Museum & Science Park District, ${cleanCity}`,
-          description:
-            'Interactive exhibits on classical mechanics, optics, probability galton boards, and astronomical instrumentation.',
-          studyConnection: `Hands-on physical demonstrations of ${studyTopic} including Galton board binomial-to-normal distributions.`,
-          mapsUri: `https://www.google.com/maps/search/${encodeURIComponent(`Science Museum Planetarium ${cleanCity}`)}`,
-          distanceHint: 'Central Academic District',
-        },
-        {
-          id: 'place-central-library',
-          name: `Central Reference & University Research Library (${cleanCity})`,
-          category: 'Library',
-          address: `University Avenue, ${cleanCity}`,
-          description:
-            'Quiet reading halls, textbook archives, IEEE/Springer digital terminals, and collaborative study rooms.',
-          studyConnection: `Ideal quiet study space for deep revision and textbook problem sets on ${studyTopic}.`,
-          mapsUri: `https://www.google.com/maps/search/${encodeURIComponent(`Central Public University Library ${cleanCity}`)}`,
-          distanceHint: 'Open Daily • Quiet Zones',
-        },
-        {
-          id: 'place-innovation-lab',
-          name: `Public Maker Space & Natural History Gallery (${cleanCity})`,
-          category: 'Museum',
-          address: `Civic Cultural Complex, ${cleanCity}`,
-          description:
-            'Curated collections spanning scientific instrumentation history, mathematical polyhedra, and ecological biodiversity.',
-          studyConnection: `Connects theoretical concepts in ${studyTopic} with real-world engineering artifacts.`,
-          mapsUri: `https://www.google.com/maps/search/${encodeURIComponent(`Natural History Technology Museum ${cleanCity}`)}`,
-          distanceHint: 'Student Entry Available',
-        },
-      ];
-
+      // No real place data source (e.g. Places API / Maps grounding) is connected, so no places
+      // are invented. Students get an honest notice and a real Google Maps search link instead.
+      const cleanCity = city.trim();
       res.json({
         city: cleanCity,
         studyTopic,
-        places,
+        places: [],
+        message: 'Educational Maps is not available yet: no verified place data source is connected.',
+        mapsSearchUri: cleanCity
+          ? `https://www.google.com/maps/search/${encodeURIComponent(`science museum planetarium library ${cleanCity}`)}`
+          : undefined,
       });
     } catch (err) {
       res.status(500).json({
@@ -3967,6 +3613,13 @@ Never output markdown fences or commentary outside the JSON.`;
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`LearnMate full-stack server running on http://localhost:${PORT}`);
+    const vertexMode = resolveVertexConfig({ fallbackProjectId: DEFAULT_GCP_PROJECT_ID }).mode;
+    if (!getDeveloperGenAIClient() && vertexMode !== 'enabled') {
+      console.warn(
+        '[LearnMate] WARNING: GEMINI_API_KEY is not set. AI features (tutor, quizzes, OCR, voice) ' +
+          'will report "AI is not set up" until you copy .env.example to .env and add your key.'
+      );
+    }
   });
 }
 

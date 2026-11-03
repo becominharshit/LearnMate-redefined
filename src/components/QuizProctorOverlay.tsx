@@ -7,6 +7,31 @@ interface QuizProctorOverlayProps {
   quizTitle?: string;
 }
 
+// iPhone Safari and many in-app browsers do not implement the Fullscreen API at all,
+// so the methods must be feature-checked; calling them unguarded throws and blanks the app.
+function requestFullscreenSafely(): void {
+  try {
+    const root = document.documentElement;
+    if (!document.fullscreenElement && document.fullscreenEnabled && root.requestFullscreen) {
+      root.requestFullscreen().catch(() => {
+        // Browsers may refuse without a user gesture.
+      });
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function exitFullscreenSafely(): void {
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const QuizProctorOverlay: React.FC<QuizProctorOverlayProps> = ({
   isQuizActive,
   onAutoSubmit,
@@ -26,17 +51,9 @@ export const QuizProctorOverlay: React.FC<QuizProctorOverlayProps> = ({
       setIsLocked(false);
       hasAutoSubmittedRef.current = false;
 
-      // Request fullscreen automatically
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {
-          // May require user gesture on some browser configurations
-        });
-      }
+      requestFullscreenSafely();
     } else {
-      // Exit fullscreen when quiz finishes if currently in fullscreen
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      }
+      exitFullscreenSafely();
     }
   }, [isQuizActive]);
 

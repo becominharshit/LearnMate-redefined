@@ -32,35 +32,6 @@ interface NotebookAndScannerModalProps {
   onImportAsStudyDocument: (doc: StudyDocument) => void;
 }
 
-/**
- * Generates a realistic SVG data URL of handwritten probability & calculus notes
- * so students can test the OCR scanner immediately even without a webcam or local image.
- */
-function buildSampleHandwrittenSvgDataUrl(): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="680" height="420" viewBox="0 0 680 420">
-    <rect width="680" height="420" fill="#FFFDF5"/>
-    <line x1="65" y1="0" x2="65" y2="420" stroke="#FCA5A5" stroke-width="1.5"/>
-    <g stroke="#E2E8F0" stroke-width="1">
-      <line x1="0" y1="60" x2="680" y2="60"/>
-      <line x1="0" y1="105" x2="680" y2="105"/>
-      <line x1="0" y1="150" x2="680" y2="150"/>
-      <line x1="0" y1="195" x2="680" y2="195"/>
-      <line x1="0" y1="240" x2="680" y2="240"/>
-      <line x1="0" y1="285" x2="680" y2="285"/>
-      <line x1="0" y1="330" x2="680" y2="330"/>
-      <line x1="0" y1="375" x2="680" y2="375"/>
-    </g>
-    <text x="85" y="50" font-family="cursive, sans-serif" font-size="22" font-weight="bold" fill="#1E3A8A">Lecture Scan: Conditional Probability &amp; Bayes Rule</text>
-    <text x="85" y="96" font-family="cursive, sans-serif" font-size="18" fill="#1E293B">1) Conditional Prob: P(A | B) = P(A and B) / P(B), for P(B) &gt; 0</text>
-    <text x="85" y="141" font-family="cursive, sans-serif" font-size="18" fill="#1E293B">2) Multiplication Rule: P(A and B) = P(A | B) * P(B)</text>
-    <text x="85" y="186" font-family="cursive, sans-serif" font-size="18" fill="#1E293B">3) Independence Check: A, B independent iff P(A and B) = P(A)P(B)</text>
-    <text x="85" y="231" font-family="cursive, sans-serif" font-size="18" fill="#B91C1C">Warning: Disjoint events (P(A and B)=0) are NOT independent!</text>
-    <text x="85" y="276" font-family="cursive, sans-serif" font-size="18" fill="#1E293B">4) Bayes Theorem: P(A | B) = [ P(B | A) * P(A) ] / P(B)</text>
-    <text x="85" y="321" font-family="cursive, sans-serif" font-size="18" fill="#047857">5) Total Probability: P(B) = P(B|A)P(A) + P(B|A^c)P(A^c)</text>
-  </svg>`;
-  return `data:image/svg+xml;base64,${btoa(svg)}`;
-}
-
 export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = ({
   isOpen,
   initialMode,
@@ -92,23 +63,20 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
 
   // Scan Notes state
   const [scanTitle, setScanTitle] = useState('Handwritten Lecture Notes');
-  const [imageDataUrl, setImageDataUrl] = useState<string>(() =>
-    buildSampleHandwrittenSvgDataUrl()
-  );
+  // Starts empty: the scanner only ever processes and saves the student's own photo.
+  const [imageDataUrl, setImageDataUrl] = useState<string>('');
   const [imageRotation, setImageRotation] = useState(0);
   const [highContrastPreview, setHighContrastPreview] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [noteDisplayStyle, setNoteDisplayStyle] = useState<'clean' | 'handwritten'>(
     'clean'
   );
-  const [scannedCleanText, setScannedCleanText] = useState<string>(
-    `# Conditional Probability & Bayes Rule\n\n• **Conditional Probability**: P(A | B) = P(A and B) / P(B) provided P(B) > 0.\n• **Multiplication Rule**: P(A and B) = P(A | B) · P(B).\n• **Statistical Independence**: Events A and B are independent if and only if P(A and B) = P(A) · P(B).\n• **Key Exam Pitfall**: Mutually exclusive (disjoint) events with non-zero probability are NEVER independent.\n• **Bayes' Theorem**: P(A | B) = [P(B | A) · P(A)] / [P(B | A)P(A) + P(B | Aᶜ)P(Aᶜ)].`
-  );
-  const [scannedHandwrittenText, setScannedHandwrittenText] = useState<string>(
-    `Conditional Probability & Bayes Rule\n1) P(A | B) = P(A and B) / P(B) when P(B) > 0\n2) Multiplication: P(A and B) = P(A | B) · P(B)\n3) Independent iff P(A and B) = P(A)P(B)\n4) Watch out: Disjoint events cannot occur together, so knowing A happened tells you B did NOT happen!\n5) Bayes Rule flips conditional probabilities using Prior P(A) and Likelihood P(B|A).`
-  );
+  const [scannedCleanText, setScannedCleanText] = useState<string>('');
+  const [scannedHandwrittenText, setScannedHandwrittenText] = useState<string>('');
+  const [scannedKeyConcepts, setScannedKeyConcepts] = useState<string[]>([]);
   const [uncertainFlags, setUncertainFlags] = useState<string[]>([]);
   const [scanSavedMsg, setScanSavedMsg] = useState<string | null>(null);
+  const [scanMsgIsError, setScanMsgIsError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Voice Recorder state
@@ -117,11 +85,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
   const [recordedBase64, setRecordedBase64] = useState<string | null>(null);
-  const [spokenOrTypedTranscript, setSpokenOrTypedTranscript] = useState(
-    'In today’s lecture on Sampling Distributions and the Central Limit Theorem, we learned that the standard error of the sample mean is sigma divided by the square root of n. To cut the standard error in half, we must quadruple the sample size n.'
-  );
+  const [spokenOrTypedTranscript, setSpokenOrTypedTranscript] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribedNotes, setTranscribedNotes] = useState<string>('');
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const timerIntervalRef = useRef<number | null>(null);
 
@@ -151,6 +118,11 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
   };
 
   const handleRunOcrScan = async () => {
+    if (!imageDataUrl) {
+      setScanMsgIsError(true);
+      setScanSavedMsg('Upload or take a photo of your notes first.');
+      return;
+    }
     setIsScanning(true);
     setScanSavedMsg(null);
     try {
@@ -161,17 +133,23 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
       setScannedCleanText(res.cleanContent);
       setScannedHandwrittenText(res.handwrittenContent || res.cleanContent);
       setUncertainFlags(res.uncertainSegments || []);
+      setScannedKeyConcepts(res.keyConcepts || []);
+      setScanMsgIsError(false);
       setScanSavedMsg('OCR scan complete! You can edit the notes or open them in Learn.');
     } catch (err) {
-      setScanSavedMsg(
-        err instanceof Error ? err.message : 'Scanned with local structured OCR.'
-      );
+      setScanMsgIsError(true);
+      setScanSavedMsg(err instanceof Error ? err.message : 'Could not scan these notes.');
     } finally {
       setIsScanning(false);
     }
   };
 
   const handleSaveScanToNotebook = (openInLearn: boolean) => {
+    if (!scannedCleanText.trim()) {
+      setScanMsgIsError(true);
+      setScanSavedMsg('There are no notes to save yet. Scan a photo or type your notes first.');
+      return;
+    }
     const entry: NotebookEntry = {
       id: `nb-scan-${Date.now()}`,
       title: scanTitle.trim() || 'Scanned Notes',
@@ -181,12 +159,13 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
       uncertainSegments: uncertainFlags,
       originalImageUrl: imageDataUrl,
       summary: scannedCleanText.slice(0, 160),
-      keyConcepts: ['Scanned Formula', 'Digitized Notes'],
+      keyConcepts: scannedKeyConcepts,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     studyStorage.saveNotebookEntry(entry);
     setNotebookEntries(studyStorage.getNotebookEntries());
+    setScanMsgIsError(false);
     setScanSavedMsg('Saved to My Notebook!');
 
     if (openInLearn) {
@@ -261,6 +240,11 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
   };
 
   const handleRunAudioTranscription = async (openInLearn: boolean) => {
+    if (!recordedBase64 && !spokenOrTypedTranscript.trim()) {
+      setTranscribeError('Record a lecture or type a transcript first.');
+      return;
+    }
+    setTranscribeError(null);
     setIsTranscribing(true);
     try {
       const res = await aiStudyClient.transcribeAudio({
@@ -276,7 +260,7 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
         cleanContent: res.structuredNotes,
         handwrittenContent: res.transcript,
         uncertainSegments: [],
-        audioDurationSeconds: recordingSeconds || 45,
+        audioDurationSeconds: recordingSeconds || undefined,
         summary: res.summary,
         keyConcepts: res.keyConcepts,
         createdAt: new Date().toISOString(),
@@ -309,6 +293,10 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
         onImportAsStudyDocument(newDoc);
         onClose();
       }
+    } catch (err) {
+      setTranscribeError(
+        err instanceof Error ? err.message : 'Could not transcribe this recording.'
+      );
     } finally {
       setIsTranscribing(false);
     }
@@ -459,14 +447,21 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     </div>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white flex items-center justify-center h-64">
-                    <img
-                      src={imageDataUrl}
-                      alt="Scanned study notes preview"
-                      className={`max-h-full max-w-full object-contain transition-transform ${
-                        highContrastPreview ? 'contrast-150 brightness-105' : ''
-                      }`}
-                      style={{ transform: `rotate(${imageRotation}deg)` }}
-                    />
+                    {imageDataUrl ? (
+                      <img
+                        src={imageDataUrl}
+                        alt="Scanned study notes preview"
+                        className={`max-h-full max-w-full object-contain transition-transform ${
+                          highContrastPreview ? 'contrast-150 brightness-105' : ''
+                        }`}
+                        style={{ transform: `rotate(${imageRotation}deg)` }}
+                      />
+                    ) : (
+                      <p className="px-6 text-center text-xs text-slate-500">
+                        Upload or take a photo of your handwritten notes, then press
+                        &ldquo;Extract &amp; Digitize Notes&rdquo;.
+                      </p>
+                    )}
                   </div>
                   <input
                     type="text"
@@ -540,12 +535,21 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                     </div>
                   )}
 
-                  {scanSavedMsg && (
-                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900 flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-[#34A853] shrink-0" />
-                      <span>{scanSavedMsg}</span>
-                    </div>
-                  )}
+                  {scanSavedMsg &&
+                    (scanMsgIsError ? (
+                      <div
+                        role="alert"
+                        className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-medium text-red-900 flex items-center gap-2"
+                      >
+                        <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>{scanSavedMsg}</span>
+                      </div>
+                    ) : (
+                      <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-[#34A853] shrink-0" />
+                        <span>{scanSavedMsg}</span>
+                      </div>
+                    ))}
 
                   <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                     <button
@@ -671,6 +675,16 @@ export const NotebookAndScannerModal: React.FC<NotebookAndScannerModalProps> = (
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
+
+                  {transcribeError && (
+                    <div
+                      role="alert"
+                      className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-medium text-red-900 flex items-center gap-2"
+                    >
+                      <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>{transcribeError}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">

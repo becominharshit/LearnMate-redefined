@@ -83,6 +83,15 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  // If local data belongs to a signed-in account, render nothing private until auth has
+  // resolved: the previous student's data must not flash on a shared device before the wipe.
+  const [hasAccountDataAtStartup] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('learnmate_owner_uid_v1'));
+    } catch {
+      return false;
+    }
+  });
 
   const effectiveDoc = activeDoc || documents[0] || studyStorage.getDocuments()[0];
 
@@ -115,24 +124,38 @@ export function App() {
     setNotifications(studyStorage.getNotifications());
     setStudentProfile(studyStorage.getStudentProfile());
 
+    const reloadLocalState = () => {
+      const refreshedDocs = studyStorage.getDocuments();
+      setDocuments(refreshedDocs);
+      const activeId = studyStorage.getActiveDocumentId();
+      setActiveDoc(
+        (prev) =>
+          refreshedDocs.find((d) => d.id === (prev?.id ?? activeId)) || refreshedDocs[0] || null
+      );
+      setNotifications(studyStorage.getNotifications());
+      setStudentProfile(studyStorage.getStudentProfile());
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      setIsAuthReady(true);
 
       if (currentUser) {
+        setIsAuthReady(true);
         setIsSyncing(true);
         try {
           await studyStorage.syncWithCloudUser(currentUser);
-          const refreshedDocs = studyStorage.getDocuments();
-          setDocuments(refreshedDocs);
-          if (refreshedDocs.length > 0 && !activeDoc) {
-            setActiveDoc(refreshedDocs[0]);
-          }
+          reloadLocalState();
         } catch (err) {
           console.error('Error syncing with Firestore:', err);
         } finally {
           setIsSyncing(false);
         }
+      } else {
+        // Signed out (or no session): wipe the previous account's private data from this browser
+        // before the UI is allowed to render anything.
+        await studyStorage.syncWithCloudUser(null);
+        reloadLocalState();
+        setIsAuthReady(true);
       }
     });
 
@@ -318,6 +341,14 @@ export function App() {
     setNotifications(studyStorage.getNotifications());
   };
 
+  if (hasAccountDataAtStartup && !isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FCFBF9] text-sm text-[#606B7C]">
+        Loading your account…
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FCFBF9] text-[#121827] pt-16">
       {/* True Glassmorphic Top Strip (Clear frosted glass, no colored background) */}
@@ -338,8 +369,16 @@ export function App() {
         user={user}
         isAuthReady={isAuthReady}
         isSyncing={isSyncing}
-        onLogin={signInWithGoogle}
-        onLogout={signOutUser}
+        onLogin={() => {
+          signInWithGoogle().catch((err) => {
+            console.warn('Google sign-in did not complete:', err);
+          });
+        }}
+        onLogout={() => {
+          signOutUser().catch((err) => {
+            console.warn('Sign-out failed:', err);
+          });
+        }}
         documents={documents}
         onSelectDocumentFromSearch={(doc) => handleSelectDocument(doc, 'explain')}
         notifications={notifications}
@@ -506,6 +545,23 @@ export function App() {
                 handleSelectTab('revision');
               }}
             />
+          </div>
+        )}
+
+        {activeTab === 'create' && !effectiveDoc && (
+          <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
+            <h2 className="font-serif-editorial text-3xl font-bold text-[#121827]">
+              Add Study Material First
+            </h2>
+            <p className="text-sm text-[#606B7C]">
+              The creative tools work on one of your study materials. Upload a PDF or paste notes to begin.
+            </p>
+            <button
+              onClick={() => handleSelectTab('home')}
+              className="px-5 py-2.5 rounded-lg lm-btn-accent text-xs font-semibold cursor-pointer"
+            >
+              Upload Study Material
+            </button>
           </div>
         )}
 

@@ -562,28 +562,24 @@ export function buildAiCapabilityRegistry(params: {
         'Routes complex reasoning, game specs, and mini-app specifications to Gemini or verified deterministic educational templates.',
     },
     {
+      // No Higgsfield API client exists in this codebase, so a configured key must never be
+      // reported as a working integration.
       id: 'higgsfield_media',
       name: 'Higgsfield Video & Visual Generation Adapter',
-      provider: hasHiggsfieldApiKey ? 'higgsfield_api' : 'fallback',
-      modelId: 'higgsfield-reel-v1',
-      endpoint: '/api/create/video-lesson, /api/providers/status',
-      authenticationType: hasHiggsfieldApiKey ? 'developer_api_key' : 'deterministic_engine',
-      enabled: true,
+      provider: 'fallback',
+      modelId: 'not-implemented',
+      endpoint: 'none',
+      authenticationType: 'deterministic_engine',
+      enabled: false,
       configured: hasHiggsfieldApiKey,
-      available: hasHiggsfieldApiKey,
+      available: false,
       supportsStreaming: false,
-      supportsAsyncJobs: true,
-      estimatedCostOrBillingCategory: 'developer_api_paid_prepayment',
-      verificationStatus: hasHiggsfieldApiKey ? 'WORKING_VERIFIED' : 'BLOCKED_BY_BILLING',
-      lastCheckedStatus: hasHiggsfieldApiKey
-        ? 'Higgsfield API adapter configured'
-        : 'HIGGSFIELD_API_KEY not configured — using deterministic scientific animation fallback',
-      lastError: hasHiggsfieldApiKey
-        ? undefined
-        : 'HIGGSFIELD_API_KEY is not set in server environment.',
-      userFacingNotice: hasHiggsfieldApiKey
-        ? 'Higgsfield video generation active.'
-        : 'Higgsfield API unconfigured; rendering deterministic mathematical & physics animations.',
+      supportsAsyncJobs: false,
+      estimatedCostOrBillingCategory: 'free_deterministic_local',
+      verificationStatus: 'UNSUPPORTED_IN_CURRENT_ENVIRONMENT',
+      lastCheckedStatus: 'Not implemented: the server makes no Higgsfield API calls.',
+      lastError: 'Higgsfield integration is not implemented.',
+      userFacingNotice: 'Higgsfield video generation is not implemented.',
       fallbackStrategy:
         'Renders verified HTML5 Canvas / SVG multi-scene animated explanations with real kinematics and probability formulas.',
     },

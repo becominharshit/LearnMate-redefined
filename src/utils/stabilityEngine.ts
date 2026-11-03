@@ -81,6 +81,18 @@ export function classifyGeminiError(error: unknown): ClassifiedGeminiError {
 
   const retryAfterMs = extractRetryAfterMs(error);
 
+  // 0. The server has no Gemini credentials at all: say so plainly instead of "generation failed".
+  if (rawMessage === 'NO_API_KEY') {
+    return {
+      category: 'auth_config_error',
+      retryable: false,
+      userMessage:
+        'AI is not set up on this server yet (missing API key), so this feature cannot run right now.',
+      statusCode,
+      rawReason: rawMessage,
+    };
+  }
+
   // 1. Daily or per-model quota exhaustion or depleted prepayment credits (do not retry indefinitely; evaluate before auth_config_error so 429/402 messages mentioning 'check your plan and billing details' are not misclassified)
   if (
     statusCode === 402 ||

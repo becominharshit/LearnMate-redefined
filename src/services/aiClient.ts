@@ -315,6 +315,7 @@ export const aiStudyClient = {
     updatedAt: string;
     articles: DailyNewsArticle[];
     groundedWithSearch: boolean;
+    message?: string;
   }> {
     return postJson('/api/explore/daily-news', { category });
   },
@@ -326,6 +327,8 @@ export const aiStudyClient = {
     city: string;
     studyTopic: string;
     places: EducationalPlaceItem[];
+    message?: string;
+    mapsSearchUri?: string;
   }> {
     return postJson('/api/explore/educational-maps', params);
   },
