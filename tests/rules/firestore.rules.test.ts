@@ -15,10 +15,10 @@ import { deleteDoc, doc, getDoc, getDocs, collection, setDoc, updateDoc } from '
 let env: RulesTestEnvironment;
 
 const now = '2026-11-03T10:00:00.000Z';
-const verifiedGoogle = { email_verified: true, firebase: { sign_in_provider: 'google.com' } };
-const verifiedEmail = { email_verified: true, firebase: { sign_in_provider: 'password' } };
-const unverifiedEmail = { email_verified: false, firebase: { sign_in_provider: 'password' } };
-const anonymous = { email_verified: false, firebase: { sign_in_provider: 'anonymous' } };
+const verifiedGoogle = { email_verified: true, firebase: { sign_in_provider: 'google.com' as const } };
+const verifiedEmail = { email_verified: true, firebase: { sign_in_provider: 'password' as const } };
+const unverifiedEmail = { email_verified: false, firebase: { sign_in_provider: 'password' as const } };
+const anonymous = { email_verified: false, firebase: { sign_in_provider: 'anonymous' as const } };
 
 function studyDoc(uid: string, id = 'doc-1') {
   return {

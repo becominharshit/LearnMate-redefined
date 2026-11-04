@@ -10,7 +10,7 @@
 | 1 | Login | **Google + email/password** for now (no phone OTP). |
 | 2 | Guest preview | **Yes**, "Try a sample chapter" without login (no AI cost). |
 | 3 | Firebase | **New, clean projects of your own** (dev + production). I prepare everything; you do a 10-minute console setup (section 4). |
-| 4 | Create for 16–17-year-olds | **Reconsidered**: Claude makes Create work for every student; Higgsfield only for 18+ (section 5). |
+| 4 | Create for 16–17-year-olds | **Reconsidered**: Claude makes Create work for every student. Higgsfield stays 18+ because its terms forbid younger users; a **parental-approval system** (Phase 2) covers services that do allow minors with consent, and unlocks Higgsfield only if Higgsfield grants a written exception (section 5). |
 | 5 | Plan format | **Phases**, listing every existing feature that changes (section 3). |
 | 6 | Tools and timer | **Keep all tools** (calculator, units, statistics, graph, formulas) behind a **small movable icon**. The **timer is movable** and can be **switched off in Settings**. |
 | 7 | YouTube | **Free option**: official YouTube player + the student pastes the transcript. |
@@ -45,13 +45,20 @@ Each table lists **what exists today → what it becomes**. "New" rows are addit
 | AI endpoints (`/api/study/*`, `/api/create/*`, voice socket) are open to anyone | Every request carries the student's login token and the **server verifies it**. **Per-student limits**: a per-minute rate limit and a daily allowance (e.g. 40 tutor questions, 5 practice sets, 10 diagrams), with a friendly "you've reached today's limit" message. |
 | No security headers; 15 MB request limit everywhere; no CORS rules | Helmet security headers and a Content-Security-Policy, requests only from your own domain, a size limit per route, a link allow-list (YouTube only), and logs that never contain names, notes or tokens. |
 | Firestore rules (already owner-only) | Kept, with **stricter field checks**, plus **automated tests** on the local emulator proving student A can't read or write student B's data. |
-| AI: Claude, with Gemini as fallback | **Claude only.** Gemini code paths and `.env` settings removed. Gemini-only features are replaced: voice answers use Claude plus the browser's speech, and YouTube is handled in Phase 3. |
+| AI: Claude, with Gemini as fallback | **Claude only.** Gemini is switched off now (even if Google keys exist); its leftover modules and environment settings are removed in Phase 3. Voice answers use Claude plus the browser's speech, and YouTube is rebuilt in Phase 3. |
 | No safeguards for minors | Anthropic's requirements for apps serving minors: "You're chatting with an AI" labels, a safety instruction in every prompt, a **"Report"** button on AI answers (saved for review), and a public safety statement page. |
 | Usage stats for the admin only | Plus per-student usage counters, so you can see the cost per student. |
 | Create (Higgsfield) open to everyone | **Switched off** until the age question exists (Phase 2), then **18+ only**, checked on the server (Phase 5). |
 
 **Done when:** a script without a login gets "401"; student A cannot see B's data (automated test); the server log shows Claude only.
 **You do:** the Firebase console steps in section 4.
+
+**Status (4 Nov 2026):** ✅ Built and verified.
+- Sign-in checks, per-student limits, security headers, origin checks, request-size limits and the AI Report button are in place.
+- Firestore rules are stricter and covered by 5 emulator tests (student A cannot read, list, change or delete student B's data; unverified, anonymous and signed-out accounts get nothing).
+- The full end-to-end check passed: no login → 401, forged token → 401, unverified email → 403, daily limit → 429, another site's origin → 403, oversized upload → 413, another student's video job → 404, voice socket without login → refused.
+- Gemini is switched off in code; its old modules and environment variables are removed in Phase 3 with the features that used them.
+- Creating the Firebase projects is still the one step only you can do (section 4). Until then the app runs against the local emulator.
 
 ### Phase 2: First impression (landing page, sample chapter, profile)
 
@@ -63,6 +70,7 @@ Each table lists **what exists today → what it becomes**. "New" rows are addit
 | "Set up your JEE profile" banner stays until the name is changed (bug) | Shown **until the first-run setup is completed**, then gone. |
 | Long profile form (education stage, board, school, university, goals…) | **First-run setup with 4 questions**: name, class and exam session, language, age band. Everything else is optional under "More about you". The profile syncs privately to the student's account. |
 | No legal pages | **Privacy policy, Terms, AI & safety statement, contact / grievance officer.** |
+| No age or parental-approval system | **First-run age band** (under 16 / 16–17 / 18+). A 16–17-year-old can ask a parent or guardian to approve by email link; the approval, its date and what it covers are stored privately with the student's profile. Approval unlocks only features whose provider allows minors with consent — **Higgsfield stays blocked** unless it grants a written exception (section 5). |
 
 **Done when:** a new visitor reaches a first explanation within 60 seconds, and the banner disappears after setup.
 
@@ -140,6 +148,8 @@ I can't create projects in your Google account. Please:
    ```
 5. Later, repeat 1–4 for the production project `LearnMate JEE` and add your website domain under **Authentication → Settings → Authorized domains**.
 
+The same keys are documented in `.env.example` with short explanations. **Emulator mode** lets me test without a project: set `VITE_FIREBASE_USE_EMULATOR="true"` and `VITE_FIREBASE_PROJECT_ID="demo-learnmate"`, then run `npm run emulators` in a second terminal. The emulator rules tests run with `npm run test:rules`.
+
 To deploy the security rules, run `npx firebase-tools login` once in a terminal (it opens your browser). I handle the rest. Until then I build and test against the local Firebase emulator.
 
 ## 5. Create for 16–17-year-olds (reconsidered)
@@ -164,9 +174,11 @@ India's IT Rules amendment (in force 20 Feb 2026) also requires **realistic** AI
    - training opt-out switched on;
    - files removed from Higgsfield soon after the student downloads them;
    - every image and video labelled **"AI-generated"**.
-3. **Later, only if needed:** photo-style images for 16–17-year-olds via OpenAI's image API, with parental consent. India's DPDP Act requires parental consent for under-18s from about May 2027 anyway.
+3. **Parental approval (built in Phase 2), as you asked.** A 16–17-year-old can send a parent or guardian an email link; once the parent approves, the consent is recorded privately with the student's profile, including its date and what it covers. This unlocks only providers that allow minors with parental consent. It does **not** override a provider's age limit.
+4. **Higgsfield exception:** I have drafted an email asking Higgsfield to confirm in writing whether supervised classroom use by 16–17-year-olds, with verified parental consent, is allowed (`docs/HIGGSFIELD_AGE_EXCEPTION_EMAIL.md`). If they agree, the same parental-approval record unlocks Higgsfield. If they refuse or do not reply, Higgsfield remains 18+ — letting younger students use it could get your account closed.
+5. **Later, only if needed and funded:** photo-style images and short videos for 16–17-year-olds via a provider whose terms allow minors with parental consent (for example OpenAI's image API). India's DPDP Act requires verifiable parental consent for under-18s from about May 2027 anyway.
 
-**You do now:** in your Higgsfield Workspace settings, switch on the **training opt-out**. It takes up to 10 business days to apply.
+**You do now:** in your Higgsfield Workspace settings, switch on the **training opt-out** (up to 10 business days to apply). If you want the age exception, send the drafted email from your Higgsfield account address and keep the reply.
 
 ## 6. How private data flows
 

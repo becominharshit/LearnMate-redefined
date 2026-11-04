@@ -9,15 +9,32 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: GOOGLE_GENAI_USE_VERTEXAI
-        value: "false"
+      # Firebase web settings are needed at build time (Vite) as well as at runtime.
+      # Add these in the Render dashboard; see docs/PHASE2_PLAN.md section 4.
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false
+      - key: VITE_SUPPORT_EMAIL
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: AI_PROVIDER
-        value: auto
-      - key: GEMINI_API_KEY
+      - key: APP_URL
         sync: false
-      - key: HIGGSFIELD_API_KEY
+      - key: ALLOWED_ORIGINS
         sync: false
       - key: ADMIN_TOKEN
+        sync: false
+      # Optional: Higgsfield stays paused until age checks exist.
+      - key: HIGGSFIELD_API_KEY
+        sync: false
+      - key: HIGGSFIELD_API_SECRET
         sync: false

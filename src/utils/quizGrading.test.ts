@@ -9,12 +9,22 @@ import {
   computeOverallProgressSummary,
   generateStudyProgressReportText,
   parseYouTubeUrl,
+  isValidYouTubeVideoId,
   formatTimestamp,
   computeTimerRemainingSeconds,
   buildGroundedStickyNotesAndFlashcards,
   buildGroundedMindMapAndRevisionSheet,
 } from './quizGrading';
 import type { QuizQuestion, RevisionTask } from '../types/study';
+
+test('isValidYouTubeVideoId accepts only 11-character ids', () => {
+  assert.equal(isValidYouTubeVideoId('dQw4w9WgXcQ'), true);
+  assert.equal(isValidYouTubeVideoId('abc_-123456'), true);
+  assert.equal(isValidYouTubeVideoId('short'), false);
+  assert.equal(isValidYouTubeVideoId('https://evil.example'), false);
+  assert.equal(isValidYouTubeVideoId('dQw4w9WgXcQ/../evil'), false);
+  assert.equal(isValidYouTubeVideoId(undefined), false);
+});
 
 test('validateMaterialInput enforces PDF page count and file type limits', () => {
   const validPdf = validateMaterialInput({

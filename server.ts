@@ -1188,7 +1188,7 @@ Rules for Voice Tutoring:
                     message:
                       err instanceof Error
                         ? err.message
-                        : 'Gemini Live stream switched to grounded voice synthesis.',
+                        : 'Live voice stream ended; switching to Claude voice answers.',
                   });
                 },
                 onclose: () => {
@@ -1360,6 +1360,8 @@ async function startServer() {
             reportOnly: true,
             directives: {
               defaultSrc: ["'self'"],
+              // function-plot compiles equations with new Function(), so enforcing this policy
+              // later needs 'unsafe-eval' or a switch to a parser such as JSXGraph (Phase 6).
               scriptSrc: ["'self'", 'https://apis.google.com', 'https://www.gstatic.com'],
               connectSrc: [
                 "'self'",
@@ -2647,7 +2649,7 @@ Analyze the provided study material and generate:
         res.status(503).json({
           error:
             notice.aiNotice ||
-            'Gemini model timed out; client will use grounded local concept map.',
+            'The AI model timed out; the app will use its local concept map instead.',
           aiStatus: notice.aiStatus,
           aiNotice: notice.aiNotice,
         });
@@ -3004,8 +3006,8 @@ Never fabricate content if the video has no educational material.`,
         return;
       }
 
-      const apiKey = (process.env.YOUTUBE_API_KEY || process.env.GEMINI_API_KEY || '').trim();
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+      const apiKey = (process.env.YOUTUBE_API_KEY || '').trim();
+      if (!apiKey || apiKey.startsWith('MY_')) {
         res.json({
           configured: false,
           videos: [],

@@ -34,6 +34,11 @@ export interface ParsedYouTubeUrl {
   error?: string;
 }
 
+/** True when a stored video id is safe to place in a YouTube embed URL. */
+export function isValidYouTubeVideoId(videoId: string | null | undefined): videoId is string {
+  return Boolean(videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId));
+}
+
 /**
  * Validates and parses a public YouTube URL into a canonical 11-character videoId.
  */
@@ -84,7 +89,7 @@ export function parseYouTubeUrl(rawUrl: string): ParsedYouTubeUrl {
   }
 
   videoId = videoId.trim();
-  if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+  if (!isValidYouTubeVideoId(videoId)) {
     return {
       valid: false,
       error: 'Could not find a valid 11-character YouTube video ID in the link.',

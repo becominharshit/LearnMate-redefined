@@ -48,6 +48,7 @@ import {
   computeTopicProgress,
   computeOverallProgressSummary,
   formatSourceReferenceLabel,
+  isValidYouTubeVideoId,
 } from '../utils/quizGrading';
 import { renderPdfPageToCanvas } from '../utils/pdfExtractor';
 import { classifyJeeSubject } from '../utils/jeeSubjects';
@@ -1343,11 +1344,13 @@ export const StudyView: React.FC<StudyViewProps> = ({
                 </div>
 
                 {/* Embedded YouTube Player when activeDocument is a YouTube Lecture */}
-                {activeDocument.sourceType === 'youtube' && activeDocument.videoId && (
+                {activeDocument.sourceType === 'youtube' &&
+                  isValidYouTubeVideoId(activeDocument.videoId) && (
                   <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-900 aspect-video">
                     <iframe
                       title={activeDocument.title}
-                      src={`https://www.youtube.com/embed/${activeDocument.videoId}?start=${
+                      // youtube-nocookie reduces tracking of students who are minors.
+                      src={`https://www.youtube-nocookie.com/embed/${activeDocument.videoId}?start=${
                         activePageObj?.timestampSeconds || 0
                       }&rel=0`}
                       className="w-full h-full"
