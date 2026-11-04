@@ -6,20 +6,41 @@ import {
   browserLocalPersistence,
   inMemoryPersistence,
   browserPopupRedirectResolver,
+  connectAuthEmulator,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  updateProfile,
+  reload,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   type Auth,
   type User,
 } from 'firebase/auth';
-import {
-  getFirestore,
-  doc,
-  getDocFromServer,
-  setLogLevel,
-} from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import { getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/firestore';
+
+/**
+ * Firebase settings come from .env (VITE_FIREBASE_*), so dev and production projects stay
+ * separate. With VITE_FIREBASE_USE_EMULATOR=true the app uses the local Firebase emulators.
+ */
+const env = import.meta.env;
+export const usingFirebaseEmulator = env.VITE_FIREBASE_USE_EMULATOR === 'true';
+const projectId = env.VITE_FIREBASE_PROJECT_ID || (usingFirebaseEmulator ? 'demo-learnmate' : '');
+
+/** False when .env has no Firebase project yet; the app then shows setup instructions. */
+export const firebaseConfigured = usingFirebaseEmulator || Boolean(env.VITE_FIREBASE_API_KEY && projectId);
+
+const firebaseConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY || 'demo-api-key',
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || `${projectId || 'demo-learnmate'}.firebaseapp.com`,
+  projectId: projectId || 'demo-learnmate',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: env.VITE_FIREBASE_APP_ID,
+};
 
 /**
  * Removes leftover Firebase Auth keys from localStorage and sessionStorage after sign-out.
@@ -66,11 +87,13 @@ function createSafeAuth(): Auth {
 }
 
 export const auth = createSafeAuth();
-export const db =
-  firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-    : getFirestore(app);
+export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
+
+if (usingFirebaseEmulator) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
 
 // Suppress noisy internal SDK connection retry warnings when operating in local-first mode
 try {
@@ -88,23 +111,13 @@ export enum OperationType {
   WRITE = 'write',
 }
 
+/** Logged on sync errors. Deliberately contains no email, name or photo. */
 export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  };
+  signedIn: boolean;
+  emailVerified: boolean | undefined;
 }
 
 export function isAuthTokenServiceError(error: unknown): boolean {
@@ -131,43 +144,13 @@ export function handleFirestoreError(
 
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo:
-        auth.currentUser?.providerData.map((provider) => ({
-          providerId: provider.providerId,
-          displayName: provider.displayName,
-          email: provider.email,
-          photoUrl: provider.photoURL,
-        })) || [],
-    },
     operationType,
-    path,
+    // The path contains the account id; keep only its shape.
+    path: path ? path.replace(/^users\/[^/]+/, 'users/{uid}') : null,
+    signedIn: Boolean(auth.currentUser),
+    emailVerified: auth.currentUser?.emailVerified,
   };
   console.warn('Firestore sync notice:', JSON.stringify(errInfo));
-}
-
-export async function testFirestoreConnection(): Promise<void> {
-  try {
-    if (auth.currentUser) {
-      try {
-        await auth.currentUser.getIdToken(false);
-      } catch {
-        await firebaseSignOut(auth);
-      }
-    }
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (isAuthTokenServiceError(error)) {
-      await firebaseSignOut(auth).catch(() => {});
-      return;
-    }
-    // Permission-denied on 'test/connection' is expected and confirms backend reachability.
-  }
 }
 
 export async function signInWithGoogle(): Promise<User | null> {
@@ -177,6 +160,54 @@ export async function signInWithGoogle(): Promise<User | null> {
     browserPopupRedirectResolver
   );
   return result.user;
+}
+
+export async function signInWithEmail(email: string, password: string): Promise<User> {
+  const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return result.user;
+}
+
+/** Creates an email/password account and sends the verification email. */
+export async function createAccountWithEmail(
+  name: string,
+  email: string,
+  password: string
+): Promise<User> {
+  const result = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  if (name.trim()) {
+    await updateProfile(result.user, { displayName: name.trim() });
+  }
+  await sendEmailVerification(result.user);
+  return result.user;
+}
+
+export async function resendVerificationEmail(): Promise<void> {
+  if (auth.currentUser) await sendEmailVerification(auth.currentUser);
+}
+
+export async function sendPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email.trim());
+}
+
+/** Reloads the account (e.g. after the student clicked the verification link) and refreshes its token. */
+export async function refreshCurrentUser(): Promise<User | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+  await reload(user);
+  await user.getIdToken(true);
+  return auth.currentUser;
+}
+
+/** Email/password accounts must verify their address before using the app; Google accounts are verified. */
+export function needsEmailVerification(user: User | null): boolean {
+  return Boolean(
+    user && !user.emailVerified && user.providerData.some((p) => p.providerId === 'password')
+  );
+}
+
+/** The signed-in student's ID token for API calls (refreshed automatically when it expires). */
+export async function getApiIdToken(forceRefresh = false): Promise<string | null> {
+  return auth.currentUser ? auth.currentUser.getIdToken(forceRefresh) : null;
 }
 
 export async function signOutUser(): Promise<void> {

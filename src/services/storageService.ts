@@ -109,9 +109,24 @@ export interface IStudyStorageRepository {
   getStudentProfile(): StudentAcademicProfile;
   saveStudentProfile(profile: StudentAcademicProfile): void;
 
+  /** Saves a student's report about an AI answer to their private area for review. */
+  submitAiReport(report: AiContentReport): Promise<void>;
+
   clearAllProgress(): void;
   syncWithCloudUser(user: User | null): Promise<void>;
   subscribe(listener: () => void): () => void;
+}
+
+export type AiReportKind = 'tutor_answer' | 'practice_question';
+export type AiReportReason = 'wrong' | 'unclear' | 'inappropriate' | 'other';
+
+export interface AiContentReport {
+  kind: AiReportKind;
+  reason: AiReportReason;
+  note?: string;
+  /** The AI text being reported (trimmed to 2,000 characters). */
+  excerpt: string;
+  documentId?: string;
 }
 
 const KEYS = {
@@ -1421,6 +1436,22 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     };
     safeWriteJson(KEYS.STUDENT_PROFILE, updated);
     this.notifyListeners();
+  }
+
+  async submitAiReport(report: AiContentReport): Promise<void> {
+    const user = this.currentUser;
+    if (!user) throw new Error('Please sign in to send a report.');
+    const id = `report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await setDoc(doc(db, 'users', user.uid, 'reports', id), {
+      id,
+      uid: user.uid,
+      kind: report.kind,
+      reason: report.reason,
+      note: (report.note || '').trim().slice(0, 500),
+      excerpt: report.excerpt.slice(0, 2000),
+      documentId: (report.documentId || '').slice(0, 160),
+      createdAt: new Date().toISOString(),
+    });
   }
 
   clearAllProgress(): void {

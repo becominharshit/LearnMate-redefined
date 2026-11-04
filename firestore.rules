@@ -4,16 +4,22 @@ service cloud.firestore {
     // ===============================================================
     // Helper Functions
     // ===============================================================
-    function isAuthenticated() {
-      return request.auth != null;
+
+    // Google accounts, or email accounts whose address has been verified. Anonymous and
+    // unverified accounts can't read or write anything.
+    function isVerifiedStudent() {
+      return request.auth != null &&
+             request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+             request.auth.token.email_verified == true;
     }
 
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isVerifiedStudent() && request.auth.uid == userId;
     }
 
     function isValidUserProfile(data, userId) {
       return data.keys().hasAll(['uid', 'updatedAt']) &&
+             data.keys().hasOnly(['uid', 'updatedAt', 'email', 'displayName', 'photoURL', 'activeDocumentId']) &&
              data.uid is string && data.uid == userId &&
              data.updatedAt is string && data.updatedAt.size() <= 64 &&
              (!('email' in data) || (data.email is string && data.email.size() <= 320)) &&
@@ -22,10 +28,11 @@ service cloud.firestore {
              (!('activeDocumentId' in data) || (data.activeDocumentId is string && data.activeDocumentId.size() <= 160));
     }
 
-    function isValidStudyDocument(data, userId) {
+    function isValidStudyDocument(data, userId, docId) {
       return data.keys().hasAll(['id', 'uid', 'title', 'sourceType', 'pageCount', 'pagesJson', 'topicsJson', 'overview', 'createdAt', 'lastStudiedAt']) &&
+             data.keys().hasOnly(['id', 'uid', 'title', 'sourceType', 'pageCount', 'pagesJson', 'topicsJson', 'overview', 'createdAt', 'lastStudiedAt', 'youtubeUrl', 'videoId']) &&
              data.uid is string && data.uid == userId &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 160 &&
+             data.id is string && data.id == docId && data.id.size() <= 160 &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
              data.sourceType in ['pdf', 'text', 'youtube', 'scanned_notes', 'voice_note', 'course'] &&
              (!('youtubeUrl' in data) || (data.youtubeUrl is string && data.youtubeUrl.size() <= 1024)) &&
@@ -38,24 +45,26 @@ service cloud.firestore {
              data.lastStudiedAt is string && data.lastStudiedAt.size() <= 64;
     }
 
-    function isValidQuizAttempt(data, userId) {
+    function isValidQuizAttempt(data, userId, attemptId) {
       return data.keys().hasAll(['id', 'uid', 'documentId', 'documentTitle', 'mode', 'score', 'totalQuestions', 'percentage', 'attemptJson', 'completedAt']) &&
+             data.keys().hasOnly(['id', 'uid', 'documentId', 'documentTitle', 'mode', 'score', 'totalQuestions', 'percentage', 'attemptJson', 'completedAt']) &&
              data.uid is string && data.uid == userId &&
-             data.id is string && data.id.size() > 0 && data.id.size() <= 160 &&
+             data.id is string && data.id == attemptId && data.id.size() <= 160 &&
              data.documentId is string && data.documentId.size() > 0 && data.documentId.size() <= 160 &&
              data.documentTitle is string && data.documentTitle.size() <= 300 &&
              data.mode in ['diagnostic', 'adaptive', 'jee_simulator'] &&
-             data.score is int && data.score >= 0 && data.score <= 100 &&
+             data.score is int && data.score >= 0 && data.score <= 300 &&
              data.totalQuestions is int && data.totalQuestions >= 1 && data.totalQuestions <= 100 &&
              data.percentage is int && data.percentage >= 0 && data.percentage <= 100 &&
              data.attemptJson is string && data.attemptJson.size() <= 500000 &&
              data.completedAt is string && data.completedAt.size() <= 64;
     }
 
-    function isValidStudyState(data, userId) {
+    function isValidStudyState(data, userId, docId) {
       return data.keys().hasAll(['documentId', 'uid', 'updatedAt']) &&
+             data.keys().hasOnly(['documentId', 'uid', 'updatedAt', 'tutorMessagesJson', 'mistakesJson', 'revisionPlanJson', 'cachedQuizJson', 'quickReviseJson']) &&
              data.uid is string && data.uid == userId &&
-             data.documentId is string && data.documentId.size() > 0 && data.documentId.size() <= 160 &&
+             data.documentId is string && data.documentId == docId && data.documentId.size() <= 160 &&
              data.updatedAt is string && data.updatedAt.size() <= 64 &&
              (!('tutorMessagesJson' in data) || (data.tutorMessagesJson is string && data.tutorMessagesJson.size() <= 600000)) &&
              (!('mistakesJson' in data) || (data.mistakesJson is string && data.mistakesJson.size() <= 300000)) &&
@@ -64,8 +73,23 @@ service cloud.firestore {
              (!('quickReviseJson' in data) || (data.quickReviseJson is string && data.quickReviseJson.size() <= 500000));
     }
 
+    // Reports a student files about an AI answer; reviewed by the LearnMate team in the console.
+    function isValidAiReport(data, userId, reportId) {
+      return data.keys().hasOnly(['id', 'uid', 'kind', 'reason', 'note', 'excerpt', 'documentId', 'createdAt']) &&
+             data.keys().hasAll(['id', 'uid', 'kind', 'reason', 'excerpt', 'createdAt']) &&
+             data.uid is string && data.uid == userId &&
+             data.id is string && data.id == reportId && data.id.size() <= 160 &&
+             data.kind in ['tutor_answer', 'practice_question'] &&
+             data.reason in ['wrong', 'unclear', 'inappropriate', 'other'] &&
+             (!('note' in data) || (data.note is string && data.note.size() <= 500)) &&
+             data.excerpt is string && data.excerpt.size() <= 2000 &&
+             (!('documentId' in data) || (data.documentId is string && data.documentId.size() <= 160)) &&
+             data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
     // ===============================================================
-    // User Scoped Collections
+    // User Scoped Collections: every student can reach only their own data.
+    // Anything not matched below is denied.
     // ===============================================================
     match /users/{userId} {
       allow read: if isOwner(userId);
@@ -74,19 +98,25 @@ service cloud.firestore {
 
       match /documents/{docId} {
         allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidStudyDocument(request.resource.data, userId);
+        allow create, update: if isOwner(userId) && isValidStudyDocument(request.resource.data, userId, docId);
         allow delete: if isOwner(userId);
       }
 
       match /attempts/{attemptId} {
         allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidQuizAttempt(request.resource.data, userId);
+        allow create, update: if isOwner(userId) && isValidQuizAttempt(request.resource.data, userId, attemptId);
         allow delete: if isOwner(userId);
       }
 
       match /studyState/{docId} {
         allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidStudyState(request.resource.data, userId);
+        allow create, update: if isOwner(userId) && isValidStudyState(request.resource.data, userId, docId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /reports/{reportId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidAiReport(request.resource.data, userId, reportId);
         allow delete: if isOwner(userId);
       }
     }

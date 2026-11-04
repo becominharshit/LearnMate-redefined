@@ -26,6 +26,7 @@ import { aiStudyClient } from '../services/aiClient';
 import { classifyJeeSubject } from '../utils/jeeSubjects';
 import { QuizProctorOverlay } from './QuizProctorOverlay';
 import { MathText } from './MathText';
+import { ReportButton } from './ReportButton';
 
 interface PracticeWorkspaceViewProps {
   documents: StudyDocument[];
@@ -451,8 +452,17 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           {/* Grounded Explanation Box when submitted */}
           {submittedResult && (
             <div className="p-4 rounded-xl bg-canvas border border-line space-y-1.5 text-xs">
-              <div className="font-semibold text-brand">
-                Solution (Source: Page {activeQuestion.sourcePage})
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-brand">
+                  AI-written solution (Source: Page {activeQuestion.sourcePage})
+                </span>
+                <ReportButton
+                  kind="practice_question"
+                  excerpt={`${activeQuestion.question}\n\nOptions: ${activeQuestion.options.join(' | ')}\nMarked answer: ${
+                    activeQuestion.options[activeQuestion.correctIndex]
+                  }\n\nSolution: ${activeQuestion.explanation}`}
+                  documentId={currentDoc?.id}
+                />
               </div>
               <MathText text={activeQuestion.explanation} className="text-sm text-ink" />
             </div>

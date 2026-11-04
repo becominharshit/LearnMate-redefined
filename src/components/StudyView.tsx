@@ -56,6 +56,7 @@ import { QuickReviseView } from './QuickReviseView';
 import { ExploreFurtherView } from './ExploreFurtherView';
 import { QuizProctorOverlay } from './QuizProctorOverlay';
 import { MathText } from './MathText';
+import { ReportButton } from './ReportButton';
 
 export type StudySubMode =
   | 'explain'
@@ -636,7 +637,8 @@ export const StudyView: React.FC<StudyViewProps> = ({
               Ask, understand, move forward.
             </h1>
             <p className="lm-editorial-subtitle text-base sm:text-lg text-body">
-              Get clear, step-by-step explanations, examples, and practice, tailored to your study material.
+              Step-by-step explanations, examples and practice from your study material. Answers are
+              written by AI and can contain mistakes, so use Report if something looks wrong.
             </p>
           </div>
 
@@ -846,9 +848,12 @@ export const StudyView: React.FC<StudyViewProps> = ({
 
             {/* The tutor's latest answer, or quick actions for this page */}
             <div className="p-4 rounded-xl bg-canvas border border-line space-y-3">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-brand">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>AI tutor</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-brand">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>AI tutor</span>
+                </div>
+                <span className="text-[10px] text-muted">AI can make mistakes</span>
               </div>
 
               {isAskingTutor ? (
@@ -893,20 +898,27 @@ export const StudyView: React.FC<StudyViewProps> = ({
                 <p className="text-xs text-danger leading-relaxed">{tutorError}</p>
               )}
 
-              <div className="pt-2 border-t border-soft flex items-center justify-between text-[11px]">
+              <div className="pt-2 border-t border-soft flex items-center justify-between gap-2 text-[11px]">
                 <span className="text-muted">Page {currentPage}</span>
                 {latestTutorAnswer && !isAskingTutor && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void handleAskTutor(
-                        `Explain that again more simply, with a different example from page ${currentPage}.`
-                      )
-                    }
-                    className="font-semibold text-brand hover:underline cursor-pointer"
-                  >
-                    Explain differently →
-                  </button>
+                  <span className="flex items-center gap-3">
+                    <ReportButton
+                      kind="tutor_answer"
+                      excerpt={latestTutorAnswer.content}
+                      documentId={activeDocument.id}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleAskTutor(
+                          `Explain that again more simply, with a different example from page ${currentPage}.`
+                        )
+                      }
+                      className="font-semibold text-brand hover:underline cursor-pointer"
+                    >
+                      Explain differently →
+                    </button>
+                  </span>
                 )}
               </div>
             </div>
@@ -1960,14 +1972,21 @@ export const StudyView: React.FC<StudyViewProps> = ({
                                 <Sparkles className="w-3.5 h-3.5" />
                               </span>
                               <span className="text-xs font-bold text-ink">
-                                LearnMate Tutor
+                                LearnMate AI tutor
                               </span>
                             </div>
-                            <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${sourceBadgeStyle}`}
-                            >
-                              {sourceLabel}
-                            </span>
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${sourceBadgeStyle}`}
+                              >
+                                {sourceLabel}
+                              </span>
+                              <ReportButton
+                                kind="tutor_answer"
+                                excerpt={msg.content}
+                                documentId={activeDocument.id}
+                              />
+                            </div>
                           </div>
 
                           {/* Reading Prose */}

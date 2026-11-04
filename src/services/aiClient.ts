@@ -23,6 +23,7 @@ import type {
   Generate3DModelResponse,
   Custom3DSceneSpec,
 } from '../types/study';
+import { apiFetch } from './apiFetch';
 
 export interface AiStatusMetadata {
   aiStatus?: string;
@@ -149,7 +150,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 
   const task = (async () => {
     try {
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: serialized,
@@ -305,7 +306,7 @@ export const aiStudyClient = {
     errorReason?: string;
     verificationStatus?: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' | 'WORKING_WITH_NON_AI_FALLBACK';
   }> {
-    const resp = await fetch(`/api/create/video-jobs/${encodeURIComponent(jobId)}`);
+    const resp = await apiFetch(`/api/create/video-jobs/${encodeURIComponent(jobId)}`);
     if (!resp.ok) {
       throw new Error(resp.status === 404 ? 'Video job not found.' : 'Could not check the video status.');
     }

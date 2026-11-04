@@ -13,6 +13,9 @@ import { ProgressView } from './components/ProgressView';
 import { VoiceTutorModal } from './components/VoiceTutorModal';
 import { NotebookAndScannerModal } from './components/NotebookAndScannerModal';
 import { DynamicCompanion } from './components/DynamicCompanion';
+import { AuthScreen } from './components/AuthScreen';
+import { VerifyEmailScreen, FirebaseSetupScreen } from './components/AccountGateScreens';
+import { SafetyStatementPage } from './components/SafetyStatementPage';
 import {
   StudyDocument,
   LearnMateNotification,
@@ -24,6 +27,8 @@ import { aiStudyClient } from './services/aiClient';
 import { splitTextIntoPages } from './utils/quizGrading';
 import {
   auth,
+  firebaseConfigured,
+  needsEmailVerification,
   signInWithGoogle,
   signOutUser,
   onAuthStateChanged,
@@ -83,17 +88,48 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  // If local data belongs to a signed-in account, render nothing private until auth has
-  // resolved: the previous student's data must not flash on a shared device before the wipe.
-  const [hasAccountDataAtStartup] = useState(() => {
-    try {
-      return Boolean(localStorage.getItem('learnmate_owner_uid_v1'));
-    } catch {
-      return false;
-    }
-  });
+  // Forces a re-render after the student verifies their email (reload() mutates the same User).
+  const [, setVerificationCheck] = useState(0);
+  const [showSafetyPage, setShowSafetyPage] = useState(
+    () => typeof window !== 'undefined' && window.location.hash === '#safety'
+  );
 
   const effectiveDoc = activeDoc || documents[0] || studyStorage.getDocuments()[0];
+
+  const reloadLocalState = () => {
+    const refreshedDocs = studyStorage.getDocuments();
+    setDocuments(refreshedDocs);
+    const activeId = studyStorage.getActiveDocumentId();
+    setActiveDoc(
+      (prev) =>
+        refreshedDocs.find((d) => d.id === (prev?.id ?? activeId)) || refreshedDocs[0] || null
+    );
+    setNotifications(studyStorage.getNotifications());
+    setStudentProfile(studyStorage.getStudentProfile());
+  };
+
+  /** Loads the signed-in student's private data from their cloud area. */
+  const syncAccount = async (currentUser: User) => {
+    setIsSyncing(true);
+    try {
+      await studyStorage.syncWithCloudUser(currentUser);
+      reloadLocalState();
+    } catch (err) {
+      console.error('Error syncing with Firestore:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const openSafetyPage = () => {
+    window.history.pushState(null, '', '#safety');
+    setShowSafetyPage(true);
+  };
+
+  const closeSafetyPage = () => {
+    setShowSafetyPage(false);
+    window.history.pushState(null, '', `#${activeTab}`);
+  };
 
   const handleSelectTab = (tab: ActiveTab) => {
     setActiveTab(tab);
@@ -108,11 +144,16 @@ export function App() {
 
   useEffect(() => {
     const onHashChange = () => {
+      setShowSafetyPage(window.location.hash === '#safety');
       const tabFromHash = parseTabFromHash();
       setActiveTab(tabFromHash);
     };
     window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('popstate', onHashChange);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('popstate', onHashChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -124,31 +165,14 @@ export function App() {
     setNotifications(studyStorage.getNotifications());
     setStudentProfile(studyStorage.getStudentProfile());
 
-    const reloadLocalState = () => {
-      const refreshedDocs = studyStorage.getDocuments();
-      setDocuments(refreshedDocs);
-      const activeId = studyStorage.getActiveDocumentId();
-      setActiveDoc(
-        (prev) =>
-          refreshedDocs.find((d) => d.id === (prev?.id ?? activeId)) || refreshedDocs[0] || null
-      );
-      setNotifications(studyStorage.getNotifications());
-      setStudentProfile(studyStorage.getStudentProfile());
-    };
-
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
 
       if (currentUser) {
         setIsAuthReady(true);
-        setIsSyncing(true);
-        try {
-          await studyStorage.syncWithCloudUser(currentUser);
-          reloadLocalState();
-        } catch (err) {
-          console.error('Error syncing with Firestore:', err);
-        } finally {
-          setIsSyncing(false);
+        // Email accounts sync only after verification (the database refuses them until then).
+        if (!needsEmailVerification(currentUser)) {
+          await syncAccount(currentUser);
         }
       } else {
         // Signed out (or no session): wipe the previous account's private data from this browser
@@ -341,11 +365,32 @@ export function App() {
     setNotifications(studyStorage.getNotifications());
   };
 
-  if (hasAccountDataAtStartup && !isAuthReady) {
+  // Public pages and account gates: nothing private renders until a verified student is signed in.
+  if (showSafetyPage) {
+    return <SafetyStatementPage onBack={closeSafetyPage} />;
+  }
+  if (!firebaseConfigured) {
+    return <FirebaseSetupScreen />;
+  }
+  if (!isAuthReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-canvas text-sm text-muted">
         Loading your account…
       </div>
+    );
+  }
+  if (!user) {
+    return <AuthScreen onOpenSafety={openSafetyPage} />;
+  }
+  if (needsEmailVerification(user)) {
+    return (
+      <VerifyEmailScreen
+        user={user}
+        onVerified={() => {
+          setVerificationCheck((n) => n + 1);
+          void syncAccount(user);
+        }}
+      />
     );
   }
 

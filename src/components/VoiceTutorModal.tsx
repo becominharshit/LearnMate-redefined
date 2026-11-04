@@ -25,6 +25,7 @@ import {
   finalizeActiveTranscriptTurn,
   type VoiceTranscriptEntry,
 } from '../utils/stabilityEngine';
+import { getApiIdToken } from '../firebase';
 
 interface TranscriptTurnItem extends VoiceTranscriptEntry {
   citations?: TutorCitation[];
@@ -563,10 +564,13 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
+      // The server only answers after it has verified the student's login token.
+      const idToken = await getApiIdToken().catch(() => null);
       ws.send(
         JSON.stringify({
           type: 'setup',
+          idToken,
           title: studyDoc.title,
           pages: studyDoc.pages,
           weakTopics,
@@ -577,12 +581,12 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        if (msg.type === 'error') {
+          setStatusNote(msg.message || 'Please sign in again to use the voice tutor.');
+          return;
+        }
         if (msg.type === 'status') {
-          if (msg.state === 'connected') {
-            setStatusNote('Connected to Gemini Live Audio (gemini-3.8-live)');
-          } else {
-            setStatusNote('Interactive Voice Tutor Ready');
-          }
+          setStatusNote('AI voice tutor ready. Answers are written by AI and can contain mistakes.');
           const greeting = `Hi! I'm LearnMate Buddy, your voice tutor for ${studyDoc.title.replace(
             /\.pdf$/i,
             ''

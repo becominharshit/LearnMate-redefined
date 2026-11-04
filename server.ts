@@ -7,6 +7,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
+import helmet from 'helmet';
+import { initializeApp as initializeAdminApp, getApps as getAdminApps } from 'firebase-admin/app';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { GoogleGenAI, Modality, ThinkingLevel, Type } from '@google/genai';
 import {
   GeminiRequestManager,
@@ -56,21 +59,58 @@ import {
   type HiggsfieldSubmitResponse,
 } from './src/utils/higgsfieldClient.ts';
 import type { Custom3DSceneSpec } from './src/types/study.ts';
+import {
+  authenticateStudent,
+  readBearerToken,
+  type IdTokenVerifier,
+  type VerifiedStudent,
+} from './src/server/studentAuth.ts';
+import {
+  StudentUsageLimiter,
+  dailyLimitsFromEnv,
+  hashForLogs,
+} from './src/server/usageLimits.ts';
+import {
+  isAllowedOrigin,
+  isPublicApiPath,
+  usageCategoryForPath,
+} from './src/server/requestGuards.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function loadDefaultFirebaseProjectId(): string {
-  try {
-    const raw = fs.readFileSync(path.resolve(__dirname, 'firebase-applet-config.json'), 'utf8');
-    const parsed = JSON.parse(raw) as { projectId?: string };
-    return parsed.projectId || 'cs-project-wsjgygls';
-  } catch {
-    return 'cs-project-wsjgygls';
-  }
+/**
+ * LearnMate uses Claude only. Gemini's API terms do not allow apps likely to be used by people
+ * under 18, so every Gemini client below stays disabled even if Google keys are present.
+ * The remaining Gemini code is removed together with its old features in Phase 3.
+ */
+const GEMINI_ENABLED = false;
+
+const DEFAULT_GCP_PROJECT_ID = (process.env.GOOGLE_CLOUD_PROJECT || '').trim();
+
+// ---- Student sign-in (Firebase Authentication) ----
+const FIREBASE_USE_EMULATOR = (process.env.VITE_FIREBASE_USE_EMULATOR || '').trim() === 'true';
+const FIREBASE_PROJECT_ID =
+  (process.env.VITE_FIREBASE_PROJECT_ID || '').trim() || (FIREBASE_USE_EMULATOR ? 'demo-learnmate' : '');
+if (FIREBASE_USE_EMULATOR && !process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+  process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 }
 
-const DEFAULT_GCP_PROJECT_ID = loadDefaultFirebaseProjectId();
+/** Verifies Firebase ID tokens with Google's public keys; only the project id is needed. */
+function createIdTokenVerifier(): IdTokenVerifier | null {
+  if (!FIREBASE_PROJECT_ID) return null;
+  const adminApp = getAdminApps()[0] || initializeAdminApp({ projectId: FIREBASE_PROJECT_ID });
+  const adminAuth = getAdminAuth(adminApp);
+  return (idToken: string) => adminAuth.verifyIdToken(idToken);
+}
+
+const verifyStudentIdToken = createIdTokenVerifier();
+const studentUsage = new StudentUsageLimiter({
+  dailyLimits: dailyLimitsFromEnv(process.env),
+  perMinute: Number(process.env.AI_REQUESTS_PER_MINUTE) || 12,
+});
+
+type StudentRequest = express.Request & { student?: VerifiedStudent };
 
 const PORT = Number(process.env.PORT) || 3000;
 const ALLOWED_MODELS = new Set([
@@ -99,17 +139,12 @@ function getAnthropicApiKey(): string | null {
 }
 
 function hasGeminiConfigured(): boolean {
-  return (
-    Boolean(getDeveloperGenAIClient()) ||
-    resolveVertexConfig({ fallbackProjectId: DEFAULT_GCP_PROJECT_ID }).mode === 'enabled'
-  );
+  return false;
 }
 
-/** Claude is used whenever its key is set, unless AI_PROVIDER=gemini and Gemini is configured. */
+/** Claude handles every AI feature whenever its key is set. */
 function anthropicPreferred(): boolean {
-  if (!getAnthropicApiKey()) return false;
-  const preference = (process.env.AI_PROVIDER || 'auto').trim().toLowerCase();
-  return !(preference === 'gemini' && hasGeminiConfigured());
+  return Boolean(getAnthropicApiKey());
 }
 
 function claudeModelFor(tier: AiTier): string {
@@ -130,11 +165,30 @@ const HIGGSFIELD_IMAGE_TO_VIDEO_MODEL =
 /** Optional proxy or local mock server for Higgsfield; defaults to https://api.higgsfield.ai. */
 const HIGGSFIELD_API_BASE = process.env.HIGGSFIELD_BASE_URL?.trim() || undefined;
 
-function getHiggsfieldAuth(): string | null {
+/**
+ * Higgsfield's API terms require every end user to be 18 or older, so it stays paused until the
+ * app knows each student's age (Phase 2). After that it is enabled for 18+ accounts only.
+ */
+const HIGGSFIELD_PAUSED = true;
+
+function hasHiggsfieldKey(): boolean {
   const key = (process.env.HIGGSFIELD_API_KEY || '').trim();
-  if (!key || key.startsWith('MY_')) return null;
-  return buildHiggsfieldAuthHeader(key, process.env.HIGGSFIELD_API_SECRET);
+  return Boolean(key) && !key.startsWith('MY_');
 }
+
+function getHiggsfieldAuth(): string | null {
+  if (HIGGSFIELD_PAUSED || !hasHiggsfieldKey()) return null;
+  return buildHiggsfieldAuthHeader(
+    (process.env.HIGGSFIELD_API_KEY || '').trim(),
+    process.env.HIGGSFIELD_API_SECRET
+  );
+}
+
+/**
+ * Added to every Claude prompt. Most students are 16-18, and Anthropic's rules for products
+ * serving minors require age-appropriate safeguards.
+ */
+const MINOR_SAFETY_RULES = `Safety: the student is a teenager (usually 16 to 18) preparing for JEE. Keep every reply age-appropriate and focused on learning. Do not produce sexual content, graphic violence, or instructions for weapons, drugs, self-harm or other dangerous acts; briefly redirect to studying instead. If the student mentions self-harm, hopelessness or severe exam stress, reply with warmth, encourage them to talk to a parent, teacher or friend they trust, and share India's free Tele-MANAS helpline: 14416 (or 1-800-891-4416). Never ask for personal details such as phone numbers, addresses or photos.`;
 
 /** Reply-language instruction for tutoring prompts, from the student's profile preference. */
 function languageInstruction(preferred?: string): string {
@@ -259,6 +313,7 @@ interface StudentTutorContextInput {
 type TutorSourceType = 'material' | 'general' | 'both';
 
 function getDeveloperGenAIClient(): GoogleGenAI | null {
+  if (!GEMINI_ENABLED) return null;
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
     return null;
@@ -277,6 +332,7 @@ function getDeveloperGenAIClient(): GoogleGenAI | null {
 const getGenAIClient = getDeveloperGenAIClient;
 
 function getVertexGenAIClient(): GoogleGenAI | null {
+  if (!GEMINI_ENABLED) return null;
   const cfg = resolveVertexConfig({ fallbackProjectId: DEFAULT_GCP_PROJECT_ID });
   if (cfg.mode === 'disabled' || cfg.configError || !cfg.projectId) {
     return null;
@@ -297,6 +353,8 @@ let developerApiBillingDepleted = false;
 
 interface VideoGenerationJob {
   jobId: string;
+  /** Student who created the job; only they may read its status. */
+  ownerUid?: string;
   topic: string;
   mode: 'text_to_video' | 'image_to_video';
   aspectRatio: '16:9' | '9:16';
@@ -566,6 +624,7 @@ async function getTrialEligibleStudyClient(): Promise<{
   ai: GoogleGenAI | null;
   provider: AiBackendProvider;
 }> {
+  if (!GEMINI_ENABLED) return { ai: null, provider: 'developer_api' };
   const cfg = resolveVertexConfig({ fallbackProjectId: DEFAULT_GCP_PROJECT_ID });
   if (cfg.mode !== 'disabled') {
     const probe = await runLowCostVertexProbe(false);
@@ -596,33 +655,22 @@ interface StructuredJsonParams {
 type StructuredJsonResult<T> = { data: T; modelUsed: string; providerUsed?: AiBackendProvider };
 
 /**
- * Routes structured-JSON generation to Claude (when ANTHROPIC_API_KEY is set) and falls back to
- * Gemini only if Gemini is also configured. Throws NO_API_KEY when no provider is available.
+ * Generates structured JSON with Claude. Throws NO_API_KEY when ANTHROPIC_API_KEY is missing.
  */
 async function generateStructuredJson<T>(
   params: StructuredJsonParams
 ): Promise<StructuredJsonResult<T>> {
+  const formatRules =
+    params.mathFormat === 'latex'
+      ? `\n\n${LATEX_FORMAT_RULES}`
+      : params.mathFormat === 'unicode'
+      ? `\n\n${UNICODE_FORMAT_RULES}`
+      : '';
   const prepared: StructuredJsonParams = {
     ...params,
-    systemInstruction:
-      params.mathFormat === 'latex'
-        ? `${params.systemInstruction}\n\n${LATEX_FORMAT_RULES}`
-        : params.mathFormat === 'unicode'
-        ? `${params.systemInstruction}\n\n${UNICODE_FORMAT_RULES}`
-        : params.systemInstruction,
+    systemInstruction: `${params.systemInstruction}${formatRules}\n\n${MINOR_SAFETY_RULES}`,
   };
-
-  if (anthropicPreferred()) {
-    try {
-      return await generateStructuredJsonWithClaude<T>(prepared);
-    } catch (err) {
-      if (!hasGeminiConfigured()) throw err;
-      console.warn(
-        `[AI] Claude failed for ${params.operation} (${err instanceof Error ? err.message : String(err)}); trying Gemini.`
-      );
-    }
-  }
-  return generateStructuredJsonWithGemini<T>(prepared);
+  return generateStructuredJsonWithClaude<T>(prepared);
 }
 
 async function generateStructuredJsonWithClaude<T>(
@@ -991,12 +1039,20 @@ function attachGeminiLiveWebSocketServer(httpServer: http.Server) {
     let sessionPages: PageInput[] = [];
     let sessionTitle = 'Study Material';
     let sessionWeakTopics: string[] = [];
+    // Browsers cannot send headers on WebSockets, so the login token arrives in the setup message.
+    let studentUid: string | null = null;
 
     const safeSend = (payload: Record<string, unknown>) => {
       if (clientWs.readyState === WebSocket.OPEN) {
         clientWs.send(JSON.stringify(payload));
       }
     };
+
+    // Close connections that never sign in.
+    const authDeadline = setTimeout(() => {
+      if (!studentUid) clientWs.close(4401, 'Sign-in required');
+    }, 15_000);
+    clientWs.on('close', () => clearTimeout(authDeadline));
 
     clientWs.on('message', async (rawBuffer) => {
       try {
@@ -1008,7 +1064,25 @@ function attachGeminiLiveWebSocketServer(httpServer: http.Server) {
           currentTopic?: string;
           data?: string;
           question?: string;
+          idToken?: string;
         };
+
+        if (!studentUid) {
+          const auth =
+            msg.type === 'setup'
+              ? await authenticateStudent(verifyStudentIdToken, msg.idToken || null)
+              : null;
+          if (!auth || !auth.ok) {
+            safeSend({
+              type: 'error',
+              code: auth && !auth.ok ? auth.code : 'auth_required',
+              message: auth && !auth.ok ? auth.message : 'Please sign in to use the voice tutor.',
+            });
+            clientWs.close(4401, 'Sign-in required');
+            return;
+          }
+          studentUid = auth.student.uid;
+        }
 
         if (msg.type === 'setup') {
           sessionTitle = msg.title || 'Study Material';
@@ -1155,8 +1229,19 @@ Rules for Voice Tutoring:
         }
 
         if (msg.type === 'voice_question' && msg.question) {
-          const qText = msg.question.trim();
+          const qText = msg.question.trim().slice(0, 2000);
           if (!qText) return;
+
+          const allowance = studentUsage.consume(studentUid, 'tutor');
+          if (!allowance.allowed) {
+            safeSend({
+              type: 'voice_response',
+              text: allowance.message || 'Please wait a moment and try again.',
+              citations: [],
+              sourceType: 'general',
+            });
+            return;
+          }
 
           if (liveSession) {
             try {
@@ -1193,6 +1278,8 @@ Your reply is read aloud by a speech synthesizer, so:
 - No Markdown, no bullet points, no LaTeX; say formulas in words (for example "v equals u plus a t").
 - If the student's notes below cover the question, say which page.
 ${sessionWeakTopics.length > 0 ? `- The student is working on: ${sessionWeakTopics.join(', ')}.` : ''}
+
+${MINOR_SAFETY_RULES}
 
 Student notes:
 ${material || 'No notes provided.'}`,
@@ -1257,7 +1344,116 @@ ${material || 'No notes provided.'}`,
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '15mb' }));
+  const isProduction = process.env.NODE_ENV === 'production';
+  // Hosts such as Render put one proxy in front of the app.
+  app.set('trust proxy', 1);
+
+  app.use(
+    helmet({
+      // Firebase's Google sign-in pop-up must be able to report back to this page.
+      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+      crossOriginEmbedderPolicy: false,
+      // Report-only first, so a missed domain shows up in the browser console instead of
+      // breaking sign-in. Off in development, where Vite injects inline scripts.
+      contentSecurityPolicy: isProduction
+        ? {
+            reportOnly: true,
+            directives: {
+              defaultSrc: ["'self'"],
+              scriptSrc: ["'self'", 'https://apis.google.com', 'https://www.gstatic.com'],
+              connectSrc: [
+                "'self'",
+                'wss:',
+                'https://*.googleapis.com',
+                'https://*.firebaseio.com',
+                'https://*.firebaseapp.com',
+              ],
+              frameSrc: [
+                "'self'",
+                'https://*.firebaseapp.com',
+                'https://accounts.google.com',
+                'https://www.youtube-nocookie.com',
+                'https://www.youtube.com',
+              ],
+              imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+              mediaSrc: ["'self'", 'blob:', 'https:'],
+              styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+              fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+              workerSrc: ["'self'", 'blob:'],
+              objectSrc: ["'none'"],
+              baseUri: ["'self'"],
+              frameAncestors: ["'none'"],
+            },
+          }
+        : false,
+    })
+  );
+
+  // Only this site (plus any ALLOWED_ORIGINS) may call the API from a browser.
+  const extraAllowedOrigins = [process.env.APP_URL || '', ...(process.env.ALLOWED_ORIGINS || '').split(',')]
+    .map((value) => value.trim())
+    .filter((value) => /^https?:\/\//.test(value));
+  app.use('/api', (req, res, next) => {
+    if (!isAllowedOrigin(req.get('origin'), req.get('host'), extraAllowedOrigins)) {
+      res.status(403).json({ error: 'Requests from other websites are not allowed.', code: 'origin_not_allowed' });
+      return;
+    }
+    next();
+  });
+
+  // Photos and recordings need room; everything else is text and stays small.
+  app.use(
+    ['/api/study/scan-notes', '/api/study/transcribe-audio', '/api/create/video-lesson'],
+    express.json({ limit: '12mb' })
+  );
+  app.use(express.json({ limit: '2mb' }));
+  app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const type = (err as { type?: string } | null)?.type;
+    if (type === 'entity.too.large') {
+      res.status(413).json({ error: 'This upload is too large. Please use a smaller file.' });
+      return;
+    }
+    if (type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'The request could not be read. Please try again.' });
+      return;
+    }
+    next(err);
+  });
+
+  // Every API route needs a signed-in student, except the health check and the admin
+  // diagnostics (which have their own ADMIN_TOKEN check below). New routes are protected by default.
+  app.use('/api', async (req, res, next) => {
+    const fullPath = `${req.baseUrl}${req.path}`;
+    if (isPublicApiPath(fullPath)) {
+      next();
+      return;
+    }
+    const auth = await authenticateStudent(verifyStudentIdToken, readBearerToken(req.get('authorization')));
+    if (!auth.ok) {
+      res.status(auth.status).json({ error: auth.message, code: auth.code });
+      return;
+    }
+    const studentReq = req as StudentRequest;
+    studentReq.student = auth.student;
+
+    // AI calls (POST) count toward the per-minute and daily limits; status checks (GET) do not.
+    if (req.method === 'POST') {
+      const uid = auth.student.uid;
+      const category = usageCategoryForPath(req.method, fullPath);
+      const decision = studentUsage.consume(uid, category);
+      if (!decision.allowed) {
+        if (decision.retryAfterSeconds) res.set('Retry-After', String(decision.retryAfterSeconds));
+        console.log(`[Usage] blocked student=${hashForLogs(uid)} route=${fullPath} reason=${decision.code}`);
+        res.status(429).json({ error: decision.message, code: decision.code });
+        return;
+      }
+      // Failed requests don't use up the student's allowance.
+      res.on('finish', () => {
+        if (res.statusCode >= 400) studentUsage.release(uid, category);
+      });
+    }
+    next();
+  });
 
   // Internal diagnostics reveal the cloud project ID and service-account identity, and
   // /api/vertex/probe triggers a billed model call. In production they require ADMIN_TOKEN.
@@ -2541,7 +2737,7 @@ Analyze the provided study material and generate:
       if (!ai) {
         res.status(503).json({
           error:
-            'GEMINI_API_KEY is required on the server to analyze YouTube videos with Gemini.',
+            'YouTube import is being rebuilt. For now, open the video on YouTube, choose "Show transcript", copy it, and paste it under Paste text.',
         });
         return;
       }
@@ -2990,7 +3186,7 @@ Never fabricate content if the video has no educational material.`,
             effort: 'low',
             timeoutMs: 90_000,
             system:
-              'You read handwritten and printed JEE Physics, Chemistry and Mathematics notes accurately. Transcribe only what is visible in the image; never add content that is not there.',
+              `You read handwritten and printed JEE Physics, Chemistry and Mathematics notes accurately. Transcribe only what is visible in the image; never add content that is not there.\n\n${MINOR_SAFETY_RULES}`,
             messages: [
               {
                 role: 'user',
@@ -3398,7 +3594,7 @@ Never output markdown fences or commentary outside the JSON.`;
           const claudeText = await callAnthropicMessagesApi({
             apiKey: claude3dKey,
             model: CLAUDE_FAST_MODEL,
-            system: systemPrompt,
+            system: `${systemPrompt}\n\n${MINOR_SAFETY_RULES}`,
             prompt: `Concept to visualize in 3D: "${concept}". Academic context: ${contextText.slice(0, 400)}. Style: ${style}. Generate structured 3D scene JSON.`,
             maxTokens: 8000,
           });
@@ -3552,8 +3748,9 @@ Never output markdown fences or commentary outside the JSON.`;
             'AI image generation is unavailable right now. Showing a simple outline instead.';
         }
       } else if (!generatedImageUrl && !modelNotice) {
-        modelNotice =
-          'AI image generation is not set up (add HIGGSFIELD_API_KEY to .env). Showing a simple outline instead.';
+        modelNotice = HIGGSFIELD_PAUSED
+          ? 'AI images are paused while we add age checks. A diagram maker for every student is coming soon. Showing a simple outline instead.'
+          : 'AI image generation is not set up (add HIGGSFIELD_API_KEY to .env). Showing a simple outline instead.';
       }
 
       res.json({
@@ -3623,6 +3820,7 @@ Never output markdown fences or commentary outside the JSON.`;
 
       const jobRecord: VideoGenerationJob = {
         jobId,
+        ownerUid: (req as StudentRequest).student?.uid,
         topic,
         mode,
         aspectRatio: safeAspectRatio,
@@ -3698,8 +3896,9 @@ Never output markdown fences or commentary outside the JSON.`;
 
       let videoUrl: string | undefined;
       let omniStatus = 'animated_explanation_ready';
-      let userFacingNotice =
-        'AI media generation requires configuration or paid model access. Playing deterministic Animated Explanation for your study topic.';
+      let userFacingNotice = HIGGSFIELD_PAUSED
+        ? 'AI video is paused while we add age checks. Playing the animated explanation for your topic instead.'
+        : 'AI video is not set up on this server. Playing the animated explanation for your topic instead.';
 
       const ai = getGenAIClient();
       if (ai && typeof (ai as any).interactions?.create === 'function') {
@@ -3800,11 +3999,13 @@ Never output markdown fences or commentary outside the JSON.`;
 
   app.get('/api/create/video-jobs/:jobId', (req, res) => {
     const job = videoJobs.get(req.params.jobId);
-    if (!job) {
+    // Another student's job looks exactly like a missing one.
+    if (!job || job.ownerUid !== (req as StudentRequest).student?.uid) {
       res.status(404).json({ error: 'Video job not found.' });
       return;
     }
-    res.json(job);
+    const { ownerUid: _owner, ...publicJob } = job;
+    res.json(publicJob);
   });
 
   // 13. Lo-Fi Focus Radio — Strictly Instrumental Lyria Clip + Deterministic Synth Config
@@ -4003,7 +4204,8 @@ Never output markdown fences or commentary outside the JSON.`;
           : 0,
       activeCooldownUntil: maxCooldown,
       byOperation: formattedOps,
-      modelsConfigured: Array.from(FALLBACK_MODEL_CHAIN),
+      modelsConfigured: [CLAUDE_SMART_MODEL, CLAUDE_FAST_MODEL],
+      students: studentUsage.snapshot(),
     });
   });
 
@@ -4125,19 +4327,29 @@ Never output markdown fences or commentary outside the JSON.`;
     console.log(`LearnMate full-stack server running on http://localhost:${PORT}`);
     if (getAnthropicApiKey()) {
       console.log(
-        `[LearnMate] AI provider: Anthropic Claude (smart: ${CLAUDE_SMART_MODEL}, fast: ${CLAUDE_FAST_MODEL})` +
-          (hasGeminiConfigured() ? ', with Gemini as fallback.' : '.')
+        `[LearnMate] AI provider: Anthropic Claude only (smart: ${CLAUDE_SMART_MODEL}, fast: ${CLAUDE_FAST_MODEL}).`
       );
-    } else if (hasGeminiConfigured()) {
-      console.log('[LearnMate] AI provider: Google Gemini.');
     } else {
       console.warn(
-        '[LearnMate] WARNING: No AI key found (ANTHROPIC_API_KEY or GEMINI_API_KEY). AI features ' +
-          '(tutor, quizzes, OCR, voice) will report "AI is not set up" until you add a key to .env.'
+        '[LearnMate] WARNING: ANTHROPIC_API_KEY is not set. AI features (tutor, quizzes, OCR, voice) ' +
+          'will report "AI is not set up" until you add it to .env.'
+      );
+    }
+    if (FIREBASE_PROJECT_ID) {
+      console.log(
+        `[LearnMate] Student sign-in: Firebase project "${FIREBASE_PROJECT_ID}"` +
+          (FIREBASE_USE_EMULATOR ? ' (local emulator).' : '.')
+      );
+    } else {
+      console.warn(
+        '[LearnMate] WARNING: VITE_FIREBASE_PROJECT_ID is not set, so sign-in and every AI feature ' +
+          'are unavailable. See docs/PHASE2_PLAN.md section 4.'
       );
     }
     console.log(
-      `[LearnMate] Higgsfield media generation: ${getHiggsfieldAuth() ? 'enabled' : 'not configured'}.`
+      `[LearnMate] Higgsfield media generation: ${
+        !hasHiggsfieldKey() ? 'not configured' : HIGGSFIELD_PAUSED ? 'paused until age checks exist' : 'enabled'
+      }.`
     );
   });
 }
