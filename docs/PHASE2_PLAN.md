@@ -74,6 +74,17 @@ Each table lists **what exists today → what it becomes**. "New" rows are addit
 
 **Done when:** a new visitor reaches a first explanation within 60 seconds, and the banner disappears after setup.
 
+**Status (5 Nov 2026):** ✅ Built and verified.
+- The public landing page has the English/Hinglish worked example, four-step explanation, honest limits, privacy promises, free NTA/SATHEE/NCERT links, FAQ and account buttons.
+- The guest sample is a fixed Probability chapter with four concepts, four JEE-style questions and six flashcards. It uses no AI and can be added to an account after sign-in.
+- New accounts start empty. The fake starter documents, planner tasks and profile values have been removed; older devices are cleaned when the profile is read.
+- First-run setup asks the four approved questions (name, class/session, language, age band), waits for the private cloud profile to load, and can be postponed. The dashboard banner stays until setup is saved, then disappears.
+- Privacy, Terms, Contact/grievance and the AI & safety statement are public pages. They degrade honestly while `VITE_SUPPORT_EMAIL` and the grievance-officer details are still unset.
+- The profile syncs privately as owner-only `profileJson` in the user root document. Signing out clears private study data from that browser.
+- Verification: 81 unit tests, 6 Firestore emulator rules tests, TypeScript and the production build pass. Manual browser checks covered landing → sample → add → sign-up → email verification → sample auto-add, first-run setup and postponement, profile save/sync, legal-page back navigation, sign-out cleanup and the signed-in dashboard.
+- Mobile check at 390 px: landing, sample, sign-up, legal pages and the four setup steps have no horizontal overflow. The landing header was compacted for small screens, the setup modal now top-aligns when it is taller than the viewport, and section links leave room for the sticky header. Lighthouse on the landing page is 100 accessibility, 100 best practices and 100 SEO; `public/robots.txt` is included and the muted/success colours were darkened to pass contrast.
+- Still open before public launch: set `VITE_SUPPORT_EMAIL`, publish the grievance officer's name and postal details, choose an email-delivery provider for parental approval, and complete the real-project Firebase setup in section 4. Higgsfield remains paused and Gemini remains disabled. The configured Anthropic key can list the two Claude models but currently returns “credit balance is too low”, so add credits and run one real AI request before launch.
+
 ### Phase 3: Clean home and navigation
 
 | Existing | Change |

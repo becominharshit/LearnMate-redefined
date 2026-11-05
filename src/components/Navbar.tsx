@@ -147,7 +147,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     studentProfile?.targetExam && EXAM_BLUEPRINTS[studentProfile.targetExam]
       ? EXAM_BLUEPRINTS[studentProfile.targetExam].shortName
       : 'JEE Main';
-  const classLabel = studentProfile?.schoolClass || 'Class 12';
+  const classLabel = studentProfile?.schoolClass || '';
+  const targetExamLabel = `${targetExamShort}${
+    studentProfile?.targetExamYear ? ` ${studentProfile.targetExamYear}` : ''
+  }`;
+  const profileSubtitle = classLabel ? `${classLabel} · ${targetExamLabel}` : targetExamLabel;
   const displayName = user?.displayName || studentProfile?.fullName || 'Student';
   const avatarInitial = displayName[0]?.toUpperCase() || 'S';
 
@@ -313,7 +317,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </span>
                 )}
                 <span className="hidden md:inline text-xs font-semibold text-ink max-w-[150px] truncate">
-                  {classLabel} · {targetExamShort}
+                  {profileSubtitle}
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-muted" />
               </button>
@@ -323,9 +327,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="px-4 py-3 border-b border-line">
                     <div className="text-sm font-bold text-ink truncate">{displayName}</div>
                     <div className="text-xs text-muted truncate">
-                      {isSyncing
-                        ? 'Syncing your progress…'
-                        : `${classLabel} · ${targetExamShort} ${studentProfile?.targetExamYear || '2027'}`}
+                      {isSyncing ? 'Syncing your progress…' : profileSubtitle}
                     </div>
                   </div>
 

@@ -36,6 +36,14 @@ import type {
   StudentAcademicProfile,
 } from '../types/study';
 import { computeContentVersion } from '../utils/quizGrading';
+import {
+  DEFAULT_STUDENT_PROFILE,
+  isProfileSetupComplete,
+  normalizeStudentProfile,
+  profileNeedsMigration,
+} from '../utils/studentProfile';
+
+export { DEFAULT_STUDENT_PROFILE } from '../utils/studentProfile';
 
 /**
  * Storage repository interface supporting both local browser persistence
@@ -107,7 +115,7 @@ export interface IStudyStorageRepository {
   savePdfAnnotations(documentId: string, annotations: PdfAnnotationItem[]): void;
 
   getStudentProfile(): StudentAcademicProfile;
-  saveStudentProfile(profile: StudentAcademicProfile): void;
+  saveStudentProfile(profile: StudentAcademicProfile): StudentAcademicProfile;
 
   /** Saves a student's report about an AI answer to their private area for review. */
   submitAiReport(report: AiContentReport): Promise<void>;
@@ -150,7 +158,6 @@ const KEYS = {
   ACCESSIBILITY: 'learnmate_accessibility_v2',
   PDF_ANNOTATIONS_PREFIX: 'learnmate_pdf_annotations_v1_',
   STUDENT_PROFILE: 'learnmate_student_profile_v1',
-  SEEDED: 'learnmate_seeded_materials_v1',
   // UID of the signed-in account that owns the private data currently in localStorage.
   OWNER_UID: 'learnmate_owner_uid_v1',
 };
@@ -175,365 +182,6 @@ const DEFAULT_ACCESSIBILITY: AccessibilitySettings = {
   highContrast: false,
   reducedMotion: false,
 };
-
-export const DEFAULT_STUDENT_PROFILE: StudentAcademicProfile = {
-  fullName: 'LearnMate Student',
-  educationStage: 'school',
-  schoolClass: 'Class 12',
-  stream: 'PCM',
-  schoolBoard: 'CBSE',
-  schoolName: 'National Public School',
-  collegeYear: '2nd Year',
-  degreeCourse: 'B.Tech CSE / AI',
-  universityName: 'Indian Institute of Technology',
-  academicYear: '2026–2027',
-  primaryGoal: 'competitive_exam',
-  targetExam: 'jee_main',
-  targetExamYear: '2027',
-  subjectsStudied: ['Mathematics', 'Physics', 'Chemistry', 'Probability & Statistics'],
-  weakAreas: ['Conditional Probability', 'Bayes Theorem', 'Rotational Dynamics'],
-  preferredLanguage: 'English',
-  personalGoalStatement: 'Master probability, calculus, and mechanics with 85%+ mock test accuracy.',
-  dailyStudyMinutesGoal: 90,
-  updatedAt: new Date().toISOString(),
-};
-
-/**
- * Starter study materials matching the 3 recent materials shown on the approved home design.
- * Note: Quiz attempts and progress metrics are NEVER pre-populated or fabricated.
- */
-export const STARTER_DOCUMENTS: StudyDocument[] = [
-  {
-    id: 'doc-probability-notes',
-    title: 'Probability Notes.pdf',
-    sourceType: 'pdf',
-    fileSize: 428500,
-    pageCount: 4,
-    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    lastStudiedAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    overview:
-      'Comprehensive lecture notes covering Sample Spaces, Axioms of Probability, Conditional Probability, Independence, Bayes Theorem, and Discrete Random Variables.',
-    topics: [
-      {
-        id: 'top-axioms',
-        name: 'Sample Spaces & Kolmogorov Axioms',
-        summary:
-          'Defines sample space Ω, events as subsets, and the three foundational probability axioms including additivity for mutually exclusive events.',
-        keyConcepts: ['Sample Space (Ω)', 'Non-negativity P(E) ≥ 0', 'Normalization P(Ω) = 1', 'Disjoint Additivity'],
-        sourcePages: [1],
-      },
-      {
-        id: 'top-conditional',
-        name: 'Conditional Probability & Independence',
-        summary:
-          'Explains how observing event B restricts the sample space via P(A|B) = P(A and B) / P(B), and defines statistical independence when P(A and B) = P(A)P(B).',
-        keyConcepts: ['P(A|B) = P(A & B) / P(B)', 'Multiplication Rule', 'Statistical Independence', 'Disjoint vs Independent Confusion'],
-        sourcePages: [2],
-      },
-      {
-        id: 'top-bayes',
-        name: 'Law of Total Probability & Bayes Theorem',
-        summary:
-          'Shows how to update prior beliefs P(A) with new evidence B using likelihood P(B|A) and marginal probability P(B), with diagnostic testing applications.',
-        keyConcepts: ['Prior Probability P(A)', 'Likelihood P(B|A)', 'Posterior P(A|B)', 'False Positive Paradox'],
-        sourcePages: [3],
-      },
-      {
-        id: 'top-rv',
-        name: 'Discrete Random Variables & Expectation',
-        summary:
-          'Covers Probability Mass Functions (PMF), Linearity of Expectation E[X], and Variance Var(X) = E[X²] - (E[X])².',
-        keyConcepts: ['PMF normalization Σ p(x) = 1', 'Expected Value E[X]', 'Linearity of Expectation', 'Variance Formula'],
-        sourcePages: [4],
-      },
-    ],
-    pages: [
-      {
-        pageNumber: 1,
-        title: 'Foundations: Sample Spaces & Kolmogorov Axioms',
-        content: `1. Sample Spaces and Events
-In probability theory, an experiment is any process that produces a well-defined outcome. The Sample Space (denoted Ω) is the set of all possible outcomes of a random experiment. An Event E is any subset of the sample space Ω.
-
-Examples of Sample Spaces:
-• Single coin toss: Ω = {Heads, Tails}
-• Rolling a six-sided die: Ω = {1, 2, 3, 4, 5, 6}
-
-2. Kolmogorov's Three Axioms of Probability
-A probability measure P assigns a real number P(E) to every event E such that:
-• Axiom 1 (Non-negativity): For any event E, P(E) ≥ 0.
-• Axiom 2 (Normalization): The probability of the entire sample space is P(Ω) = 1.
-• Axiom 3 (Countable Additivity): If E₁, E₂, ... are mutually exclusive (disjoint) events (meaning Eᵢ and Eⱼ have no overlap for i ≠ j), then:
-  P(E₁ or E₂ or ...) = Σ P(Eᵢ).
-
-3. Key Consequences of the Axioms
-• Complement Rule: P(Eᶜ) = 1 − P(E)
-• Empty Set: P({}) = 0
-• Inclusion-Exclusion Principle (for any two events A and B):
-  P(A or B) = P(A) + P(B) − P(A and B).
-Common Pitfall: Students often forget to subtract P(A and B) when events A and B can occur together.`,
-      },
-      {
-        pageNumber: 2,
-        title: 'Conditional Probability & Statistical Independence',
-        content: `1. Conditional Probability
-Conditional probability measures the probability that event A occurs given that event B has already occurred. Provided P(B) > 0, it is defined as:
-  P(A | B) = P(A and B) / P(B)
-
-Intuition: Observing B restricts our universe of possibilities from the original sample space Ω down to B. Within B, only the overlap (A and B) corresponds to event A occurring.
-
-2. The Multiplication Rule
-Rearranging the definition of conditional probability gives the Multiplication Rule:
-  P(A and B) = P(A | B) · P(B) = P(B | A) · P(A)
-
-3. Statistical Independence
-Two events A and B are statistically independent if and only if knowing that one occurred gives no information about whether the other occurred:
-  P(A and B) = P(A) · P(B)   (or equivalently P(A | B) = P(A) when P(B) > 0).
-
-CRITICAL DISTINCTION — Disjoint vs. Independent:
-• Mutually Exclusive (Disjoint) means A and B cannot occur together, so P(A and B) = 0.
-• If two events A and B have non-zero probabilities (P(A) > 0 and P(B) > 0) and are disjoint, they CANNOT be independent because knowing A happened guarantees B did NOT happen (P(B | A) = 0 ≠ P(B)).`,
-      },
-      {
-        pageNumber: 3,
-        title: 'Law of Total Probability & Bayes Theorem',
-        content: `1. Partition of the Sample Space & Law of Total Probability
-Suppose events A₁, A₂, ..., Aₙ form a partition of Ω (they are pairwise disjoint and their union is Ω). Then for any event B:
-  P(B) = Σ P(B | Aᵢ) · P(Aᵢ)
-
-For a binary partition {A, Aᶜ}:
-  P(B) = P(B | A)P(A) + P(B | Aᶜ)P(Aᶜ)
-
-2. Bayes' Theorem
-Bayes' Theorem allows us to invert conditional probabilities—computing P(A | B) from P(B | A):
-  P(A | B) = [ P(B | A) · P(A) ] / P(B)
-           = [ P(B | A) · P(A) ] / [ P(B | A)P(A) + P(B | Aᶜ)P(Aᶜ) ]
-
-Terminology:
-• P(A): Prior probability (initial belief before observing evidence B)
-• P(B | A): Likelihood (probability of observing evidence B given hypothesis A)
-• P(B): Marginal probability / normalizing evidence
-• P(A | B): Posterior probability (updated belief after observing B)
-
-3. Clinical Diagnostic Example (Base Rate Fallacy)
-Suppose a rare condition affects 1% of a population (P(D) = 0.01). A test has 99% sensitivity P(+ | D) = 0.99 and 95% specificity P(− | Dᶜ) = 0.95 (so false positive rate P(+ | Dᶜ) = 0.05).
-By Bayes' Theorem:
-  P(D | +) = (0.99 × 0.01) / (0.99 × 0.01 + 0.05 × 0.99) = 0.0099 / 0.0594 ≈ 16.7%.`,
-      },
-      {
-        pageNumber: 4,
-        title: 'Discrete Random Variables, Expectation & Variance',
-        content: `1. Discrete Random Variables and PMF
-A Random Variable X is a function that maps outcomes in the sample space Ω to real numbers. For a discrete random variable X, the Probability Mass Function (PMF) is p(x) = P(X = x).
-Valid PMF properties:
-• p(x) ≥ 0 for all x
-• Σₓ p(x) = 1 (the sum over all possible values equals 1).
-
-2. Expected Value (Mean)
-The expected value E[X] (or μ) is the probability-weighted average of all possible values of X:
-  E[X] = Σₓ x · P(X = x)
-
-Linearity of Expectation:
-For ANY random variables X and Y (even if they are dependent!) and constants a, b:
-  E[aX + bY] = a·E[X] + b·E[Y].
-
-3. Variance and Standard Deviation
-Variance measures the spread of X around its mean μ = E[X]:
-  Var(X) = E[(X − μ)²] = E[X²] − (E[X])²
-
-Scaling Property of Variance:
-For any constant a and shift b:
-  Var(aX + b) = a² · Var(X).
-Note that adding a constant shift b does not change the spread, whereas multiplying X by a scales the variance by a²!`,
-      },
-    ],
-  },
-  {
-    id: 'doc-sets-relations',
-    title: 'Sets and Relations',
-    sourceType: 'text',
-    pageCount: 3,
-    createdAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
-    lastStudiedAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
-    overview:
-      'Core discrete mathematics study notes on Set Operations, Power Sets, Cartesian Products, Binary Relations, and Equivalence Relations.',
-    topics: [
-      {
-        id: 'top-set-ops',
-        name: 'Set Theory, Subsets & Power Sets',
-        summary:
-          'Covers set membership, subset definitions, De Morgan Laws, and Power Set cardinality |P(A)| = 2^n.',
-        keyConcepts: ['Power Set |P(A)| = 2^n', 'De Morgan Laws', 'Cartesian Product A × B', 'Empty Set {}'],
-        sourcePages: [1],
-      },
-      {
-        id: 'top-relation-props',
-        name: 'Properties of Binary Relations',
-        summary:
-          'Defines Reflexive, Symmetric, Antisymmetric, and Transitive relations on a set A with matrix and graph criteria.',
-        keyConcepts: ['Reflexive (a,a) in R', 'Symmetric vs Antisymmetric', 'Transitive Closure', 'Relation Composition'],
-        sourcePages: [2],
-      },
-      {
-        id: 'top-equivalence',
-        name: 'Equivalence Relations & Partial Orders',
-        summary:
-          'Explains how equivalence relations (RST) partition a set into disjoint equivalence classes, while partial orders (RAT) establish hierarchy.',
-        keyConcepts: ['Equivalence Relation (RST)', 'Equivalence Classes [a]', 'Partial Order (Poset)', 'Congruence Modulo n'],
-        sourcePages: [3],
-      },
-    ],
-    pages: [
-      {
-        pageNumber: 1,
-        title: 'Set Operations, De Morgan Laws & Power Sets',
-        content: `1. Sets and Subsets
-A set is an unordered collection of distinct objects called elements. Set A is a subset of B if every element of A is also an element of B. The empty set {} is a subset of every set.
-
-2. Power Set Cardinality
-The Power Set P(A) is the set of all subsets of A. If a finite set A has n elements (|A| = n), then its power set has:
-  |P(A)| = 2ⁿ elements.
-
-3. Set Operations & De Morgan's Laws
-• Union (A or B): {x | x is in A or x is in B}
-• Intersection (A and B): {x | x is in A and x is in B}
-• Difference (A − B): {x | x is in A and x is not in B}
-• De Morgan's Laws:
-  (A union B)ᶜ = Aᶜ intersect Bᶜ
-  (A intersect B)ᶜ = Aᶜ union Bᶜ
-
-4. Cartesian Product
-The Cartesian product of sets A and B is the set of all ordered pairs:
-  A × B = {(a, b) | a in A and b in B}, with cardinality |A × B| = |A| · |B|.`,
-      },
-      {
-        pageNumber: 2,
-        title: 'Binary Relations and Core Properties',
-        content: `1. Definition of a Binary Relation
-A binary relation R from set A to set B is any subset of A × B. A relation on a single set A is a subset of A × A. Since |A × A| = n², there are 2^(n²) possible binary relations on a set of size n.
-
-2. Four Fundamental Properties of Relations on Set A
-• Reflexive: For every element a in A, (a, a) is in R. (Every vertex has a self-loop).
-• Symmetric: For all a, b in A, if (a, b) is in R then (b, a) is in R.
-• Antisymmetric: For all a, b in A, if (a, b) is in R and (b, a) is in R, then a = b.
-  Note: Symmetric and Antisymmetric are NOT opposites! A relation can be both (e.g. the equality relation R = {(a,a)}) or neither.
-• Transitive: For all a, b, c in A, if (a, b) is in R and (b, c) is in R, then (a, c) is in R.`,
-      },
-      {
-        pageNumber: 3,
-        title: 'Equivalence Relations, Partitions & Partial Orders',
-        content: `1. Equivalence Relations
-A relation R on set A is an Equivalence Relation if it is:
-1) Reflexive
-2) Symmetric
-3) Transitive
-
-Example: Congruence Modulo n on integers Z, where a ≡ b (mod n) iff n divides (a − b).
-
-2. Equivalence Classes and Partitions
-For an equivalence relation R, the equivalence class of an element a in A is:
-  [a] = {x in A | (a, x) is in R}.
-Fundamental Theorem: The equivalence classes of any equivalence relation on A form a Partition of A—every element of A belongs to exactly one equivalence class, and any two classes are either identical or disjoint.
-
-3. Partial Orders (Posets)
-A relation R on set A is a Partial Order if it is:
-1) Reflexive
-2) Antisymmetric
-3) Transitive
-Example: The divisibility relation (a | b) on positive integers Z⁺, or the subset relation on P(S).`,
-      },
-    ],
-  },
-  {
-    id: 'doc-stats-chapter-3',
-    title: 'Statistics Chapter 3',
-    sourceType: 'text',
-    pageCount: 3,
-    createdAt: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-    lastStudiedAt: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-    overview:
-      'Chapter 3 notes on Sampling Distributions, the Central Limit Theorem, Confidence Intervals, and Hypothesis Testing (Type I & II Errors and p-values).',
-    topics: [
-      {
-        id: 'top-clt',
-        name: 'Sampling Distributions & Central Limit Theorem',
-        summary:
-          'Explains standard error SE = σ / √n and why the sample mean X̄ approaches a normal distribution as sample size n grows.',
-        keyConcepts: ['Standard Error σ / √n', 'Central Limit Theorem (CLT)', 'Sample Size Scaling (4x n → ½ SE)', 'Unbiased Estimator'],
-        sourcePages: [1],
-      },
-      {
-        id: 'top-ci',
-        name: 'Confidence Intervals & Margin of Error',
-        summary:
-          'Covers constructing and properly interpreting (1 − α) confidence intervals X̄ ± z* · (σ / √n) and Student t-distributions.',
-        keyConcepts: ['Margin of Error z* · SE', 'Correct Frequentist CI Interpretation', 'Confidence Level vs Width Tradeoff', 'Student t-distribution (df = n − 1)'],
-        sourcePages: [2],
-      },
-      {
-        id: 'top-hypothesis',
-        name: 'Hypothesis Testing, p-values & Type I/II Errors',
-        summary:
-          'Details null H₀ vs alternative H₁ hypotheses, p-value definition, Type I error (α), Type II error (β), and statistical power (1 − β).',
-        keyConcepts: ['p-value Definition', 'Type I Error (False Positive α)', 'Type II Error (False Negative β)', 'Statistical Power (1 − β)'],
-        sourcePages: [3],
-      },
-    ],
-    pages: [
-      {
-        pageNumber: 1,
-        title: 'Sampling Distributions & The Central Limit Theorem',
-        content: `1. Statistic vs. Parameter
-A parameter (such as population mean μ or standard deviation σ) describes the entire population. A statistic (such as sample mean X̄ or sample standard deviation s) is computed from a random sample of size n.
-
-2. Properties of the Sample Mean X̄
-For i.i.d. observations X₁, X₂, ..., Xₙ with mean μ and variance σ²:
-• Expected Value: E[X̄] = μ (X̄ is an unbiased estimator of μ)
-• Variance of Sample Mean: Var(X̄) = σ² / n
-• Standard Error (SE): SD(X̄) = σ / √n
-
-Important Scaling Rule: To cut the standard error in half, you must quadruple (4×) the sample size n because of the square root √n in the denominator!
-
-3. The Central Limit Theorem (CLT)
-Regardless of the shape of the underlying population distribution (provided σ² is finite), as sample size n becomes large (typically n ≥ 30), the sampling distribution of the standardized sample mean converges to a Standard Normal distribution:
-  Z = (X̄ − μ) / (σ / √n)  →  N(0, 1).`,
-      },
-      {
-        pageNumber: 2,
-        title: 'Confidence Intervals & Student t-Distribution',
-        content: `1. Structure of a Confidence Interval
-A (1 − α) confidence interval for a population mean μ with known σ is:
-  X̄ ± z_(α/2) · (σ / √n)
-where Margin of Error (ME) = z_(α/2) · (σ / √n). For a 95% confidence interval, z* ≈ 1.96.
-
-2. Correct Interpretation of a 95% Confidence Interval
-• CORRECT: If we repeated the random sampling process many times and built a 95% interval each time, approximately 95% of those constructed intervals would capture the true fixed population parameter μ.
-• INCORRECT Misconception: "There is a 95% probability that the true mean μ moves around inside this specific fixed interval." Once computed, the interval is fixed and μ is a fixed constant—either μ is inside or it isn't.
-
-3. Unknown Population Standard Deviation (Student's t)
-When σ is unknown and estimated using sample standard deviation s, we use the t-distribution with n − 1 degrees of freedom:
-  X̄ ± t_(α/2, n−1) · (s / √n).`,
-      },
-      {
-        pageNumber: 3,
-        title: 'Hypothesis Testing, p-values & Type I / II Errors',
-        content: `1. Null and Alternative Hypotheses
-• Null Hypothesis (H₀): Baseline claim of "no effect" or "no difference" (e.g. μ = μ₀).
-• Alternative Hypothesis (H₁ or Hₐ): Research claim we seek evidence for (e.g. μ ≠ μ₀).
-
-2. What a p-value Actually Means
-The p-value is the probability, assuming the null hypothesis H₀ is TRUE, of observing a test statistic at least as extreme as the one actually observed:
-  p-value = P(Test Statistic ≥ observed | H₀ is true).
-• Common Misconception: The p-value is NOT the probability that the null hypothesis H₀ is true!
-• Decision Rule: If p-value ≤ α (significance level, e.g. 0.05), we reject H₀.
-
-3. Type I Error, Type II Error, and Power
-• Type I Error (False Positive, rate = α): Rejecting H₀ when H₀ is actually true.
-• Type II Error (False Negative, rate = β): Failing to reject H₀ when H₁ is actually true.
-• Statistical Power = 1 − β: The probability of correctly rejecting a false null hypothesis.`,
-      },
-    ],
-  },
-];
 
 function safeReadJson<T>(key: string, fallback: T): T {
   try {
@@ -568,8 +216,6 @@ function writeOwnerUid(uid: string): void {
     // ignore in restricted storage
   }
 }
-
-const STARTER_DOCUMENT_IDS = new Set(STARTER_DOCUMENTS.map((d) => d.id));
 
 export class HybridCloudStudyRepository implements IStudyStorageRepository {
   private currentUser: User | null = null;
@@ -612,8 +258,8 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   }
 
   /**
-   * Clears private user study data, attempts, tutor history, and caches on sign-out or account switch,
-   * while preserving public preferences like themeMode, then re-seeds clean starter documents.
+   * Clears private user study data, attempts, tutor history, and caches on sign-out or account
+   * switch, while preserving only device preferences such as themeMode.
    */
   private clearPrivateUserCaches(): void {
     try {
@@ -644,11 +290,11 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
 
   private ensureSeeded(): void {
     try {
-      const seeded = localStorage.getItem(KEYS.SEEDED);
-      const existing = safeReadJson<StudyDocument[]>(KEYS.DOCUMENTS, []);
-      if (!seeded && existing.length === 0) {
-        safeWriteJson(KEYS.DOCUMENTS, STARTER_DOCUMENTS);
-        localStorage.setItem(KEYS.SEEDED, 'true');
+      // New accounts start empty. The guest sample chapter is added only when the student
+      // taps "Add to my account", so no invented material appears in their library.
+      const existingDocs = safeReadJson<StudyDocument[] | null>(KEYS.DOCUMENTS, null);
+      if (existingDocs === null) {
+        safeWriteJson(KEYS.DOCUMENTS, []);
       }
       const existingNotifs = safeReadJson<LearnMateNotification[] | null>(
         KEYS.NOTIFICATIONS,
@@ -697,10 +343,28 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     }
   }
 
+  private async persistProfileToCloud(profile: StudentAcademicProfile): Promise<void> {
+    if (!this.currentUser) return;
+    const uid = this.currentUser.uid;
+    const profilePath = `users/${uid}`;
+    try {
+      await setDoc(
+        doc(db, 'users', uid),
+        {
+          uid,
+          profileJson: JSON.stringify(profile).slice(0, 19_500),
+          displayName: this.currentUser.displayName || profile.fullName || 'LearnMate Student',
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, profilePath);
+    }
+  }
+
   private async persistDocumentToCloud(studyDoc: StudyDocument): Promise<void> {
     if (!this.currentUser) return;
-    // Built-in sample documents are seeded locally on every device; they are not user data.
-    if (STARTER_DOCUMENT_IDS.has(studyDoc.id)) return;
     const uid = this.currentUser.uid;
     const docPath = `users/${uid}/documents/${studyDoc.id}`;
     try {
@@ -789,15 +453,64 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
 
     const uid = user.uid;
     try {
-      // 1. Save User Profile
+      // 1. Merge the private academic profile. The newest saved copy wins, but an account
+      // that was already set up always beats an empty local profile (for example after the
+      // student signs in on a new device).
+      const userRef = doc(db, 'users', uid);
+      const userSnap = await getDoc(userRef);
+      const cloudData = userSnap.exists() ? userSnap.data() : null;
+
+      let cloudProfile: StudentAcademicProfile | null = null;
+      if (cloudData && typeof cloudData.profileJson === 'string' && cloudData.profileJson) {
+        try {
+          cloudProfile = normalizeStudentProfile(JSON.parse(cloudData.profileJson));
+        } catch {
+          cloudProfile = null;
+        }
+      }
+
+      const localProfile = this.getStudentProfile();
+      let profileToUse = localProfile;
+      if (cloudProfile) {
+        const cloudUpdated = Date.parse(cloudProfile.updatedAt) || 0;
+        const localUpdated = Date.parse(localProfile.updatedAt) || 0;
+        if (
+          (cloudProfile.setupCompleted && !localProfile.setupCompleted) ||
+          cloudUpdated > localUpdated
+        ) {
+          profileToUse = cloudProfile;
+        }
+      }
+      if (profileToUse !== localProfile) {
+        safeWriteJson(KEYS.STUDENT_PROFILE, profileToUse);
+      }
+
+      const cloudActiveDoc =
+        cloudData && typeof cloudData.activeDocumentId === 'string'
+          ? cloudData.activeDocumentId
+          : '';
+      const activeDocumentId = this.getActiveDocumentId() || cloudActiveDoc;
+      if (activeDocumentId) {
+        try {
+          localStorage.setItem(KEYS.ACTIVE_DOC_ID, activeDocumentId);
+        } catch {
+          // ignore restricted storage
+        }
+      }
+
+      const profileJson =
+        profileToUse.setupCompleted || profileToUse.fullName.trim()
+          ? JSON.stringify(profileToUse)
+          : '';
       await setDoc(
-        doc(db, 'users', uid),
+        userRef,
         {
           uid,
           email: user.email || '',
-          displayName: user.displayName || 'LearnMate Student',
+          displayName: user.displayName || profileToUse.fullName || 'LearnMate Student',
           photoURL: user.photoURL || '',
-          activeDocumentId: this.getActiveDocumentId() || STARTER_DOCUMENTS[0].id,
+          ...(activeDocumentId ? { activeDocumentId } : {}),
+          ...(profileJson ? { profileJson } : {}),
           updatedAt: new Date().toISOString(),
         },
         { merge: true }
@@ -1042,7 +755,7 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   }
 
   getDocuments(): StudyDocument[] {
-    const docs = safeReadJson<StudyDocument[]>(KEYS.DOCUMENTS, STARTER_DOCUMENTS);
+    const docs = safeReadJson<StudyDocument[]>(KEYS.DOCUMENTS, []);
     return [...docs].sort(
       (a, b) => new Date(b.lastStudiedAt).getTime() - new Date(a.lastStudiedAt).getTime()
     );
@@ -1421,21 +1134,28 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   }
 
   getStudentProfile(): StudentAcademicProfile {
-    // Merge with defaults so profiles saved by an older schema never miss newer fields.
     const stored = safeReadJson<Partial<StudentAcademicProfile> | null>(
       KEYS.STUDENT_PROFILE,
       null
     );
-    return { ...DEFAULT_STUDENT_PROFILE, ...(stored || {}) };
+    const normalized = normalizeStudentProfile(stored);
+    // Remove fake defaults saved by older builds once, then keep the cleaned copy.
+    if (profileNeedsMigration(stored)) {
+      safeWriteJson(KEYS.STUDENT_PROFILE, normalized);
+    }
+    return normalized;
   }
 
-  saveStudentProfile(profile: StudentAcademicProfile): void {
+  saveStudentProfile(profile: StudentAcademicProfile): StudentAcademicProfile {
     const updated: StudentAcademicProfile = {
-      ...profile,
+      ...normalizeStudentProfile(profile),
+      setupCompleted: profile.setupCompleted || isProfileSetupComplete(profile),
       updatedAt: new Date().toISOString(),
     };
     safeWriteJson(KEYS.STUDENT_PROFILE, updated);
+    void this.persistProfileToCloud(updated);
     this.notifyListeners();
+    return updated;
   }
 
   async submitAiReport(report: AiContentReport): Promise<void> {
@@ -1505,35 +1225,8 @@ export const STARTER_NOTIFICATIONS: LearnMateNotification[] = [
   },
 ];
 
-export const STARTER_PLANNER_TASKS: StudyPlannerTask[] = [
-  {
-    id: 'plan-task-1',
-    title: 'Review Bayes Theorem & Total Probability (Pages 2–3)',
-    dateIso: new Date().toISOString().slice(0, 10),
-    durationMinutes: 25,
-    category: 'revision',
-    completed: false,
-    documentId: 'doc-probability-notes',
-  },
-  {
-    id: 'plan-task-2',
-    title: 'Complete 10-Question Diagnostic Practice on Sets & Relations',
-    dateIso: new Date().toISOString().slice(0, 10),
-    durationMinutes: 20,
-    category: 'practice',
-    completed: false,
-    documentId: 'doc-sets-relations',
-  },
-  {
-    id: 'plan-task-3',
-    title: 'Spaced Repetition Flashcard Check: Central Limit Theorem',
-    dateIso: new Date(Date.now() + 86400 * 1000).toISOString().slice(0, 10),
-    durationMinutes: 15,
-    category: 'study',
-    completed: false,
-    documentId: 'doc-stats-chapter-3',
-  },
-];
+/** A new account starts with a blank planner; tasks are created from the student's own work. */
+export const STARTER_PLANNER_TASKS: StudyPlannerTask[] = [];
 
 export const COURSE_LIBRARY_CATALOG: CourseLibraryItem[] = [
   {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar, ActiveTab } from './components/Navbar';
 import { HomeView } from './components/HomeView';
 import { StudyView, StudySubMode } from './components/StudyView';
@@ -16,6 +16,11 @@ import { DynamicCompanion } from './components/DynamicCompanion';
 import { AuthScreen } from './components/AuthScreen';
 import { VerifyEmailScreen, FirebaseSetupScreen } from './components/AccountGateScreens';
 import { SafetyStatementPage } from './components/SafetyStatementPage';
+import { LandingPage } from './components/LandingPage';
+import { SampleChapterPage } from './components/SampleChapterPage';
+import { FirstRunSetupModal, type FirstRunAnswers } from './components/FirstRunSetupModal';
+import { LegalPage } from './components/LegalPage';
+import { buildSampleChapterDocument, SAMPLE_CHAPTER_ID } from './data/sampleChapter';
 import {
   StudyDocument,
   LearnMateNotification,
@@ -47,6 +52,56 @@ const VALID_TABS: ActiveTab[] = [
   'pdf-workspace',
   'analytics'
 ];
+
+type PublicRoute =
+  | 'landing'
+  | 'signin'
+  | 'signup'
+  | 'sample'
+  | 'privacy'
+  | 'terms'
+  | 'contact'
+  | 'safety';
+
+const PENDING_SAMPLE_KEY = 'learnmate_pending_sample_v1';
+
+function parsePublicRouteFromHash(): PublicRoute | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+  if (
+    raw === 'landing' ||
+    raw === 'signin' ||
+    raw === 'signup' ||
+    raw === 'sample' ||
+    raw === 'privacy' ||
+    raw === 'terms' ||
+    raw === 'contact' ||
+    raw === 'safety'
+  ) {
+    return raw;
+  }
+  return null;
+}
+
+function readPendingSampleIntent(): boolean {
+  try {
+    return sessionStorage.getItem(PENDING_SAMPLE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writePendingSampleIntent(value: boolean): void {
+  try {
+    if (value) {
+      sessionStorage.setItem(PENDING_SAMPLE_KEY, 'true');
+    } else {
+      sessionStorage.removeItem(PENDING_SAMPLE_KEY);
+    }
+  } catch {
+    // ignore restricted storage
+  }
+}
 
 function parseTabFromHash(): ActiveTab {
   if (typeof window === 'undefined') return 'dashboard';
@@ -88,13 +143,22 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  // The cloud profile must load before first-run setup decides whether to open.
+  const [accountSynced, setAccountSynced] = useState(false);
   // Forces a re-render after the student verifies their email (reload() mutates the same User).
-  const [, setVerificationCheck] = useState(0);
-  const [showSafetyPage, setShowSafetyPage] = useState(
-    () => typeof window !== 'undefined' && window.location.hash === '#safety'
+  const [verificationTick, setVerificationCheck] = useState(0);
+
+  // Public pages (landing, sample, legal) and the first-run setup flow.
+  const [publicRoute, setPublicRoute] = useState<PublicRoute | null>(() =>
+    parsePublicRouteFromHash()
   );
+  const [pendingSampleAdd, setPendingSampleAdd] = useState(() => readPendingSampleIntent());
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupDismissed, setSetupDismissed] = useState(false);
+  const publicBackTargetRef = useRef<PublicRoute | null>(null);
 
   const effectiveDoc = activeDoc || documents[0] || studyStorage.getDocuments()[0];
+  const sampleIsAdded = documents.some((document) => document.id === SAMPLE_CHAPTER_ID);
 
   const reloadLocalState = () => {
     const refreshedDocs = studyStorage.getDocuments();
@@ -111,6 +175,7 @@ export function App() {
   /** Loads the signed-in student's private data from their cloud area. */
   const syncAccount = async (currentUser: User) => {
     setIsSyncing(true);
+    setAccountSynced(false);
     try {
       await studyStorage.syncWithCloudUser(currentUser);
       reloadLocalState();
@@ -118,20 +183,29 @@ export function App() {
       console.error('Error syncing with Firestore:', err);
     } finally {
       setIsSyncing(false);
+      setAccountSynced(true);
     }
   };
 
-  const openSafetyPage = () => {
-    window.history.pushState(null, '', '#safety');
-    setShowSafetyPage(true);
+  const goPublic = (route: PublicRoute, rememberPrevious = true) => {
+    if (rememberPrevious && publicRoute && publicRoute !== route) {
+      publicBackTargetRef.current = publicRoute;
+    } else if (!publicRoute) {
+      publicBackTargetRef.current = null;
+    }
+    setPublicRoute(route);
+    if (typeof window !== 'undefined') {
+      const targetHash = `#${route}`;
+      if (window.location.hash !== targetHash) {
+        window.history.pushState(null, '', targetHash);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
-  const closeSafetyPage = () => {
-    setShowSafetyPage(false);
-    window.history.pushState(null, '', `#${activeTab}`);
-  };
-
-  const handleSelectTab = (tab: ActiveTab) => {
+  const goToApp = (tab: ActiveTab) => {
+    setPublicRoute(null);
+    publicBackTargetRef.current = null;
     setActiveTab(tab);
     if (typeof window !== 'undefined') {
       const targetHash = `#${tab}`;
@@ -142,11 +216,33 @@ export function App() {
     }
   };
 
+  const closePublicPage = () => {
+    const target = publicBackTargetRef.current;
+    publicBackTargetRef.current = null;
+    if (target) {
+      setPublicRoute(target);
+      window.history.pushState(null, '', `#${target}`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (user && !needsEmailVerification(user)) {
+      goToApp(activeTab);
+      return;
+    }
+    goPublic('landing', false);
+  };
+
+  const handleSelectTab = (tab: ActiveTab) => {
+    goToApp(tab);
+  };
+
   useEffect(() => {
     const onHashChange = () => {
-      setShowSafetyPage(window.location.hash === '#safety');
-      const tabFromHash = parseTabFromHash();
-      setActiveTab(tabFromHash);
+      const route = parsePublicRouteFromHash();
+      setPublicRoute(route);
+      if (!route) {
+        setActiveTab(parseTabFromHash());
+      }
     };
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('popstate', onHashChange);
@@ -155,6 +251,17 @@ export function App() {
       window.removeEventListener('popstate', onHashChange);
     };
   }, []);
+
+  // A signed-out visitor always sees the public landing page, even if an old tab hash
+  // points at a private tab or the session was just signed out.
+  useEffect(() => {
+    if (!isAuthReady || user || publicRoute) return;
+    setPublicRoute('landing');
+    if (typeof window !== 'undefined' && window.location.hash !== '#landing') {
+      window.history.replaceState(null, '', '#landing');
+      window.scrollTo({ top: 0 });
+    }
+  }, [isAuthReady, user, publicRoute]);
 
   useEffect(() => {
     const docs = studyStorage.getDocuments();
@@ -185,6 +292,107 @@ export function App() {
 
     return () => unsubscribe();
   }, []);
+
+  const handleSetupComplete = (answers: FirstRunAnswers) => {
+    const updated: StudentAcademicProfile = {
+      ...studentProfile,
+      fullName: answers.fullName,
+      schoolClass: answers.schoolClass,
+      educationStage: answers.schoolClass === 'Dropper' ? 'self_learner' : 'school',
+      targetExam: 'jee_main',
+      targetExamYear: '2027',
+      examSession: answers.examSession,
+      preferredLanguage: answers.preferredLanguage,
+      ageBand: answers.ageBand,
+      setupCompleted: true,
+    };
+    const saved = studyStorage.saveStudentProfile(updated);
+    setStudentProfile(saved);
+    setSetupOpen(false);
+  };
+
+  const addSampleToAccount = () => {
+    const sample = buildSampleChapterDocument();
+    studyStorage.saveDocument(sample);
+    studyStorage.setActiveDocumentId(sample.id);
+    setDocuments(studyStorage.getDocuments());
+    setActiveDoc(sample);
+    setNotifications(studyStorage.getNotifications());
+    setStudyInitialMode('explain');
+    writePendingSampleIntent(false);
+    setPendingSampleAdd(false);
+    setPublicRoute(null);
+    publicBackTargetRef.current = null;
+    setActiveTab('study');
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', '#study');
+      window.scrollTo({ top: 0 });
+    }
+  };
+
+  const handleAddSample = () => {
+    if (user && !needsEmailVerification(user)) {
+      addSampleToAccount();
+      return;
+    }
+    writePendingSampleIntent(true);
+    setPendingSampleAdd(true);
+    goPublic(user ? 'signin' : 'signup');
+  };
+
+  const openSampleInLibrary = () => {
+    const sample =
+      documents.find((document) => document.id === SAMPLE_CHAPTER_ID) ||
+      studyStorage.getDocumentById(SAMPLE_CHAPTER_ID);
+    if (sample) {
+      handleSelectDocument(sample, 'explain');
+    } else {
+      addSampleToAccount();
+    }
+  };
+
+  // Finish the sample intent after sign-in or email verification, then leave the auth screen.
+  useEffect(() => {
+    if (!isAuthReady || !user || needsEmailVerification(user)) return;
+    if (pendingSampleAdd) {
+      addSampleToAccount();
+      return;
+    }
+    if (publicRoute === 'signin' || publicRoute === 'signup') {
+      // Replace the auth screen in history so the browser Back button does not bounce
+      // between "Opening your dashboard…" and the dashboard.
+      setPublicRoute(null);
+      publicBackTargetRef.current = null;
+      setActiveTab('dashboard');
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '#dashboard');
+        window.scrollTo({ top: 0 });
+      }
+    }
+  }, [isAuthReady, user, verificationTick, pendingSampleAdd, publicRoute]);
+
+  // Open first-run setup only after the cloud profile has loaded, so returning students are not
+  // asked the same four questions again on a new device.
+  useEffect(() => {
+    if (!isAuthReady || !user || needsEmailVerification(user) || !accountSynced) {
+      if (!user || needsEmailVerification(user)) setSetupOpen(false);
+      return;
+    }
+    if (studentProfile.setupCompleted) {
+      setSetupOpen(false);
+      return;
+    }
+    if (!setupDismissed) {
+      setSetupOpen(true);
+    }
+  }, [
+    isAuthReady,
+    user,
+    verificationTick,
+    accountSynced,
+    studentProfile.setupCompleted,
+    setupDismissed,
+  ]);
 
   const refreshDocumentsState = () => {
     const refreshed = studyStorage.getDocuments();
@@ -366,11 +574,54 @@ export function App() {
   };
 
   // Public pages and account gates: nothing private renders until a verified student is signed in.
-  if (showSafetyPage) {
-    return <SafetyStatementPage onBack={closeSafetyPage} />;
+  const landingElement = (
+    <LandingPage
+      isSignedIn={Boolean(user && !needsEmailVerification(user))}
+      onSignIn={() => goPublic('signin')}
+      onSignUp={() => goPublic('signup')}
+      onOpenSample={() => goPublic('sample')}
+      onOpenDashboard={() => goToApp('dashboard')}
+      onOpenSafety={() => goPublic('safety')}
+      onOpenLegal={(page) => goPublic(page)}
+    />
+  );
+
+  if (publicRoute === 'safety') {
+    return <SafetyStatementPage onBack={closePublicPage} />;
   }
+  if (publicRoute === 'privacy' || publicRoute === 'terms' || publicRoute === 'contact') {
+    return (
+      <LegalPage
+        page={publicRoute}
+        onBack={closePublicPage}
+        onOpenSafety={() => goPublic('safety')}
+        onOpenPage={(page) => goPublic(page)}
+      />
+    );
+  }
+  if (publicRoute === 'sample') {
+    return (
+      <SampleChapterPage
+        isSignedIn={Boolean(user && !needsEmailVerification(user))}
+        sampleAdded={sampleIsAdded}
+        onBack={closePublicPage}
+        onAddToAccount={handleAddSample}
+        onOpenInLibrary={openSampleInLibrary}
+        onSignUp={() => goPublic('signup')}
+        onOpenSafety={() => goPublic('safety')}
+        onOpenLegal={(page) => goPublic(page)}
+      />
+    );
+  }
+  if (publicRoute === 'landing') {
+    return landingElement;
+  }
+
   if (!firebaseConfigured) {
-    return <FirebaseSetupScreen />;
+    if (publicRoute === 'signin' || publicRoute === 'signup') {
+      return <FirebaseSetupScreen />;
+    }
+    return landingElement;
   }
   if (!isAuthReady) {
     return (
@@ -380,7 +631,23 @@ export function App() {
     );
   }
   if (!user) {
-    return <AuthScreen onOpenSafety={openSafetyPage} />;
+    if (publicRoute === 'signin' || publicRoute === 'signup') {
+      return (
+        <AuthScreen
+          key={publicRoute}
+          initialMode={publicRoute}
+          onBack={() => goPublic('landing')}
+          onOpenSafety={() => goPublic('safety')}
+          onOpenLegal={(page) => goPublic(page)}
+          notice={
+            pendingSampleAdd
+              ? 'Sign in to add the free sample chapter to your account. After email verification, it will appear automatically.'
+              : null
+          }
+        />
+      );
+    }
+    return landingElement;
   }
   if (needsEmailVerification(user)) {
     return (
@@ -391,6 +658,13 @@ export function App() {
           void syncAccount(user);
         }}
       />
+    );
+  }
+  if (publicRoute === 'signin' || publicRoute === 'signup') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-canvas text-sm text-muted">
+        Opening your dashboard…
+      </div>
     );
   }
 
@@ -461,7 +735,11 @@ export function App() {
               onSelectDoc={(doc, mode = 'explain') => handleSelectDocument(doc, mode)}
               onNavigateTab={handleSelectTab}
               studentProfile={studentProfile}
-              onOpenProfileModal={() => setProfileModalOpen(true)}
+              isProfileSyncing={isSyncing}
+              onOpenProfileModal={() => {
+                setSetupDismissed(false);
+                setSetupOpen(true);
+              }}
             />
           </div>
         )}
@@ -639,11 +917,31 @@ export function App() {
         )}
       </main>
 
+      {/* First-run setup: four questions, shown once */}
+      <FirstRunSetupModal
+        isOpen={setupOpen}
+        initialName={user?.displayName || studentProfile.fullName || ''}
+        profile={studentProfile}
+        onComplete={handleSetupComplete}
+        onDismiss={() => {
+          setSetupOpen(false);
+          setSetupDismissed(true);
+        }}
+        onOpenFullProfile={() => {
+          setSetupOpen(false);
+          setSetupDismissed(true);
+          setProfileModalOpen(true);
+        }}
+      />
+
       {/* Personalized Student Academic Profile Modal */}
       <StudentProfileModal
         isOpen={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}
-        onProfileSaved={(updated) => setStudentProfile(updated)}
+        onProfileSaved={(updated) => {
+          setStudentProfile(updated);
+          if (updated.setupCompleted) setSetupOpen(false);
+        }}
       />
 
       {/* Live Voice AI Tutor Modal */}

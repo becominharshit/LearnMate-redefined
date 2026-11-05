@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ArrowLeft,
   ArrowRight,
   BookOpenCheck,
   GraduationCap,
@@ -24,6 +25,11 @@ type AuthMode = 'signin' | 'signup' | 'reset';
 
 interface AuthScreenProps {
   onOpenSafety: () => void;
+  onBack?: () => void;
+  onOpenLegal?: (page: 'privacy' | 'terms' | 'contact') => void;
+  initialMode?: 'signin' | 'signup';
+  /** Explains why the student was sent here, e.g. to add the sample chapter. */
+  notice?: string | null;
 }
 
 const VALUE_POINTS = [
@@ -33,8 +39,14 @@ const VALUE_POINTS = [
 ];
 
 /** Sign-in and sign-up page shown to everyone who is not signed in. */
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenSafety }) => {
-  const [mode, setMode] = useState<AuthMode>('signin');
+export const AuthScreen: React.FC<AuthScreenProps> = ({
+  onOpenSafety,
+  onBack,
+  onOpenLegal,
+  initialMode = 'signin',
+  notice: entryNotice = null,
+}) => {
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -143,6 +155,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenSafety }) => {
       {/* Sign-in card */}
       <main className="flex-1 flex items-center justify-center px-5 py-10 sm:px-8">
         <div className="w-full max-w-sm space-y-6">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-brand cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Back to LearnMate
+            </button>
+          )}
+
           <div className="space-y-1">
             <h2 className="font-display text-2xl font-bold text-ink">{title}</h2>
             <p className="text-sm text-muted">
@@ -151,6 +174,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenSafety }) => {
                 : 'Your notes, practice and progress stay private to your account.'}
             </p>
           </div>
+
+          {entryNotice && (
+            <p
+              role="status"
+              className="flex items-start gap-2 rounded-xl border border-brand-200 bg-brand-soft px-3.5 py-2.5 text-xs font-medium leading-relaxed text-brand"
+            >
+              <BookOpenCheck className="w-4 h-4 shrink-0 mt-0.5" />
+              {entryNotice}
+            </p>
+          )}
 
           {mode !== 'reset' && (
             <>
@@ -299,6 +332,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenSafety }) => {
               .
             </span>
           </p>
+
+          {onOpenLegal && (
+            <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] font-semibold text-muted">
+              <button type="button" onClick={() => onOpenLegal('privacy')} className="hover:text-brand cursor-pointer">
+                Privacy
+              </button>
+              <button type="button" onClick={() => onOpenLegal('terms')} className="hover:text-brand cursor-pointer">
+                Terms
+              </button>
+              <button type="button" onClick={() => onOpenLegal('contact')} className="hover:text-brand cursor-pointer">
+                Contact
+              </button>
+            </p>
+          )}
         </div>
       </main>
     </div>

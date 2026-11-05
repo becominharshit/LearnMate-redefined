@@ -1,7 +1,12 @@
 import type { Custom3DSceneSpec, Custom3DMeshSpec } from '../types/study.ts';
 import { callClaude } from './anthropicClient.ts';
+import {
+  buildClaudeAttemptPlan,
+  claudeFailureLogLine,
+  shouldTryNextClaudeModel,
+} from './claudeFailover.ts';
 
-/** Plain-text Claude call; returns null when no key is set, the call fails or the reply is cut off. */
+/** Plain-text Claude call; returns null when no key is set, every model fails or the reply is cut off. */
 export async function callAnthropicMessagesApi(params: {
   apiKey?: string;
   model?: string;
@@ -12,27 +17,50 @@ export async function callAnthropicMessagesApi(params: {
   const key = (params.apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
   if (!key || key.startsWith('MY_')) return null;
 
-  try {
-    const result = await callClaude({
-      apiKey: key,
-      baseUrl: process.env.ANTHROPIC_BASE_URL,
-      model: params.model || 'claude-haiku-5-5',
-      system: params.system,
-      messages: [{ role: 'user', content: params.prompt }],
-      // Thinking counts toward max_tokens, so leave room beyond the reply itself.
-      maxTokens: params.maxTokens || 8000,
-      effort: 'low',
-      timeoutMs: 60_000,
-    });
-    if (result.stopReason === 'max_tokens') {
-      console.warn('Anthropic API reply was cut off (max_tokens reached).');
-      return null;
+  const smartModel = process.env.ANTHROPIC_MODEL_SMART?.trim() || 'claude-sonnet-5-5';
+  const fastModel = process.env.ANTHROPIC_MODEL_FAST?.trim() || 'claude-haiku-5-5';
+  const plans = buildClaudeAttemptPlan({
+    smartModel,
+    fastModel,
+    tier: params.model === smartModel ? 'smart' : 'fast',
+  });
+
+  let lastError: unknown;
+  for (let index = 0; index < plans.length; index += 1) {
+    const plan = plans[index];
+    try {
+      const result = await callClaude({
+        apiKey: key,
+        baseUrl: process.env.ANTHROPIC_BASE_URL,
+        model: plan.model,
+        system: params.system,
+        messages: [{ role: 'user', content: params.prompt }],
+        // Thinking counts toward max_tokens, so leave room beyond the reply itself.
+        maxTokens: params.maxTokens || 8000,
+        effort: plan.effort,
+        timeoutMs: 60_000,
+      });
+      if (result.stopReason === 'max_tokens') {
+        console.warn('Anthropic API reply was cut off (max_tokens reached).');
+        return null;
+      }
+      if (result.text?.trim()) return result.text;
+      throw new Error('EMPTY_RESPONSE');
+    } catch (err) {
+      lastError = err;
+      console.warn(
+        `Anthropic model ${plan.model} failed: ${claudeFailureLogLine(err)}.`
+      );
+      if (!shouldTryNextClaudeModel(err) || index === plans.length - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
-    return result.text || null;
-  } catch (err) {
-    console.warn('Anthropic API request failed:', err instanceof Error ? err.message : String(err));
-    return null;
   }
+
+  console.warn(
+    'Anthropic API request failed:',
+    lastError instanceof Error ? lastError.message : String(lastError)
+  );
+  return null;
 }
 
 export function generateProcedural3DScene(concept: string, contextText?: string): Custom3DSceneSpec {

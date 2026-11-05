@@ -97,6 +97,30 @@ test('writes with unexpected fields or mismatched ids are refused', async () => 
   await assertFails(setDoc(doc(alice, 'publicFeed/post-1'), { text: 'hello' }));
 });
 
+test('the private profile JSON is owner-only and size-limited', async () => {
+  const alice = env.authenticatedContext('alice', verifiedGoogle).firestore();
+  const bob = env.authenticatedContext('bob', verifiedGoogle).firestore();
+  const profileJson = JSON.stringify({
+    fullName: 'Alice',
+    schoolClass: 'Class 12',
+    preferredLanguage: 'English',
+    ageBand: '16_17',
+  });
+
+  await assertSucceeds(
+    setDoc(doc(alice, 'users/alice'), { uid: 'alice', updatedAt: now, profileJson }, { merge: true })
+  );
+  await assertSucceeds(getDoc(doc(alice, 'users/alice')));
+  await assertFails(getDoc(doc(bob, 'users/alice')));
+  await assertFails(
+    setDoc(
+      doc(alice, 'users/alice'),
+      { uid: 'alice', updatedAt: now, profileJson: 'x'.repeat(20001) },
+      { merge: true }
+    )
+  );
+});
+
 test('reports can be created by their owner only and never edited', async () => {
   const report = {
     id: 'report-1',

@@ -17,7 +17,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { StudyDocument, StudentAcademicProfile } from '../types/study';
-import { studyStorage, STARTER_DOCUMENTS } from '../services/storageService';
+import { studyStorage } from '../services/storageService';
 import { getNextJeeCountdown, JEE_MAIN_2027_KEY_DATES } from '../utils/jeeCalendar';
 import {
   JEE_SUBJECTS,
@@ -36,6 +36,8 @@ interface StudentDashboardViewProps {
   onSelectDoc: (doc: StudyDocument, mode?: StudySubMode) => void;
   onNavigateTab: (tab: ActiveTab) => void;
   studentProfile?: StudentAcademicProfile;
+  /** True while the private cloud profile is still loading after sign-in. */
+  isProfileSyncing?: boolean;
   onOpenProfileModal?: () => void;
 }
 
@@ -47,8 +49,6 @@ const SUBJECT_STYLE: Record<
   Chemistry: { icon: FlaskConical, text: 'text-chemistry', soft: 'bg-chemistry-soft', bar: 'bg-chemistry' },
   Mathematics: { icon: Sigma, text: 'text-maths', soft: 'bg-maths-soft', bar: 'bg-maths' },
 };
-
-const STARTER_IDS = new Set(STARTER_DOCUMENTS.map((d) => d.id));
 
 function greetingFor(date: Date): string {
   const hour = date.getHours();
@@ -85,6 +85,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   onSelectDoc,
   onNavigateTab,
   studentProfile,
+  isProfileSyncing = false,
   onOpenProfileModal,
 }) => {
   const now = useMemo(() => new Date(), [documents]);
@@ -156,7 +157,8 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
 
   const continueDoc = activeDoc || documents[0] || null;
   const name = studentName && studentName !== 'LearnMate Student' ? studentName.split(' ')[0] : '';
-  const profileIncomplete = !studentProfile || studentProfile.fullName === 'LearnMate Student';
+  // Do not flash the setup banner while the account's saved profile is still loading.
+  const profileIncomplete = !isProfileSyncing && !studentProfile?.setupCompleted;
   const todayKey = localDayKey(now);
   const nextKeyDateIndex = JEE_MAIN_2027_KEY_DATES.findIndex((d) => d.date >= todayKey);
 
@@ -227,7 +229,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           <span className="flex-1 min-w-0">
             <span className="block text-sm font-semibold text-ink">Set up your JEE profile</span>
             <span className="block text-xs text-muted">
-              Add your name, class, target and weak chapters so the tutor can personalise its help.
+              Add your name, class, language and age band. School, board and goals stay optional.
             </span>
           </span>
           <ArrowRight className="w-4 h-4 text-brand shrink-0" />
@@ -347,15 +349,10 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                     <span className="font-semibold text-ink truncate">
                       {continueDoc.title.replace(/\.pdf$/i, '')}
                     </span>
-                    {STARTER_IDS.has(continueDoc.id) && (
-                      <span className="px-2 py-0.5 rounded-full bg-soft text-muted text-[10px] font-semibold">
-                        Sample material
-                      </span>
-                    )}
                   </div>
                   <p className="text-xs text-muted mt-0.5">
                     {continueDoc.pageCount} {continueDoc.pageCount === 1 ? 'page' : 'pages'}
-                    {!STARTER_IDS.has(continueDoc.id) && continueDoc.lastStudiedAt
+                    {continueDoc.lastStudiedAt
                       ? ` · Last opened ${relativeTime(continueDoc.lastStudiedAt, now)}`
                       : ''}
                   </p>

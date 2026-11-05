@@ -49,8 +49,14 @@ import {
   callClaude,
   toClaudeJsonSchema,
   CLAUDE_IMAGE_MEDIA_TYPES,
-  type ClaudeEffort,
+  type ClaudeResponse,
 } from './src/utils/anthropicClient.ts';
+import {
+  buildClaudeAttemptPlan,
+  claudeFailureLogLine,
+  shouldTryNextClaudeModel,
+  type ClaudeAttemptPlan,
+} from './src/utils/claudeFailover.ts';
 import {
   buildHiggsfieldAuthHeader,
   submitHiggsfieldJob,
@@ -149,6 +155,56 @@ function anthropicPreferred(): boolean {
 
 function claudeModelFor(tier: AiTier): string {
   return tier === 'fast' ? CLAUDE_FAST_MODEL : CLAUDE_SMART_MODEL;
+}
+
+function claudeAttemptsFor(tier: AiTier): ClaudeAttemptPlan[] {
+  return buildClaudeAttemptPlan({
+    smartModel: CLAUDE_SMART_MODEL,
+    fastModel: CLAUDE_FAST_MODEL,
+    tier,
+  });
+}
+
+/**
+ * Runs a Claude call on the preferred model and switches to the other Claude model when the
+ * first one is busy, overloaded, unreachable or returns unusable output. Auth, billing,
+ * refusal and cut-off errors are returned immediately because another model cannot fix them.
+ */
+async function runClaudeWithFailover<T>(
+  tier: AiTier,
+  attempt: (plan: ClaudeAttemptPlan) => Promise<T>
+): Promise<{ value: T; model: string }> {
+  const plans = claudeAttemptsFor(tier);
+  if (plans.length === 0) throw new Error('NO_API_KEY');
+
+  let lastError: unknown;
+  for (let index = 0; index < plans.length; index += 1) {
+    const plan = plans[index];
+    try {
+      const value = await attempt(plan);
+      return { value, model: plan.model };
+    } catch (err) {
+      lastError = err;
+      console.warn(
+        `[AI] Claude model ${plan.model} failed (${claudeFailureLogLine(err)}).`
+      );
+      if (!shouldTryNextClaudeModel(err)) {
+        throw err;
+      }
+      if (index === plans.length - 1) {
+        throw claudeUnavailableError(err);
+      }
+      // A very short pause avoids hammering Anthropic during a brief rate-limit spike.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
+  throw lastError || new Error('CLAUDE_UNAVAILABLE: no Claude model could answer.');
+}
+
+function claudeUnavailableError(lastError: unknown): Error {
+  const detail = claudeFailureLogLine(lastError);
+  return new Error(`CLAUDE_UNAVAILABLE: ${detail || 'no Claude model could answer'}`);
 }
 
 // Higgsfield media generation (Create section). Model ids are overridable via env.
@@ -681,7 +737,6 @@ async function generateStructuredJsonWithClaude<T>(
 
   const tier: AiTier = params.tier || 'smart';
   const model = claudeModelFor(tier);
-  const effort: ClaudeEffort = tier === 'fast' ? 'low' : 'medium';
   const cacheKey = computeRequestFingerprint([
     'claude',
     params.operation,
@@ -689,6 +744,7 @@ async function generateStructuredJsonWithClaude<T>(
     params.systemInstruction,
     params.prompt,
   ]);
+  const jsonSchema = toClaudeJsonSchema(params.responseSchema);
 
   return geminiManager.execute({
     operation: params.operation,
@@ -697,30 +753,34 @@ async function generateStructuredJsonWithClaude<T>(
     bypassCache: params.bypassCache,
     approxInputChars: params.prompt.length + params.systemInstruction.length,
     task: async () => {
-      const result = await callClaude({
-        apiKey,
-        baseUrl: process.env.ANTHROPIC_BASE_URL,
-        model,
-        system: params.systemInstruction,
-        messages: [{ role: 'user', content: params.prompt }],
-        // Thinking tokens count toward max_tokens, so leave generous room.
-        maxTokens: params.maxOutputTokens ?? (tier === 'fast' ? 8000 : 16000),
-        effort,
-        jsonSchema: toClaudeJsonSchema(params.responseSchema),
-        timeoutMs: tier === 'fast' ? 45_000 : 90_000,
+      const { value: data, model: modelUsed } = await runClaudeWithFailover(tier, async (plan) => {
+        const result: ClaudeResponse = await callClaude({
+          apiKey,
+          baseUrl: process.env.ANTHROPIC_BASE_URL,
+          model: plan.model,
+          system: params.systemInstruction,
+          messages: [{ role: 'user', content: params.prompt }],
+          // Thinking tokens count toward max_tokens, so leave generous room.
+          maxTokens: params.maxOutputTokens ?? (tier === 'fast' ? 8000 : 16000),
+          effort: plan.effort,
+          jsonSchema,
+          timeoutMs: tier === 'fast' ? 45_000 : 90_000,
+        });
+        if (result.stopReason === 'max_tokens') {
+          throw new Error('CLAUDE_OUTPUT_TRUNCATED: the AI answer was cut off. Try a smaller request.');
+        }
+        if (result.stopReason === 'refusal') {
+          throw new Error('CLAUDE_REFUSAL: the AI declined this request.');
+        }
+        if (!result.text.trim()) {
+          throw new Error('EMPTY_RESPONSE');
+        }
+        return JSON.parse(result.text) as T;
       });
-      if (result.stopReason === 'max_tokens') {
-        throw new Error('CLAUDE_OUTPUT_TRUNCATED: the AI answer was cut off. Try a smaller request.');
-      }
-      if (result.stopReason === 'refusal') {
-        throw new Error('CLAUDE_REFUSAL: the AI declined this request.');
-      }
-      if (!result.text.trim()) {
-        throw new Error('EMPTY_RESPONSE');
-      }
+
       return {
-        data: JSON.parse(result.text) as T,
-        modelUsed: result.model,
+        data,
+        modelUsed,
         providerUsed: 'anthropic_claude' as AiBackendProvider,
       };
     },
@@ -1265,14 +1325,15 @@ Rules for Voice Tutoring:
                 .slice(0, 8)
                 .map((p) => `Page ${p.pageNumber} (${p.title}): ${p.content.slice(0, 800)}`)
                 .join('\n\n');
-              const spoken = await callClaude({
-                apiKey: voiceClaudeKey,
-                baseUrl: process.env.ANTHROPIC_BASE_URL,
-                model: CLAUDE_FAST_MODEL,
-                maxTokens: 4000,
-                effort: 'low',
-                timeoutMs: 30_000,
-                system: `You are LearnMate's friendly voice tutor for JEE Main (Physics, Chemistry, Mathematics), helping with "${sessionTitle}".
+              const { value: spoken } = await runClaudeWithFailover('fast', (plan) =>
+                callClaude({
+                  apiKey: voiceClaudeKey,
+                  baseUrl: process.env.ANTHROPIC_BASE_URL,
+                  model: plan.model,
+                  maxTokens: 4000,
+                  effort: plan.effort,
+                  timeoutMs: 30_000,
+                  system: `You are LearnMate's friendly voice tutor for JEE Main (Physics, Chemistry, Mathematics), helping with "${sessionTitle}".
 Your reply is read aloud by a speech synthesizer, so:
 - Answer in 2 to 4 short spoken sentences.
 - No Markdown, no bullet points, no LaTeX; say formulas in words (for example "v equals u plus a t").
@@ -1283,8 +1344,9 @@ ${MINOR_SAFETY_RULES}
 
 Student notes:
 ${material || 'No notes provided.'}`,
-                messages: [{ role: 'user', content: qText }],
-              });
+                  messages: [{ role: 'user', content: qText }],
+                })
+              );
               const spokenText = spoken.text.replace(/[*#_`$\\]/g, '').replace(/\s+/g, ' ').trim();
               if (spokenText) {
                 safeSend({ type: 'voice_response', text: spokenText, citations: [], sourceType: 'general' });
@@ -3180,23 +3242,24 @@ Never fabricate content if the video has no educational material.`,
           return;
         }
         try {
-          const result = await callClaude({
-            apiKey: claudeKey,
-            baseUrl: process.env.ANTHROPIC_BASE_URL,
-            model: CLAUDE_SMART_MODEL,
-            maxTokens: 12000,
-            effort: 'low',
-            timeoutMs: 90_000,
-            system:
-              `You read handwritten and printed JEE Physics, Chemistry and Mathematics notes accurately. Transcribe only what is visible in the image; never add content that is not there.\n\n${MINOR_SAFETY_RULES}`,
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Data } },
-                  {
-                    type: 'text',
-                    text: `Transcribe these notes ("${title}") into clean digital study notes.
+          const { value: result } = await runClaudeWithFailover('smart', (plan) =>
+            callClaude({
+              apiKey: claudeKey,
+              baseUrl: process.env.ANTHROPIC_BASE_URL,
+              model: plan.model,
+              maxTokens: 12000,
+              effort: 'low',
+              timeoutMs: 90_000,
+              system:
+                `You read handwritten and printed JEE Physics, Chemistry and Mathematics notes accurately. Transcribe only what is visible in the image; never add content that is not there.\n\n${MINOR_SAFETY_RULES}`,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64Data } },
+                    {
+                      type: 'text',
+                      text: `Transcribe these notes ("${title}") into clean digital study notes.
 - "extractedTitle": a concise title for the notes
 - "cleanContent": the notes as structured text with headings and bullet points
 - "handwrittenContent": the same content as natural notebook-style lines
@@ -3204,22 +3267,23 @@ Never fabricate content if the video has no educational material.`,
 - "summary": a 1-2 sentence overview
 - "keyConcepts": 3 to 5 key concepts or formulas found
 Write formulas with Unicode symbols (x², H₂O, √, π, ∫, Δ, →, ≤), not LaTeX.`,
-                  },
-                ],
-              },
-            ],
-            jsonSchema: toClaudeJsonSchema({
-              type: Type.OBJECT,
-              properties: {
-                extractedTitle: { type: Type.STRING },
-                cleanContent: { type: Type.STRING },
-                handwrittenContent: { type: Type.STRING },
-                uncertainSegments: { type: Type.ARRAY, items: { type: Type.STRING } },
-                summary: { type: Type.STRING },
-                keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
-              },
-            }),
-          });
+                    },
+                  ],
+                },
+              ],
+              jsonSchema: toClaudeJsonSchema({
+                type: Type.OBJECT,
+                properties: {
+                  extractedTitle: { type: Type.STRING },
+                  cleanContent: { type: Type.STRING },
+                  handwrittenContent: { type: Type.STRING },
+                  uncertainSegments: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  summary: { type: Type.STRING },
+                  keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+              }),
+            })
+          );
           if (result.stopReason === 'max_tokens') {
             throw new Error('CLAUDE_OUTPUT_TRUNCATED: the notes are too long to read in one go.');
           }

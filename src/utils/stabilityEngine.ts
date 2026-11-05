@@ -93,6 +93,17 @@ export function classifyGeminiError(error: unknown): ClassifiedGeminiError {
     };
   }
 
+  // Both Claude models were busy, overloaded, unreachable or timed out.
+  if (lower.includes('claude_unavailable') || lower.includes('claude_timeout')) {
+    return {
+      category: 'temporarily_busy',
+      retryable: true,
+      userMessage: 'The AI service is temporarily unavailable. Please try again in a minute.',
+      statusCode,
+      rawReason: rawMessage.slice(0, 180),
+    };
+  }
+
   // Claude replies that hit max_tokens or were declined: a retry with the same input won't help.
   if (lower.includes('claude_output_truncated')) {
     return {
@@ -155,7 +166,8 @@ export function classifyGeminiError(error: unknown): ClassifiedGeminiError {
     return {
       category: 'auth_config_error',
       retryable: false,
-      userMessage: 'Generation failed. Your existing notes are safe.',
+      userMessage:
+        'The AI is not set up correctly on this server. Please contact support so it can be fixed.',
       statusCode,
       rawReason: rawMessage.slice(0, 180),
     };

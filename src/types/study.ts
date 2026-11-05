@@ -531,19 +531,32 @@ export interface PdfDocumentAnnotationsBundle {
 
 export type EducationStage = 'school' | 'college' | 'self_learner';
 
+/** Age bands used by the first-run setup. Parental approval applies to under-18 accounts. */
+export type StudentAgeBand = 'under_16' | '16_17' | '18_plus' | '';
+
+/** The exam session a student is preparing for. Session 1 is the only one supported today. */
+export type JeeExamSession =
+  | 'jee_main_2027_session_1'
+  | 'jee_main_2027_session_2'
+  | '';
+
 export interface StudentAcademicProfile {
   fullName: string;
   educationStage: EducationStage;
-  // School fields (Class 9-12)
-  schoolClass: 'Class 9' | 'Class 10' | 'Class 11' | 'Class 12';
-  stream: 'PCM' | 'PCB' | 'PCMB' | 'Commerce' | 'Arts / Humanities' | 'Foundation';
-  schoolBoard: 'CBSE' | 'ICSE / ISC' | 'State Board' | 'IB / Cambridge' | 'Other';
+  // School fields (Class 9-12, plus droppers preparing for JEE)
+  schoolClass: 'Class 9' | 'Class 10' | 'Class 11' | 'Class 12' | 'Dropper' | '';
+  stream: 'PCM' | 'PCB' | 'PCMB' | 'Commerce' | 'Arts / Humanities' | 'Foundation' | '';
+  schoolBoard: 'CBSE' | 'ICSE / ISC' | 'State Board' | 'IB / Cambridge' | 'Other' | '';
   schoolName: string;
   // College / Undergraduate fields
-  collegeYear: '1st Year' | '2nd Year' | '3rd Year' | '4th Year' | 'Postgraduate';
+  collegeYear: '1st Year' | '2nd Year' | '3rd Year' | '4th Year' | 'Postgraduate' | '';
   degreeCourse: string;
   universityName: string;
   academicYear: string;
+  // First-run setup
+  ageBand: StudentAgeBand;
+  examSession: JeeExamSession;
+  setupCompleted: boolean;
   // Learning & Exam Personalization
   primaryGoal:
     | 'competitive_exam'

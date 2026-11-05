@@ -42,7 +42,10 @@ test('classifyGeminiError distinguishes transient 429, daily quota exhaustion, a
   );
   assert.equal(authErr.category, 'auth_config_error');
   assert.equal(authErr.retryable, false);
-  assert.equal(authErr.userMessage, 'Generation failed. Your existing notes are safe.');
+  assert.equal(
+    authErr.userMessage,
+    'The AI is not set up correctly on this server. Please contact support so it can be fixed.'
+  );
 
   const missingKey = classifyGeminiError(new Error('NO_API_KEY'));
   assert.equal(missingKey.category, 'auth_config_error');

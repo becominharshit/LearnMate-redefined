@@ -57,7 +57,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 
   if (!isOpen) return null;
 
-  const isSchoolStage = profile.educationStage === 'school';
+  const isSchoolStage =
+    profile.educationStage === 'school' || profile.educationStage === 'self_learner';
 
   const handleStageChange = (stage: EducationStage) => {
     setProfile((prev) => ({
@@ -85,15 +86,15 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 
     const updated: StudentAcademicProfile = {
       ...profile,
-      subjectsStudied:
-        parsedSubjects.length > 0 ? parsedSubjects : ['Physics', 'Mathematics', 'Chemistry'],
+      subjectsStudied: parsedSubjects,
       weakAreas: parsedWeakAreas,
       updatedAt: new Date().toISOString()
     };
 
-    studyStorage.saveStudentProfile(updated);
+    const saved = studyStorage.saveStudentProfile(updated);
+    setProfile(saved);
     setSavedNotice(true);
-    onProfileSaved(updated);
+    onProfileSaved(saved);
     setTimeout(() => {
       onClose();
     }, 450);
@@ -170,7 +171,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
             <div className="p-4 rounded-xl bg-canvas border border-line space-y-3.5">
               <div className="flex items-center gap-2 text-xs font-bold text-ink">
                 <School className="w-4 h-4 text-brand" />
-                <span>School Academic Details (Class 9-12)</span>
+                <span>School / Dropper Details (Class 9–12)</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
@@ -189,10 +190,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     data-testid="profile-school-class-select"
                     className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
+                    <option value="">Not set</option>
                     <option value="Class 9">Class 9</option>
                     <option value="Class 10">Class 10</option>
                     <option value="Class 11">Class 11</option>
                     <option value="Class 12">Class 12</option>
+                    <option value="Dropper">Dropper</option>
                   </select>
                 </div>
 
@@ -211,6 +214,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     }
                     className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
+                    <option value="">Not set</option>
                     <option value="PCM">Science (PCM)</option>
                     <option value="PCB">Science (PCB)</option>
                     <option value="PCMB">Science (PCMB)</option>
@@ -235,6 +239,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     }
                     className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
+                    <option value="">Not set</option>
                     <option value="CBSE">CBSE</option>
                     <option value="ICSE / ISC">ICSE / ISC</option>
                     <option value="State Board">State Board</option>
@@ -293,6 +298,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     }
                     className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
                   >
+                    <option value="">Not set</option>
                     <option value="1st Year">1st Year</option>
                     <option value="2nd Year">2nd Year</option>
                     <option value="3rd Year">3rd Year</option>
@@ -373,6 +379,59 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 />
               </div>
             </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="profile-exam-session" className="block text-xs font-medium text-muted mb-1">
+                  JEE Main 2027 Session
+                </label>
+                <select
+                  id="profile-exam-session"
+                  value={profile.examSession}
+                  onChange={(e) =>
+                    setProfile({
+                      ...profile,
+                      examSession: e.target.value as StudentAcademicProfile['examSession']
+                    })
+                  }
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                >
+                  <option value="jee_main_2027_session_1">
+                    Session 1 (20–28 Jan 2027)
+                  </option>
+                  <option value="jee_main_2027_session_2">
+                    Session 2 (2–7 Apr 2027)
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="profile-age-band" className="block text-xs font-medium text-muted mb-1">
+                  Age Band
+                </label>
+                <select
+                  id="profile-age-band"
+                  value={profile.ageBand}
+                  onChange={(e) =>
+                    setProfile({
+                      ...profile,
+                      ageBand: e.target.value as StudentAcademicProfile['ageBand']
+                    })
+                  }
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                >
+                  <option value="">Not set</option>
+                  <option value="under_16">Under 16</option>
+                  <option value="16_17">16–17</option>
+                  <option value="18_plus">18 or older</option>
+                </select>
+              </div>
+            </div>
+
+            <p className="text-[11px] leading-relaxed text-muted">
+              The age band helps apply the right AI safeguards. Under-18 accounts never get image
+              or video generation. School, board and goal fields are optional.
+            </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -472,7 +531,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
           {savedNotice && (
             <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Profile saved. Practice questions and revision items have been calibrated.</span>
+              <span>Profile saved. Your dashboard and practice will follow these settings.</span>
             </div>
           )}
 
