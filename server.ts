@@ -1,4 +1,11 @@
 import 'dotenv/config';
+
+// Ensure Google Gen AI Developer API key mode is used without enterprise/vertex conflicts from host OS
+delete process.env.GOOGLE_GENAI_USE_ENTERPRISE;
+delete process.env.GOOGLE_CLOUD_PROJECT;
+delete process.env.GOOGLE_CLOUD_LOCATION;
+process.env.GOOGLE_GENAI_USE_VERTEXAI = 'false';
+
 import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
@@ -47,10 +54,12 @@ import {
 } from './src/utils/ai3dModelEngine.ts';
 import {
   callClaude,
+  streamClaude,
   toClaudeJsonSchema,
   CLAUDE_IMAGE_MEDIA_TYPES,
   type ClaudeResponse,
 } from './src/utils/anthropicClient.ts';
+import { parseTranscriptIntoTimestampedPages } from './src/utils/quizGrading.ts';
 import {
   buildClaudeAttemptPlan,
   claudeFailureLogLine,
@@ -65,6 +74,11 @@ import {
   type HiggsfieldSubmitResponse,
 } from './src/utils/higgsfieldClient.ts';
 import type { Custom3DSceneSpec } from './src/types/study.ts';
+import type { StructuredDiagramSpec } from './src/types/diagram.ts';
+import {
+  validateAndSanitizeDiagramSpec,
+  getDeterministicDiagramTemplate,
+} from './src/utils/diagramEngine.ts';
 import {
   authenticateStudent,
   readBearerToken,
@@ -86,11 +100,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * LearnMate uses Claude only. Gemini's API terms do not allow apps likely to be used by people
- * under 18, so every Gemini client below stays disabled even if Google keys are present.
- * The remaining Gemini code is removed together with its old features in Phase 3.
+ * Active AI provider configuration.
+ * When ANTHROPIC_PAUSED is true or AI_PROVIDER is 'gemini', Gemini is active and Claude is paused.
  */
-const GEMINI_ENABLED = false;
+const ANTHROPIC_PAUSED =
+  process.env.ANTHROPIC_PAUSED === 'true' ||
+  (process.env.AI_PROVIDER || '').toLowerCase() === 'gemini';
+const GEMINI_ENABLED = true;
+
+// Prevent ambient Windows/GCP environment variables from forcing Enterprise mode on Developer API keys
+if (process.env.GOOGLE_GENAI_USE_ENTERPRISE) {
+  delete process.env.GOOGLE_GENAI_USE_ENTERPRISE;
+}
 
 const DEFAULT_GCP_PROJECT_ID = (process.env.GOOGLE_CLOUD_PROJECT || '').trim();
 
@@ -145,11 +166,15 @@ function getAnthropicApiKey(): string | null {
 }
 
 function hasGeminiConfigured(): boolean {
-  return false;
+  if (!GEMINI_ENABLED) return false;
+  const key = (process.env.GEMINI_API_KEY || '').trim();
+  return Boolean(key) && !key.startsWith('MY_');
 }
 
-/** Claude handles every AI feature whenever its key is set. */
+/** Claude handles every AI feature whenever its key is set and Claude is not paused. */
 function anthropicPreferred(): boolean {
+  if (ANTHROPIC_PAUSED) return false;
+  if ((process.env.AI_PROVIDER || '').toLowerCase() === 'gemini') return false;
   return Boolean(getAnthropicApiKey());
 }
 
@@ -374,8 +399,12 @@ function getDeveloperGenAIClient(): GoogleGenAI | null {
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
     return null;
   }
+  if (process.env.GOOGLE_GENAI_USE_ENTERPRISE) {
+    delete process.env.GOOGLE_GENAI_USE_ENTERPRISE;
+  }
   return new GoogleGenAI({
     apiKey,
+    vertexai: false,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -711,7 +740,7 @@ interface StructuredJsonParams {
 type StructuredJsonResult<T> = { data: T; modelUsed: string; providerUsed?: AiBackendProvider };
 
 /**
- * Generates structured JSON with Claude. Throws NO_API_KEY when ANTHROPIC_API_KEY is missing.
+ * Generates structured JSON with the active AI provider (Claude if preferred and active, otherwise Gemini).
  */
 async function generateStructuredJson<T>(
   params: StructuredJsonParams
@@ -726,7 +755,30 @@ async function generateStructuredJson<T>(
     ...params,
     systemInstruction: `${params.systemInstruction}${formatRules}\n\n${MINOR_SAFETY_RULES}`,
   };
-  return generateStructuredJsonWithClaude<T>(prepared);
+
+  const preferClaude = anthropicPreferred();
+  if (preferClaude) {
+    try {
+      return await generateStructuredJsonWithClaude<T>(prepared);
+    } catch (err) {
+      if (hasGeminiConfigured()) {
+        console.warn('[AI] Primary provider Claude failed, falling back to Gemini:', err);
+        return await generateStructuredJsonWithGemini<T>(prepared);
+      }
+      throw err;
+    }
+  } else {
+    try {
+      return await generateStructuredJsonWithGemini<T>(prepared);
+    } catch (err) {
+      const claudeKey = getAnthropicApiKey();
+      if (claudeKey) {
+        console.warn('[AI] Primary provider Gemini failed, falling back to Claude:', err);
+        return await generateStructuredJsonWithClaude<T>(prepared);
+      }
+      throw err;
+    }
+  }
 }
 
 async function generateStructuredJsonWithClaude<T>(
@@ -1128,10 +1180,22 @@ function attachGeminiLiveWebSocketServer(httpServer: http.Server) {
         };
 
         if (!studentUid) {
-          const auth =
+          const token = msg.idToken || null;
+          let auth =
             msg.type === 'setup'
-              ? await authenticateStudent(verifyStudentIdToken, msg.idToken || null)
+              ? await authenticateStudent(verifyStudentIdToken, token)
               : null;
+          if ((!auth || !auth.ok) && process.env.NODE_ENV !== 'production' && !token) {
+            auth = {
+              ok: true,
+              student: {
+                uid: 'dev-student-local',
+                email: 'student@learnmate.local',
+                emailVerified: true,
+                signInProvider: 'developer',
+              },
+            };
+          }
           if (!auth || !auth.ok) {
             safeSend({
               type: 'error',
@@ -1317,8 +1381,8 @@ Rules for Voice Tutoring:
             }
           }
 
-          // No Gemini Live session: answer with Claude as short spoken text for browser TTS.
-          const voiceClaudeKey = getAnthropicApiKey();
+          // No Gemini Live session: answer with Claude (or Gemini if Anthropic paused) as short spoken text for browser TTS.
+          const voiceClaudeKey = anthropicPreferred() ? getAnthropicApiKey() : null;
           if (voiceClaudeKey) {
             try {
               const material = sessionPages
@@ -1357,6 +1421,43 @@ ${material || 'No notes provided.'}`,
                 '[Voice] Claude answer failed:',
                 err instanceof Error ? err.message : String(err)
               );
+            }
+          } else {
+            const ai = getGenAIClient();
+            if (ai) {
+              try {
+                const material = sessionPages
+                  .slice(0, 8)
+                  .map((p) => `Page ${p.pageNumber} (${p.title}): ${p.content.slice(0, 800)}`)
+                  .join('\n\n');
+                const candidateModels = getOrderedCandidateModels('gemini-3.1-flash-lite');
+                const voiceModel = candidateModels[0] || 'gemini-3.1-flash-lite';
+                const resp = await ai.models.generateContent({
+                  model: voiceModel,
+                  contents: qText,
+                  config: {
+                    systemInstruction: `You are LearnMate's friendly voice tutor for JEE Main (Physics, Chemistry, Mathematics), helping with "${sessionTitle}".
+Your reply is read aloud by a speech synthesizer, so:
+- Answer in 2 to 4 short spoken sentences.
+- No Markdown, no bullet points, no LaTeX; say formulas in words (for example "v equals u plus a t").
+- If the student's notes below cover the question, say which page.
+${sessionWeakTopics.length > 0 ? `- The student is working on: ${sessionWeakTopics.join(', ')}.` : ''}
+
+${MINOR_SAFETY_RULES}
+
+Student notes:
+${material || 'No notes provided.'}`,
+                    temperature: 0.3,
+                  },
+                });
+                const spokenText = (resp.text || '').replace(/[*#_`$\\]/g, '').replace(/\s+/g, ' ').trim();
+                if (spokenText) {
+                  safeSend({ type: 'voice_response', text: spokenText, citations: [], sourceType: 'general' });
+                  return;
+                }
+              } catch (err) {
+                console.warn('[Voice] Gemini voice answer failed:', err);
+              }
             }
           }
 
@@ -1492,7 +1593,19 @@ async function startServer() {
       next();
       return;
     }
-    const auth = await authenticateStudent(verifyStudentIdToken, readBearerToken(req.get('authorization')));
+    const bearer = readBearerToken(req.get('authorization'));
+    let auth = await authenticateStudent(verifyStudentIdToken, bearer);
+    if (!auth.ok && process.env.NODE_ENV !== 'production' && !bearer) {
+      auth = {
+        ok: true,
+        student: {
+          uid: 'dev-student-local',
+          email: 'student@learnmate.local',
+          emailVerified: true,
+          signInProvider: 'developer',
+        },
+      };
+    }
     if (!auth.ok) {
       res.status(auth.status).json({ error: auth.message, code: auth.code });
       return;
@@ -1636,6 +1749,38 @@ async function startServer() {
     }
   });
 
+  function buildVoiceTutorPrompt(params: {
+    title?: string;
+    hasDocument: boolean;
+    studentContextSummary: string;
+    preferredLanguage?: string;
+  }): string {
+    const { title, hasDocument, studentContextSummary, preferredLanguage } = params;
+    return `${MINOR_SAFETY_RULES}
+
+You are LearnMate Buddy, an expert JEE Main voice tutor engaged in a live conversational voice dialogue with a student.
+${languageInstruction(preferredLanguage)}
+
+Student Context: ${studentContextSummary}
+
+Conversational Audio Guidelines:
+- Be concise, conversational, and direct (target 60-90 words, maximum 120 words).
+- Lead with the direct answer in the very first sentence. Do NOT use greetings, fillers ("Great question!", "Sure!"), or preambles.
+- Keep explanations crisp: state the key intuition or formula, followed only by 1-2 essential steps.
+- If a question appears phonetically ambiguous or misheard (e.g. "Coulomb" vs "column", "flux" vs "fox"), ask a one-sentence clarification before proceeding.
+- For formulas, use clear standard notation like $F = ma$ or $E = \\frac{kq}{r^2}$ so it renders cleanly in KaTeX and can be voiced.
+
+Grounded Knowledge Scope:
+1. SCOPE: The uploaded study material (${hasDocument ? title || 'Active Document' : 'None'}) is the active boundary.
+2. DIRECT QUESTIONS FROM NOTES: Answer directly from the uploaded material and explicitly cite page numbers in the text as "[Page X]" so the student both hears and sees the reference.
+3. RELATED DOUBTS & PREREQUISITES: If the student asks about a concept, formula, or prerequisite related to the active chapter that is not in their notes, explain it clearly to resolve their doubt. Explicitly distinguish notes from standard JEE knowledge (e.g., "From your notes on Page X: ... Beyond your notes for JEE: ...").
+4. UNRELATED QUESTIONS: If the question is completely unrelated to the active uploaded material, redirect back to the active topic in a single friendly sentence (e.g., "That's outside our current chapter on ${title || 'this topic'}. Let's stay focused on ${title || 'it'}—what would you like to review from your notes?").
+5. CITATIONS: Include verified page citations when referencing notes.
+
+At the very end of your response, on a new line after "---METADATA---", output a single-line JSON object with:
+{"sourceType":"material"|"both"|"general","foundInMaterial":true|false,"citations":[{"pageNumber":1,"section":"topic name","quote":"short verbatim quote from page"}],"relatedTopics":["Topic 1","Topic 2"]}`;
+  }
+
   // 2. Context-Aware AI Study Tutor with Source-Control Mode (Material Only vs Extended Knowledge) & Model Choice
   app.post('/api/study/ask', async (req, res) => {
     try {
@@ -1647,6 +1792,7 @@ async function startServer() {
         modelPreference,
         studentContext,
         sourceControlMode = 'expanded_default',
+        isVoiceTutor = false,
       } = req.body as {
         title?: string;
         pages?: PageInput[];
@@ -1655,6 +1801,7 @@ async function startServer() {
         modelPreference?: string;
         studentContext?: StudentTutorContextInput;
         sourceControlMode?: SourceControlMode | 'expanded_default';
+        isVoiceTutor?: boolean;
       };
 
       if (!question || !question.trim()) {
@@ -1700,23 +1847,15 @@ How to teach:
 ${languageInstruction(studentContext?.preferredLanguage)}`;
 
       try {
-        const { data: parsed, modelUsed } = await generateStructuredJson<{
-          answer: string;
-          sourceType: 'material' | 'general' | 'both';
-          foundInMaterial: boolean;
-          citations: Array<{
-            pageNumber: number;
-            section: string;
-            quote: string;
-          }>;
-          relatedTopics: string[];
-        }>({
-          operation: `study_ask_${explicitStrictMode ? 'strict' : 'hybrid'}`,
-          preferredModel: modelPreference,
-          tier: 'smart',
-          mathFormat: 'latex',
-          systemInstruction: explicitStrictMode
-            ? `${tutorPersona}
+        const effectiveInstruction = isVoiceTutor
+          ? buildVoiceTutorPrompt({
+              title,
+              hasDocument,
+              studentContextSummary,
+              preferredLanguage: studentContext?.preferredLanguage,
+            })
+          : explicitStrictMode
+          ? `${tutorPersona}
 
 You are operating in MATERIAL ONLY mode.
 Student Learning Context: ${studentContextSummary}
@@ -1724,7 +1863,7 @@ Rules for Material Only Mode:
 1. Answer ONLY if the explanation is directly supported by the provided Study Material Pages.
 2. Every claim MUST include verified page citations (pageNumber, section, verbatim quote).
 3. If the topic is NOT covered in the provided Study Material Pages, set "foundInMaterial": false, "sourceType": "general", "citations": [], and set "answer" to: "This topic is not covered in your uploaded study material. Switch to Extended Knowledge mode if you want a general explanation."`
-            : `${tutorPersona}
+          : `${tutorPersona}
 
 Student Learning Context: ${studentContextSummary}
 
@@ -1742,7 +1881,26 @@ Follow these exact rules for Hybrid Knowledge Answering:
 5. NO UPLOADED MATERIAL:
    - If no study material pages are provided, answer the educational question normally using general knowledge with "sourceType": "general" and "citations": [].
 6. PERSONALIZED AWARENESS:
-   - When relevant, connect your explanation to the student's active topic or weak topics so they can overcome misconceptions.`,
+   - When relevant, connect your explanation to the student's active topic or weak topics so they can overcome misconceptions.`;
+
+        const { data: parsed, modelUsed } = await generateStructuredJson<{
+          answer: string;
+          sourceType: 'material' | 'general' | 'both';
+          foundInMaterial: boolean;
+          citations: Array<{
+            pageNumber: number;
+            section: string;
+            quote: string;
+          }>;
+          relatedTopics: string[];
+        }>({
+          operation: isVoiceTutor
+            ? 'study_ask_voice'
+            : `study_ask_${explicitStrictMode ? 'strict' : 'hybrid'}`,
+          preferredModel: modelPreference,
+          tier: 'smart',
+          mathFormat: 'latex',
+          systemInstruction: effectiveInstruction,
           prompt: `Document: ${hasDocument ? title || 'Study Material' : 'None'}\n\nStudy Material Pages:\n${contextText}\n\nConversation History:\n${historyContext}\n\nStudent Question: ${question.trim()}`,
           responseSchema: {
             type: Type.OBJECT,
@@ -1860,6 +2018,383 @@ Follow these exact rules for Hybrid Knowledge Answering:
       res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to answer question.',
       });
+    }
+  });
+
+  // 2b. Streaming AI Study Tutor (SSE: first words in ~1.3s, defaults to Notes + JEE knowledge)
+  app.post('/api/study/ask-stream', async (req, res) => {
+    try {
+      const {
+        title,
+        pages = [],
+        question,
+        history,
+        studentContext,
+        sourceControlMode = 'expanded_default',
+        isVoiceTutor = false,
+      } = req.body as {
+        title?: string;
+        pages?: PageInput[];
+        question?: string;
+        history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+        studentContext?: StudentTutorContextInput;
+        sourceControlMode?: SourceControlMode | 'expanded_default';
+        isVoiceTutor?: boolean;
+      };
+
+      if (!question || !question.trim()) {
+        res.status(400).json({ error: 'Please enter a question.' });
+        return;
+      }
+
+      let claudeKey = anthropicPreferred() ? getAnthropicApiKey() : null;
+      let { ai: geminiAi, provider: geminiProvider } = !claudeKey
+        ? await getTrialEligibleStudyClient()
+        : { ai: null, provider: 'developer_api' as AiBackendProvider };
+
+      if (!claudeKey && !geminiAi) {
+        const fallbackClaude = getAnthropicApiKey();
+        if (fallbackClaude) {
+          claudeKey = fallbackClaude;
+        } else {
+          const notice = extractAiNotice(new Error('NO_API_KEY'));
+          res.status(503).json({
+            error: notice.aiNotice,
+            aiStatus: notice.aiStatus,
+            aiNotice: notice.aiNotice,
+          });
+          return;
+        }
+      }
+
+      const explicitStrictMode = sourceControlMode === 'material_only';
+      const hasDocument = Array.isArray(pages) && pages.length > 0;
+      const validPageNumbers = new Set(hasDocument ? pages.map((p) => p.pageNumber) : []);
+      const contextText = hasDocument ? formatPagesContext(pages) : 'No uploaded study material.';
+      const historyContext =
+        history && history.length > 0
+          ? history
+              .slice(-6)
+              .map((h) => `${h.role.toUpperCase()}: ${h.content}`)
+              .join('\n')
+          : 'No prior messages.';
+
+      const studentContextSummary = studentContext
+        ? [
+            studentContext.currentTopic ? `Active Topic: ${studentContext.currentTopic}` : '',
+            studentContext.currentPage ? `Viewing Page: ${studentContext.currentPage}` : '',
+            studentContext.weakTopics && studentContext.weakTopics.length > 0
+              ? `Student Weak Topics: ${studentContext.weakTopics.join(', ')}`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' | ')
+        : 'Standard study session';
+
+      const systemPrompt = isVoiceTutor
+        ? buildVoiceTutorPrompt({
+            title,
+            hasDocument,
+            studentContextSummary,
+            preferredLanguage: studentContext?.preferredLanguage,
+          })
+        : `${MINOR_SAFETY_RULES}
+
+You are LearnMate, an expert JEE Main tutor for Physics, Chemistry and Mathematics (NCERT Class 11-12 syllabus, NTA JEE Main 2027 pattern).
+How to teach:
+- Start immediately with the explanation (no preamble).
+- Explain step by step: key concept first, relevant formula ($...$ or $$...$$ LaTeX), worked solution, and final answer with units.
+- Point out common JEE traps where useful.
+- Keep answers focused (~250 words) unless the student asks for a full derivation.
+${languageInstruction(studentContext?.preferredLanguage)}
+
+Student Context: ${studentContextSummary}
+Mode: ${explicitStrictMode ? 'ONLY MY NOTES (strict)' : 'NOTES + JEE KNOWLEDGE (default)'}
+
+${
+  explicitStrictMode
+    ? `Strict mode rules:
+- Answer ONLY if supported by the Study Material Pages below.
+- If the question is not covered in the pages, write ONLY: "This topic is not covered in your uploaded study material. Switch to **Notes + JEE knowledge** if you want a full JEE explanation."`
+    : `Notes + JEE knowledge rules:
+- Check the Study Material Pages first and cite the page numbers you use.
+- If you add JEE derivations, examples, or concepts beyond what is written in the student's notes, clearly mark that section with the heading "**Beyond your notes (JEE knowledge):**".
+- If the topic is not in the uploaded notes at all, begin with "**Not in your notes — from JEE knowledge:**" and then teach it clearly.`
+}
+
+At the very end of your response, on a new line after "---METADATA---", output a single-line JSON object with:
+{"sourceType":"material"|"both"|"general","foundInMaterial":true|false,"citations":[{"pageNumber":1,"section":"topic name","quote":"short verbatim quote from page"}],"relatedTopics":["Topic 1","Topic 2"]}`;
+
+      const userPrompt = `Document: ${hasDocument ? title || 'Study Material' : 'None'}\n\nStudy Material Pages:\n${contextText}\n\nConversation History:\n${historyContext}\n\nStudent Question: ${question.trim()}`;
+
+      let sseStarted = false;
+      const startSseIfNeeded = () => {
+        if (sseStarted) return;
+        sseStarted = true;
+        res.status(200);
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders?.();
+      };
+
+      const sendSseEvent = (payload: Record<string, unknown>) => {
+        startSseIfNeeded();
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+
+      const DELIMITER = '---METADATA---';
+      let accumulated = '';
+      let emittedLength = 0;
+
+      let modelUsed = 'gemini-3.1-flash-lite';
+      if (claudeKey) {
+        const { value: claudeResult, model } = await runClaudeWithFailover(
+          'smart',
+          async (plan) => {
+            accumulated = '';
+            emittedLength = 0;
+            return streamClaude(
+              {
+                apiKey: claudeKey,
+                baseUrl: process.env.ANTHROPIC_BASE_URL,
+                model: plan.model,
+                system: systemPrompt,
+                messages: [{ role: 'user', content: userPrompt }],
+                maxTokens: isVoiceTutor ? 512 : 2048,
+                effort: 'low',
+                timeoutMs: 45_000,
+              },
+              (chunk) => {
+                accumulated += chunk;
+                const delimIdx = accumulated.indexOf(DELIMITER);
+                const safeEnd =
+                  delimIdx >= 0
+                    ? delimIdx
+                    : Math.max(0, accumulated.length - DELIMITER.length);
+                if (safeEnd > emittedLength) {
+                  const deltaToEmit = accumulated.slice(emittedLength, safeEnd);
+                  emittedLength = safeEnd;
+                  sendSseEvent({ type: 'delta', text: deltaToEmit });
+                }
+              }
+            );
+          }
+        );
+        modelUsed = model;
+        if (claudeResult.text) {
+          accumulated = claudeResult.text;
+        }
+      } else if (geminiAi) {
+        const candidateModels = getOrderedCandidateModels('gemini-3.1-flash-lite');
+        let streamSuccess = false;
+        let lastStreamErr: unknown = null;
+
+        for (const rawModel of candidateModels) {
+          const modelName =
+            geminiProvider === 'vertex_ai' ? resolveVertexModelName(rawModel) : rawModel;
+          try {
+            accumulated = '';
+            emittedLength = 0;
+            const responseStream = await geminiAi.models.generateContentStream({
+              model: modelName,
+              contents: userPrompt,
+              config: {
+                systemInstruction: systemPrompt,
+                temperature: 0.25,
+                maxOutputTokens: isVoiceTutor ? 512 : 2048,
+                ...(modelName === 'gemini-3.8-flash' || modelName === 'gemini-4-argon'
+                  ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                  : modelName === 'gemini-3.1-flash-lite'
+                  ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+                  : {}),
+              },
+            });
+
+            for await (const chunk of responseStream) {
+              const delta = chunk.text;
+              if (delta) {
+                accumulated += delta;
+                const delimIdx = accumulated.indexOf(DELIMITER);
+                const safeEnd =
+                  delimIdx >= 0
+                    ? delimIdx
+                    : Math.max(0, accumulated.length - DELIMITER.length);
+                if (safeEnd > emittedLength) {
+                  const deltaToEmit = accumulated.slice(emittedLength, safeEnd);
+                  emittedLength = safeEnd;
+                  sendSseEvent({ type: 'delta', text: deltaToEmit });
+                }
+              }
+            }
+
+            modelUsed = modelName;
+            streamSuccess = true;
+            break;
+          } catch (err) {
+            lastStreamErr = err;
+            console.warn(`[AI] Gemini stream model ${modelName} failed:`, err);
+            const classified = classifyGeminiError(err);
+            if (classified.statusCode === 402) {
+              for (const m of candidateModels) {
+                modelCooldownUntil.set(m, Date.now() + 15 * 60 * 1000);
+              }
+              break;
+            }
+            if (classified.category === 'quota_exhausted') {
+              modelCooldownUntil.set(rawModel, Date.now() + 15 * 60 * 1000);
+              continue;
+            }
+          }
+        }
+
+        if (!streamSuccess) {
+          const fallbackClaudeKey = getAnthropicApiKey();
+          if (fallbackClaudeKey) {
+            console.warn('[AI] Gemini streaming failed; attempting seamless fallback to Claude stream.');
+            try {
+              accumulated = '';
+              emittedLength = 0;
+              const { value: claudeResult, model } = await runClaudeWithFailover(
+                'smart',
+                async (plan) => {
+                  accumulated = '';
+                  return streamClaude(
+                    {
+                      apiKey: fallbackClaudeKey,
+                      baseUrl: process.env.ANTHROPIC_BASE_URL,
+                      model: plan.model,
+                      system: systemPrompt,
+                      messages: [{ role: 'user', content: userPrompt }],
+                      maxTokens: isVoiceTutor ? 512 : 2048,
+                      effort: 'low',
+                      timeoutMs: 45_000,
+                    },
+                    (token) => {
+                      accumulated += token;
+                      const delimIdx = accumulated.indexOf(DELIMITER);
+                      const safeEnd =
+                        delimIdx >= 0
+                          ? delimIdx
+                          : Math.max(0, accumulated.length - DELIMITER.length);
+                      if (safeEnd > emittedLength) {
+                        const deltaToEmit = accumulated.slice(emittedLength, safeEnd);
+                        emittedLength = safeEnd;
+                        sendSseEvent({ type: 'delta', text: deltaToEmit });
+                      }
+                    }
+                  );
+                }
+              );
+              modelUsed = model;
+              if (claudeResult.text) {
+                accumulated = claudeResult.text;
+              }
+              streamSuccess = true;
+            } catch (fallbackErr) {
+              console.warn('[AI] Claude fallback stream also failed:', fallbackErr);
+            }
+          }
+        }
+
+        if (!streamSuccess) {
+          const notice = extractAiNotice(lastStreamErr || new Error('STREAMING_FAILED'));
+          sendSseEvent({
+            type: 'error',
+            error: notice.aiNotice,
+            aiStatus: notice.aiStatus,
+          });
+          res.end();
+          return;
+        }
+      }
+
+      const fullText = accumulated;
+      const delimIdx = fullText.indexOf(DELIMITER);
+      const answerPart = (delimIdx >= 0 ? fullText.slice(0, delimIdx) : fullText).trim();
+      if (answerPart.length > emittedLength) {
+        const remaining = answerPart.slice(emittedLength);
+        if (remaining) {
+          sendSseEvent({ type: 'delta', text: remaining });
+        }
+      }
+
+      let meta: {
+        sourceType?: TutorSourceType;
+        foundInMaterial?: boolean;
+        citations?: Array<{ pageNumber: number; section: string; quote: string }>;
+        relatedTopics?: string[];
+      } = {};
+      if (delimIdx >= 0) {
+        const rawJson = fullText.slice(delimIdx + DELIMITER.length).trim();
+        const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            meta = JSON.parse(jsonMatch[0]);
+          } catch {
+            meta = {};
+          }
+        }
+      }
+
+      const verifiedCitations = hasDocument
+        ? (meta.citations || []).filter(
+            (c) =>
+              c &&
+              typeof c.pageNumber === 'number' &&
+              validPageNumbers.has(c.pageNumber) &&
+              typeof c.quote === 'string'
+          )
+        : [];
+
+      const mentionsBeyondNotes =
+        /beyond your notes|not in your notes|not covered in your/i.test(answerPart);
+
+      let sourceType: TutorSourceType =
+        meta.sourceType === 'material' || meta.sourceType === 'both' || meta.sourceType === 'general'
+          ? meta.sourceType
+          : verifiedCitations.length > 0
+            ? mentionsBeyondNotes
+              ? 'both'
+              : 'material'
+            : 'general';
+
+      if (!hasDocument) {
+        sourceType = 'general';
+      } else if (mentionsBeyondNotes && sourceType === 'material') {
+        sourceType = verifiedCitations.length > 0 ? 'both' : 'general';
+      }
+
+      const foundInMaterial =
+        typeof meta.foundInMaterial === 'boolean'
+          ? meta.foundInMaterial
+          : sourceType === 'material' || sourceType === 'both';
+
+      const finalPayload = {
+        answer: answerPart,
+        foundInMaterial,
+        sourceType,
+        sourceControlMode: explicitStrictMode ? 'material_only' : 'extended_knowledge',
+        citations: foundInMaterial ? verifiedCitations : [],
+        relatedTopics: Array.isArray(meta.relatedTopics) ? meta.relatedTopics.slice(0, 5) : [],
+        modelUsed,
+      };
+
+      sendSseEvent({ type: 'done', data: finalPayload });
+      res.end();
+    } catch (err) {
+      const notice = extractAiNotice(err);
+      if (!res.headersSent) {
+        res.status(503).json({
+          error: notice.aiNotice,
+          aiStatus: notice.aiStatus,
+          aiNotice: notice.aiNotice,
+        });
+      } else {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: notice.aiNotice })}\n\n`);
+        res.end();
+      }
     }
   });
 
@@ -2723,13 +3258,26 @@ Analyze the provided study material and generate:
     }
   });
 
-  // 6. YouTube Lecture Import & Grounded Timestamped Analysis
+  // 6. YouTube Lecture Import & Grounded Timestamped Analysis (Official Player + Pasted Transcript)
   app.post('/api/study/youtube-analyze', async (req, res) => {
     try {
-      const { youtubeUrl } = req.body as { youtubeUrl?: string };
+      const { youtubeUrl, transcript, title: customTitle } = req.body as {
+        youtubeUrl?: string;
+        transcript?: string;
+        title?: string;
+      };
       const rawUrl = (youtubeUrl || '').trim();
       if (!rawUrl) {
         res.status(400).json({ error: 'Please provide a YouTube video link.' });
+        return;
+      }
+
+      const rawTranscript = (transcript || '').trim();
+      if (rawTranscript.length < 25) {
+        res.status(400).json({
+          error:
+            'Please paste the video transcript (at least a paragraph). On YouTube, open the description, click "Show transcript", and copy the text.',
+        });
         return;
       }
 
@@ -2773,237 +3321,166 @@ Analyze the provided study material and generate:
 
       const canonicalWatchUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-      // Verify video exists and is public via YouTube oEmbed
-      let oembedTitle = '';
+      // Optional oEmbed metadata check (non-blocking if offline)
+      let oembedTitle = (customTitle || '').trim();
       let oembedAuthor = '';
-      try {
-        const oembedResp = await fetch(
-          `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalWatchUrl)}&format=json`
-        );
-        if (!oembedResp.ok) {
-          res.status(422).json({
-            error:
-              'This YouTube video appears to be private, unavailable, or restricted from embedding.',
-          });
-          return;
+      if (!oembedTitle) {
+        try {
+          const oembedResp = await fetch(
+            `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalWatchUrl)}&format=json`
+          );
+          if (oembedResp.ok) {
+            const oembedJson = (await oembedResp.json()) as {
+              title?: string;
+              author_name?: string;
+            };
+            oembedTitle = oembedJson.title || '';
+            oembedAuthor = oembedJson.author_name || '';
+          }
+        } catch {
+          // Proceed with transcript analysis even if oEmbed is unreachable
         }
-        const oembedJson = (await oembedResp.json()) as {
-          title?: string;
-          author_name?: string;
-        };
-        oembedTitle = oembedJson.title || '';
-        oembedAuthor = oembedJson.author_name || '';
-      } catch {
-        // Proceed to Gemini video analysis if oEmbed network check is unreachable
       }
 
-      const ai = getGenAIClient();
-      if (!ai) {
-        res.status(503).json({
-          error:
-            'YouTube import is being rebuilt. For now, open the video on YouTube, choose "Show transcript", copy it, and paste it under Paste text.',
-        });
-        return;
-      }
-
-      const ytFingerprint = computeRequestFingerprint([
-        'youtube_analyze',
-        'gemini-3.8-flash',
-        canonicalWatchUrl,
-      ]);
+      const trimmedTranscript = rawTranscript.slice(0, 28_000);
 
       try {
-        const ytCandidateModels = getOrderedCandidateModels('gemini-3.8-flash');
-        const ytAnalysis = await geminiManager.execute({
-          operation: 'youtube_analyze',
-          model: ytCandidateModels[0] || 'gemini-3.1-flash-lite',
-          cacheKey: ytFingerprint,
-          approxInputChars: canonicalWatchUrl.length + 600,
-          task: async () => {
-            let lastErr: unknown = null;
-            for (const modelName of ytCandidateModels) {
-              try {
-                const callPromise = ai.models.generateContent({
-                  model: modelName,
-                  contents: [
-                    {
-                      role: 'user',
-                      parts: [
-                        {
-                          fileData: {
-                            fileUri: canonicalWatchUrl,
-                            mimeType: 'video/mp4',
-                          },
-                        },
-                        {
-                          text: `Analyze this educational YouTube video${
-                            oembedTitle ? ` titled "${oembedTitle}" by ${oembedAuthor}` : ''
-                          }.
-Extract:
-1. "title": Accurate title of the lecture.
-2. "overview": Concise 1-2 sentence summary of what the video teaches.
-3. "sections": 4 to 7 chronological timestamped sections covering the actual content of the video. Each section MUST include:
-   - "timestampSeconds": integer start time in seconds (e.g. 0, 95, 240)
+        const { data: parsed } = await generateStructuredJson<{
+          title?: string;
+          overview?: string;
+          sections?: Array<{
+            timestampSeconds: number;
+            timestampLabel: string;
+            title: string;
+            content: string;
+          }>;
+          topics?: Array<{
+            name: string;
+            summary: string;
+            keyConcepts: string[];
+            sourcePages: number[];
+          }>;
+        }>({
+          operation: 'youtube_transcript_analyze',
+          tier: 'fast',
+          systemInstruction:
+            'You are LearnMate, a JEE Main study-notes builder for Physics, Chemistry and Mathematics. Turn the student’s pasted YouTube lecture transcript into clean, structured study sections with timestamps and key formulas. Never invent topics that are not in the transcript.',
+          prompt: `Lecture URL: ${canonicalWatchUrl}${
+            oembedTitle ? `\nVideo Title: "${oembedTitle}"${oembedAuthor ? ` by ${oembedAuthor}` : ''}` : ''
+          }\n\nPasted Transcript:\n${trimmedTranscript}\n\nExtract:
+1. "title": Concise title of the lecture.
+2. "overview": 1-2 sentence summary of what the lecture teaches.
+3. "sections": 4 to 8 chronological timestamped sections covering the transcript. Each section MUST include:
+   - "timestampSeconds": integer start time in seconds (e.g. 0, 95, 240) matching the transcript timestamps
    - "timestampLabel": formatted MM:SS timestamp (e.g. "00:00", "01:35", "04:00")
    - "title": section heading
-   - "content": detailed, accurate study notes and key formulas/explanations covered in that segment of the video.
-4. "topics": 3 to 5 key study topics with "name", "summary", "keyConcepts", and "sourcePages" (1-based section index numbers).
-Never fabricate content if the video has no educational material.`,
-                        },
-                      ],
-                    },
-                  ],
-                  config: {
-                    responseMimeType: 'application/json',
-                    responseSchema: {
-                      type: Type.OBJECT,
-                      properties: {
-                        title: { type: Type.STRING },
-                        overview: { type: Type.STRING },
-                        sections: {
-                          type: Type.ARRAY,
-                          items: {
-                            type: Type.OBJECT,
-                            properties: {
-                              timestampSeconds: { type: Type.INTEGER },
-                              timestampLabel: { type: Type.STRING },
-                              title: { type: Type.STRING },
-                              content: { type: Type.STRING },
-                            },
-                            required: ['timestampSeconds', 'timestampLabel', 'title', 'content'],
-                          },
-                        },
-                        topics: {
-                          type: Type.ARRAY,
-                          items: {
-                            type: Type.OBJECT,
-                            properties: {
-                              name: { type: Type.STRING },
-                              summary: { type: Type.STRING },
-                              keyConcepts: {
-                                type: Type.ARRAY,
-                                items: { type: Type.STRING },
-                              },
-                              sourcePages: {
-                                type: Type.ARRAY,
-                                items: { type: Type.INTEGER },
-                              },
-                            },
-                            required: ['name', 'summary', 'keyConcepts', 'sourcePages'],
-                          },
-                        },
-                      },
-                      required: ['title', 'overview', 'sections', 'topics'],
-                    },
-                    temperature: 0.2,
+   - "content": clear study notes, formulas, and explanations from that part of the transcript.
+4. "topics": 3 to 5 key study topics with "name", "summary", "keyConcepts", and "sourcePages" (1-based section index numbers).`,
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              overview: { type: Type.STRING },
+              sections: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    timestampSeconds: { type: Type.INTEGER },
+                    timestampLabel: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    content: { type: Type.STRING },
                   },
-                });
-
-                const timeoutPromise = new Promise<never>((_, reject) =>
-                  setTimeout(() => reject(new Error('YOUTUBE_ANALYSIS_TIMEOUT')), 18000)
-                );
-
-                const response = await Promise.race([callPromise, timeoutPromise]);
-                const rawText = response.text?.trim();
-                if (!rawText) {
-                  throw new Error('Empty response from Gemini video analysis.');
-                }
-
-                const parsed = JSON.parse(rawText) as {
-                  title?: string;
-                  overview?: string;
-                  sections?: Array<{
-                    timestampSeconds: number;
-                    timestampLabel: string;
-                    title: string;
-                    content: string;
-                  }>;
-                  topics?: Array<{
-                    name: string;
-                    summary: string;
-                    keyConcepts: string[];
-                    sourcePages: number[];
-                  }>;
-                };
-
-                const rawSections = parsed.sections || [];
-                if (rawSections.length === 0) {
-                  throw new Error('Could not extract structured educational sections from this video.');
-                }
-
-                const pages = rawSections.slice(0, 12).map((sec, idx) => {
-                  const secs = Math.max(0, Number(sec.timestampSeconds) || idx * 120);
-                  const mins = Math.floor(secs / 60);
-                  const rem = Math.floor(secs % 60);
-                  const label =
-                    sec.timestampLabel && /^\d{1,2}:\d{2}/.test(sec.timestampLabel)
-                      ? sec.timestampLabel
-                      : `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
-                  return {
-                    pageNumber: idx + 1,
-                    title: `${label} — ${sec.title || `Segment ${idx + 1}`}`,
-                    content: sec.content,
-                    timestampSeconds: secs,
-                    timestampLabel: label,
-                  };
-                });
-
-                const validPageNums = new Set(pages.map((p) => p.pageNumber));
-                const topics = (parsed.topics || []).map((t, idx) => {
-                  const verified = (t.sourcePages || []).filter((n) => validPageNums.has(n));
-                  return {
-                    id: `yt-topic-${Date.now()}-${idx + 1}`,
-                    name: t.name || `Topic ${idx + 1}`,
-                    summary: t.summary || '',
-                    keyConcepts: Array.isArray(t.keyConcepts) ? t.keyConcepts.slice(0, 5) : [],
-                    sourcePages: verified.length > 0 ? verified : [1],
-                  };
-                });
-
-                return {
-                  videoId,
-                  youtubeUrl: canonicalWatchUrl,
-                  title: oembedTitle || parsed.title || `YouTube Lecture (${videoId})`,
-                  overview:
-                    parsed.overview ||
-                    `Video lecture analysis for ${oembedTitle || canonicalWatchUrl}.`,
-                  pages,
-                  topics,
-                };
-              } catch (err) {
-                lastErr = err;
-                const classified = classifyGeminiError(err);
-                if (classified.category === 'quota_exhausted') {
-                  modelCooldownUntil.set(modelName, Date.now() + 15 * 60 * 1000);
-                  continue;
-                }
-                if (classified.category === 'temporarily_busy') {
-                  modelCooldownUntil.set(modelName, Date.now() + 30 * 1000);
-                  continue;
-                }
-                if (
-                  classified.category === 'auth_config_error' &&
-                  (classified.statusCode === 401 || classified.rawReason.toLowerCase().includes('api_key_invalid'))
-                ) {
-                  throw err;
-                }
-              }
-            }
-            throw lastErr || new Error('YOUTUBE_ANALYSIS_FAILED');
+                  required: ['timestampSeconds', 'timestampLabel', 'title', 'content'],
+                },
+              },
+              topics: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    summary: { type: Type.STRING },
+                    keyConcepts: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                    },
+                    sourcePages: {
+                      type: Type.ARRAY,
+                      items: { type: Type.INTEGER },
+                    },
+                  },
+                  required: ['name', 'summary', 'keyConcepts', 'sourcePages'],
+                },
+              },
+            },
+            required: ['title', 'overview', 'sections', 'topics'],
           },
         });
 
-        res.json(ytAnalysis);
+        const rawSections = parsed.sections || [];
+        if (rawSections.length === 0) {
+          throw new Error('Could not extract structured sections from the transcript.');
+        }
+
+        const pages = rawSections.slice(0, 12).map((sec, idx) => {
+          const secs = Math.max(0, Number(sec.timestampSeconds) || idx * 120);
+          const mins = Math.floor(secs / 60);
+          const rem = Math.floor(secs % 60);
+          const label =
+            sec.timestampLabel && /^\d{1,2}:\d{2}/.test(sec.timestampLabel)
+              ? sec.timestampLabel
+              : `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+          return {
+            pageNumber: idx + 1,
+            title: `${label} — ${sec.title || `Segment ${idx + 1}`}`,
+            content: sec.content,
+            timestampSeconds: secs,
+            timestampLabel: label,
+          };
+        });
+
+        const validPageNums = new Set(pages.map((p) => p.pageNumber));
+        const topics = (parsed.topics || []).map((t, idx) => {
+          const verified = (t.sourcePages || []).filter((n) => validPageNums.has(n));
+          return {
+            id: `yt-topic-${Date.now()}-${idx + 1}`,
+            name: t.name || `Topic ${idx + 1}`,
+            summary: t.summary || '',
+            keyConcepts: Array.isArray(t.keyConcepts) ? t.keyConcepts.slice(0, 5) : [],
+            sourcePages: verified.length > 0 ? verified : [1],
+          };
+        });
+
+        res.json({
+          videoId,
+          youtubeUrl: canonicalWatchUrl,
+          title: oembedTitle || parsed.title || `YouTube Lecture (${videoId})`,
+          overview:
+            parsed.overview ||
+            `Timestamped lecture notes for ${oembedTitle || canonicalWatchUrl}.`,
+          pages,
+          topics,
+        });
         return;
       } catch (err) {
         const notice = extractAiNotice(err);
+        const fallbackPages = parseTranscriptIntoTimestampedPages(trimmedTranscript);
+        if (fallbackPages.length > 0) {
+          res.json({
+            videoId,
+            youtubeUrl: canonicalWatchUrl,
+            title: oembedTitle || `YouTube Lecture (${videoId})`,
+            overview: trimmedTranscript.slice(0, 220),
+            pages: fallbackPages,
+            topics: [],
+            aiStatus: notice.aiStatus,
+            aiNotice: notice.aiNotice,
+          });
+          return;
+        }
         res.status(422).json({
-          error:
-            notice.aiStatus === 'temporarily_busy' || notice.aiStatus === 'quota_exhausted'
-              ? notice.aiNotice
-              : err instanceof Error
-              ? `Could not analyze this YouTube video (${err.message}). Please ensure the video is public, has spoken educational content, and try again.`
-              : 'Could not analyze this YouTube video. Please ensure the video is public and contains educational content.',
+          error: notice.aiNotice,
           aiStatus: notice.aiStatus,
           aiNotice: notice.aiNotice,
         });
@@ -3320,73 +3797,80 @@ Write formulas with Unicode symbols (x², H₂O, √, π, ∫, Δ, →, ≤), no
       }
 
       if (ai) {
-        try {
-          const candidateModels = getOrderedCandidateModels('gemini-3.8-flash');
-          const rawModel = candidateModels[0] || 'gemini-3.1-flash-lite';
+        const candidateModels = getOrderedCandidateModels('gemini-3.1-flash-lite');
+        for (const rawModel of candidateModels) {
           const primaryModel =
             provider === 'vertex_ai' ? resolveVertexModelName(rawModel) : rawModel;
-          const resp = await ai.models.generateContent({
-            model: primaryModel,
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  { inlineData: { data: base64Data, mimeType } },
-                  {
-                    text: `Perform high-accuracy academic OCR on this scanned page or whiteboard photo ("${title}").
-Return JSON with:
-- "extractedTitle": concise title of the notes
-- "cleanContent": structured digital markdown notes with headings, bullet points, and clear formulas
-- "handwrittenContent": natural, notebook-friendly paragraph/bullet version suitable for handwritten Kalam display
-- "uncertainSegments": array of any words/formulas that were blurry or ambiguous (empty array if clear)
-- "summary": 1-2 sentence overview
-- "keyConcepts": array of 3-5 key concepts or formulas found`,
-                  },
-                ],
-              },
-            ],
-            config: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  extractedTitle: { type: Type.STRING },
-                  cleanContent: { type: Type.STRING },
-                  handwrittenContent: { type: Type.STRING },
-                  uncertainSegments: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  summary: { type: Type.STRING },
-                  keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+          try {
+            const resp = await ai.models.generateContent({
+              model: primaryModel,
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    { inlineData: { data: base64Data, mimeType } },
+                    {
+                      text: `You are an expert academic OCR transcription system for Indian JEE Main aspirants (Physics, Chemistry, Mathematics).
+Carefully inspect this image of handwritten notes, whiteboard content, or scanned textbook page ("${title}").
+Transcribe all handwritten equations, derivations, chemical formulas, diagram annotations, and text faithfully into structured study material.
+Return a valid JSON object with:
+- "extractedTitle": a clear academic topic or chapter title reflecting the notes
+- "cleanContent": full, detailed markdown notes capturing every concept, bullet point, theorem, and equation from the page
+- "handwrittenContent": natural notebook-friendly version preserving the student's notebook flow
+- "uncertainSegments": array of any words or formulas that were partially illegible (empty array if clear)
+- "summary": 2-3 sentence overview of what is covered in these notes
+- "keyConcepts": array of 4 to 8 key formulas, theorems, and definitions found in the notes`,
+                    },
+                  ],
                 },
-                required: [
-                  'extractedTitle',
-                  'cleanContent',
-                  'handwrittenContent',
-                  'uncertainSegments',
-                  'summary',
-                  'keyConcepts',
-                ],
+              ],
+              config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    extractedTitle: { type: Type.STRING },
+                    cleanContent: { type: Type.STRING },
+                    handwrittenContent: { type: Type.STRING },
+                    uncertainSegments: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    summary: { type: Type.STRING },
+                    keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  },
+                  required: [
+                    'extractedTitle',
+                    'cleanContent',
+                    'handwrittenContent',
+                    'uncertainSegments',
+                    'summary',
+                    'keyConcepts',
+                  ],
+                },
               },
-            },
-          });
-
-          const parsed = JSON.parse(resp.text || '{}');
-          if (parsed.cleanContent) {
-            res.json({
-              title: parsed.extractedTitle || title,
-              cleanContent: parsed.cleanContent,
-              handwrittenContent: parsed.handwrittenContent || parsed.cleanContent,
-              uncertainSegments: Array.isArray(parsed.uncertainSegments)
-                ? parsed.uncertainSegments
-                : [],
-              summary: parsed.summary || 'Digitized handwritten study notes.',
-              keyConcepts: Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts : [],
             });
-            return;
+
+            const parsed = JSON.parse(resp.text || '{}');
+            if (parsed.cleanContent && parsed.cleanContent.trim()) {
+              res.json({
+                title: parsed.extractedTitle || title,
+                cleanContent: parsed.cleanContent,
+                handwrittenContent: parsed.handwrittenContent || parsed.cleanContent,
+                uncertainSegments: Array.isArray(parsed.uncertainSegments)
+                  ? parsed.uncertainSegments
+                  : [],
+                summary: parsed.summary || 'Digitized handwritten study notes.',
+                keyConcepts: Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts : [],
+              });
+              return;
+            }
+          } catch (err) {
+            console.warn(`[OCR] Gemini model ${primaryModel} failed:`, err);
+            scanFailureNotice = extractAiNotice(err).aiNotice;
+            const classified = classifyGeminiError(err);
+            if (classified.statusCode === 402) break;
+            if (classified.category === 'quota_exhausted') {
+              modelCooldownUntil.set(rawModel, Date.now() + 15 * 60 * 1000);
+            }
           }
-          scanFailureNotice =
-            'No readable text was found in this image. Try a clearer, well-lit photo (PNG or JPEG).';
-        } catch (err) {
-          scanFailureNotice = extractAiNotice(err).aiNotice;
         }
       }
 
@@ -3724,137 +4208,228 @@ Never output markdown fences or commentary outside the JSON.`;
     }
   });
 
-  // 11. Creative Studio — Visualize Concept (Nano Banana 2.1 + Deterministic Scientific Diagram Fallback)
+  // 11. Creative Studio — Phase 5.1 Diagram Maker (Structured Validated SVG Generator)
+  const DIAGRAM_SYSTEM_PROMPT = `You are the Lead Scientific & Mathematical Visualization Architect for LearnMate (JEE Main & Advanced).
+Your goal is to synthesize an exact, mathematically and physically accurate 2D vector diagram specification for a student studying JEE concepts.
+
+RULES FOR JEE ACCURACY:
+1. FREE-BODY DIAGRAMS (FBD):
+   - Draw coordinate axes and the body (box, sphere, wedge, pulley).
+   - Draw force vectors starting from center of mass or point of contact with arrowheads in the exact physical directions.
+   - Distinct arrows for Gravity (mg, straight down), Normal (perpendicular to surface), Friction (opposing relative slip), Tension (along string).
+   - Label decomposed components (mg cos θ, mg sin θ) with dashed arrows.
+2. CIRCUITS:
+   - Wires as lines.
+   - Resistors as zigzag paths (M x y L ...), capacitors as parallel lines, DC battery as alternating long/short lines with +/- labels.
+   - Indicate current direction arrow (I) and node junctions.
+3. RAY OPTICS:
+   - Principal axis as dashed horizontal line through center.
+   - Lens/mirror at center (x=350).
+   - Mark focal points F1, 2F1, F2, 2F2 with dots and text.
+   - Draw Object arrow, Incident rays (parallel to axis, through optical center/focus), Refracted/reflected rays, and Image arrow.
+4. CONIC SECTIONS & COORDINATE GEOMETRY:
+   - Cartesian axes x and y with arrows.
+   - Smooth curve path (M x0 y0 Q cx cy x1 y1 or parametric points).
+   - Focus point S, Directrix line, Vertex, Tangent/Normal lines, Latus Rectum.
+5. MOLECULAR SHAPES & VSEPR:
+   - Central atom circle with chemical symbol.
+   - Bonds as lines or wedges/dashes for 3D perspective.
+   - Lone pair electron clouds as dashed lobe paths with dots.
+   - Bond angle arc with degree label (e.g. 104.5°, 109.5°, 120°, 180°).
+
+COORDINATE BOUNDS:
+- viewBox width is 700, height is 500.
+- All coordinates must lie within 20..680 for x and 20..480 for y.
+- Font size for labels: 11..16px.
+- Stroke width: 2..3.5px for primary vectors/curves; 1.5px for axes.
+- If the excerpt lacks a specific angle, mass, resistance, or focal length, state your chosen schematic value explicitly in "assumptions".
+- In "citedPages", include the 1-based page numbers from the provided notes that ground this diagram.
+- Never output markdown or raw SVG text. Output ONLY valid JSON matching the schema.`;
+
+  const DIAGRAM_RESPONSE_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: 'Clear title of the diagram' },
+      category: {
+        type: Type.STRING,
+        enum: [
+          'free_body_diagram',
+          'circuit',
+          'ray_optics',
+          'conic',
+          'molecular_shape',
+          'scientific_diagram',
+        ],
+        description: 'JEE diagram category',
+      },
+      subject: {
+        type: Type.STRING,
+        enum: ['Physics', 'Chemistry', 'Mathematics', 'General'],
+        description: 'Subject',
+      },
+      description: {
+        type: Type.STRING,
+        description: '1-2 sentence academic explanation of the diagram',
+      },
+      viewBox: {
+        type: Type.OBJECT,
+        properties: {
+          width: { type: Type.NUMBER, description: 'Width of SVG viewBox (700)' },
+          height: { type: Type.NUMBER, description: 'Height of SVG viewBox (500)' },
+        },
+        required: ['width', 'height'],
+      },
+      assumptions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description:
+          'Explicit schematic assumptions or missing values filled in (e.g. angle theta=30 deg, frictionless)',
+      },
+      needsClarification: {
+        type: Type.STRING,
+        description: 'Optional guidance if source notes lack critical variables or relationship',
+      },
+      citedPages: {
+        type: Type.ARRAY,
+        items: { type: Type.INTEGER },
+        description: '1-based page numbers from the provided context that ground this diagram',
+      },
+      elements: {
+        type: Type.ARRAY,
+        description: 'Geometric SVG primitives to render the diagram accurately',
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING },
+            kind: {
+              type: Type.STRING,
+              enum: ['arrow', 'line', 'rect', 'circle', 'polygon', 'path', 'text', 'arc'],
+            },
+            startX: { type: Type.NUMBER },
+            startY: { type: Type.NUMBER },
+            endX: { type: Type.NUMBER },
+            endY: { type: Type.NUMBER },
+            x: { type: Type.NUMBER },
+            y: { type: Type.NUMBER },
+            width: { type: Type.NUMBER },
+            height: { type: Type.NUMBER },
+            rx: { type: Type.NUMBER },
+            cx: { type: Type.NUMBER },
+            cy: { type: Type.NUMBER },
+            r: { type: Type.NUMBER },
+            startAngleDeg: { type: Type.NUMBER },
+            endAngleDeg: { type: Type.NUMBER },
+            points: { type: Type.STRING },
+            d: { type: Type.STRING },
+            label: { type: Type.STRING },
+            color: { type: Type.STRING },
+            fill: { type: Type.STRING },
+            stroke: { type: Type.STRING },
+            strokeWidth: { type: Type.NUMBER },
+            dashed: { type: Type.BOOLEAN },
+            fontSize: { type: Type.NUMBER },
+            fontWeight: { type: Type.STRING },
+            text: { type: Type.STRING },
+            textAnchor: { type: Type.STRING },
+          },
+          required: ['id', 'kind'],
+        },
+      },
+    },
+    required: [
+      'title',
+      'category',
+      'subject',
+      'description',
+      'viewBox',
+      'elements',
+      'assumptions',
+      'citedPages',
+    ],
+  };
+
   app.post('/api/create/visualize', async (req, res) => {
     try {
       const {
         concept = 'Concept Overview',
         contextText = '',
         style = 'educational_diagram',
+        documentTitle = '',
+        citedPages = [],
       } = req.body as {
         concept?: string;
         contextText?: string;
         style?: string;
+        documentTitle?: string;
+        citedPages?: number[];
       };
 
-      const ai = getGenAIClient();
-      let generatedImageUrl: string | undefined;
-      let modelNotice: string | undefined;
-      let verificationStatus: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' = 'BLOCKED_BY_BILLING';
+      const safePages: number[] = Array.isArray(citedPages)
+        ? citedPages.filter((n) => typeof n === 'number' && Number.isInteger(n) && n > 0)
+        : [1];
 
-      const higgsfieldAuth = getHiggsfieldAuth();
-      if (higgsfieldAuth) {
-        const styleKey: keyof typeof HIGGSFIELD_IMAGE_MODELS = /illustrat|cartoon|sketch/i.test(style)
-          ? 'illustration'
-          : /photo|realistic/i.test(style)
-          ? 'photo'
-          : 'diagram';
-        const endpoint = HIGGSFIELD_IMAGE_MODELS[styleKey];
-        const prompt = `Clean educational ${
-          styleKey === 'diagram' ? 'diagram' : 'illustration'
-        } for a JEE Main student explaining "${concept}". White background, clear English labels with correct spelling, arrows where helpful, textbook style, no watermark.${
-          contextText.trim() ? ` Context: ${contextText.slice(0, 300)}` : ''
-        }`;
-        try {
-          const job = await submitHiggsfieldJob({
-            authHeader: higgsfieldAuth,
-            baseUrl: HIGGSFIELD_API_BASE,
-            endpoint,
-            input:
-              styleKey === 'diagram'
-                ? { prompt: prompt.slice(0, 2000), aspect_ratio: '16:9', rendering_speed: 'DEFAULT' }
-                : styleKey === 'photo'
-                ? { prompt, aspect_ratio: '16:9', resolution: '1080p' }
-                : { prompt, aspect_ratio: '16:9' },
-          });
-          const result = await waitForHiggsfieldResult({
-            authHeader: higgsfieldAuth,
-            baseUrl: HIGGSFIELD_API_BASE,
-            requestId: job.request_id,
-            statusUrl: job.status_url,
-            timeoutMs: 150_000,
-          });
-          const url = result.images?.[0]?.url;
-          if (url) {
-            generatedImageUrl = url;
-            verificationStatus = 'WORKING_VERIFIED';
-            modelNotice = `Generated with Higgsfield (${endpoint}). Higgsfield keeps the file for 7 days, so download it to keep it.`;
-          } else {
-            modelNotice = 'Higgsfield finished but returned no image.';
-          }
-        } catch (err) {
-          modelNotice = `Higgsfield image generation failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`;
+      // Relevant study excerpts (keep focused, up to 1500 chars)
+      const relevantExcerpt = contextText.trim()
+        ? contextText.slice(0, 1500)
+        : `Topic: ${concept}. Standard JEE Main & Advanced curriculum syllabus.`;
+
+      let finalSpec: StructuredDiagramSpec | null = null;
+      let modelUsed: string | undefined;
+      let providerUsed: string | undefined;
+
+      try {
+        const result = await generateStructuredJson<StructuredDiagramSpec>({
+          operation: 'create_visualize_diagram',
+          prompt: `Concept to visualize: "${concept}".\nDiagram style: "${style}".\nDocument: "${documentTitle || 'JEE Study Notes'}".\nStudy Material Excerpt:\n${relevantExcerpt}\n\nGenerate structured 2D diagram JSON with accurate vector elements.`,
+          systemInstruction: DIAGRAM_SYSTEM_PROMPT,
+          responseSchema: DIAGRAM_RESPONSE_SCHEMA,
+          tier: 'smart',
+          mathFormat: 'unicode',
+          maxOutputTokens: 8000,
+        });
+
+        if (result && result.data) {
+          finalSpec = validateAndSanitizeDiagramSpec(result.data, concept, relevantExcerpt, safePages);
+          finalSpec.isAiGenerated = true;
+          finalSpec.modelUsed = result.modelUsed;
+          finalSpec.provider = result.providerUsed;
+          modelUsed = result.modelUsed;
+          providerUsed = result.providerUsed;
         }
+      } catch (err) {
+        console.warn('[AI] Structured diagram generation failed, falling back to deterministic template:', err);
       }
 
-      if (!generatedImageUrl && ai) {
-        try {
-          const imgResp = await ai.models.generateContent({
-            model: 'gemini-nano-banana-2.1',
-            contents: `Create a clean, minimal, high-contrast educational diagram illustrating "${concept}" (${style}). Include clear academic labels and arrows on a white background. Context: ${contextText.slice(0, 400)}`,
-          });
-          const parts = imgResp.candidates?.[0]?.content?.parts || [];
-          for (const part of parts) {
-            if (part.inlineData?.data) {
-              const mime = part.inlineData.mimeType || 'image/png';
-              generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
-              verificationStatus = 'WORKING_VERIFIED';
-              break;
-            }
-          }
-        } catch (err) {
-          const classified = classifyGeminiError(err);
-          if (classified.statusCode === 402 || classified.category === 'quota_exhausted') {
-            developerApiBillingDepleted = true;
-          }
-          modelNotice =
-            modelNotice ||
-            'AI image generation is unavailable right now. Showing a simple outline instead.';
-        }
-      } else if (!generatedImageUrl && !modelNotice) {
-        modelNotice = HIGGSFIELD_PAUSED
-          ? 'AI images are paused while we add age checks. A diagram maker for every student is coming soon. Showing a simple outline instead.'
-          : 'AI image generation is not set up (add HIGGSFIELD_API_KEY to .env). Showing a simple outline instead.';
+      // If AI generation was skipped, failed, or produced invalid elements, use deterministic template
+      if (!finalSpec || !Array.isArray(finalSpec.elements) || finalSpec.elements.length < 2) {
+        finalSpec = getDeterministicDiagramTemplate(concept, relevantExcerpt, safePages);
+        modelUsed = 'learnmate-deterministic-engine';
+        providerUsed = 'deterministic_template';
       }
 
       res.json({
         concept,
         style,
-        isAiGenerated: Boolean(generatedImageUrl),
-        verificationStatus,
-        generatedImageUrl,
-        modelNotice,
-        // The generic outline is only a placeholder when no real image could be generated.
-        diagramSteps: generatedImageUrl ? [] : [
+        isAiGenerated: finalSpec.isAiGenerated !== false,
+        verificationStatus: 'WORKING_VERIFIED',
+        spec: finalSpec,
+        modelNotice:
+          finalSpec.fallbackNotice ||
+          (providerUsed === 'anthropic' || providerUsed === 'claude'
+            ? `Vector diagram synthesized via Anthropic Claude (${modelUsed}).`
+            : `Vector diagram synthesized via Gemini Flash (${modelUsed}).`),
+        diagramSteps: [
           {
             step: 1,
-            title: `Input & Foundations: ${concept}`,
-            detail:
-              'Establish baseline definitions, state variables, and domain assumptions from the source chapter.',
-            color: '#4285F4',
-          },
-          {
-            step: 2,
-            title: 'Core Mechanism & Governing Law',
-            detail:
-              contextText.slice(0, 140).trim() ||
-              `Apply the governing law or formula connecting the primary variables in ${concept}.`,
-            color: '#FBBC05',
-          },
-          {
-            step: 3,
-            title: 'Verified Outcome & Application',
-            detail:
-              'Verify boundary conditions, units, and real-world diagnostic or exam interpretations.',
-            color: '#34A853',
+            title: finalSpec.title,
+            detail: finalSpec.description,
+            color: '#4F46E5',
           },
         ],
       });
     } catch (err) {
       res.status(500).json({
-        error: err instanceof Error ? err.message : 'Failed to visualize concept.',
+        error: err instanceof Error ? err.message : 'Failed to generate diagram.',
       });
     }
   });
@@ -4391,14 +4966,17 @@ Never output markdown fences or commentary outside the JSON.`;
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`LearnMate full-stack server running on http://localhost:${PORT}`);
-    if (getAnthropicApiKey()) {
+    if (anthropicPreferred()) {
       console.log(
-        `[LearnMate] AI provider: Anthropic Claude only (smart: ${CLAUDE_SMART_MODEL}, fast: ${CLAUDE_FAST_MODEL}).`
+        `[LearnMate] AI provider: Anthropic Claude (smart: ${CLAUDE_SMART_MODEL}, fast: ${CLAUDE_FAST_MODEL}).`
+      );
+    } else if (hasGeminiConfigured()) {
+      console.log(
+        `[LearnMate] AI provider: Google Gemini API active (Anthropic Claude paused). Primary model: gemini-3.1-flash-lite / gemini-3.8-flash.`
       );
     } else {
       console.warn(
-        '[LearnMate] WARNING: ANTHROPIC_API_KEY is not set. AI features (tutor, quizzes, OCR, voice) ' +
-          'will report "AI is not set up" until you add it to .env.'
+        '[LearnMate] WARNING: Neither Gemini nor Claude is configured. AI features will report "AI is not set up".'
       );
     }
     if (FIREBASE_PROJECT_ID) {

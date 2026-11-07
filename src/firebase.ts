@@ -26,7 +26,10 @@ import { getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/fi
  * Firebase settings come from .env (VITE_FIREBASE_*), so dev and production projects stay
  * separate. With VITE_FIREBASE_USE_EMULATOR=true the app uses the local Firebase emulators.
  */
-const env = import.meta.env;
+const env =
+  (typeof import.meta !== 'undefined' && import.meta.env) ||
+  (typeof process !== 'undefined' && (process.env as unknown as Record<string, string | undefined>)) ||
+  {};
 export const usingFirebaseEmulator = env.VITE_FIREBASE_USE_EMULATOR === 'true';
 const projectId = env.VITE_FIREBASE_PROJECT_ID || (usingFirebaseEmulator ? 'demo-learnmate' : '');
 

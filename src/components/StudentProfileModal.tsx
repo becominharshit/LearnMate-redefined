@@ -103,9 +103,9 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   return (
     <div
       data-testid="student-profile-modal"
-      className="fixed inset-0 z-50 bg-ink/45 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl border border-line shadow-2xl max-w-3xl w-full overflow-hidden my-8">
+      <div className="bg-white dark:bg-[#121A2E] text-ink rounded-2xl border border-line shadow-2xl max-w-3xl w-full overflow-hidden my-8">
         {/* Modal Header */}
         <div className="px-6 py-5 bg-canvas border-b border-line flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -157,7 +157,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 value={profile.educationStage}
                 onChange={(e) => handleStageChange(e.target.value as EducationStage)}
                 data-testid="profile-stage-select"
-                className="w-full h-10 px-3.5 rounded-lg border border-line text-xs font-semibold text-ink bg-white focus:outline-none focus:border-brand"
+                className="w-full h-10 px-3.5 rounded-lg border border-line text-xs font-semibold text-ink bg-white dark:bg-[#0B1020] focus:outline-none focus:border-brand"
               >
                 <option value="school">School Student (Class 9-12)</option>
                 <option value="college">Undergraduate / College Student</option>
@@ -188,7 +188,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       })
                     }
                     data-testid="profile-school-class-select"
-                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                   >
                     <option value="">Not set</option>
                     <option value="Class 9">Class 9</option>
@@ -212,7 +212,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                         stream: e.target.value as StudentAcademicProfile['stream']
                       })
                     }
-                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                   >
                     <option value="">Not set</option>
                     <option value="PCM">Science (PCM)</option>
@@ -237,7 +237,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                         schoolBoard: e.target.value as StudentAcademicProfile['schoolBoard']
                       })
                     }
-                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                   >
                     <option value="">Not set</option>
                     <option value="CBSE">CBSE</option>
@@ -258,7 +258,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     value={profile.academicYear}
                     onChange={(e) => setProfile({ ...profile, academicYear: e.target.value })}
                     placeholder="2026-2027"
-                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                   />
                 </div>
               </div>
@@ -272,7 +272,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   value={profile.schoolName}
                   onChange={(e) => setProfile({ ...profile, schoolName: e.target.value })}
                   placeholder="e.g. Delhi Public School / Kendriya Vidyalaya"
-                  className="w-full h-9 px-3 rounded-lg border border-line bg-white text-xs text-ink"
+                  className="w-full h-9 px-3 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs text-ink"
                 />
               </div>
             </div>
@@ -296,7 +296,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                         collegeYear: e.target.value as StudentAcademicProfile['collegeYear']
                       })
                     }
-                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                   >
                     <option value="">Not set</option>
                     <option value="1st Year">1st Year</option>
@@ -316,7 +316,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     value={profile.degreeCourse}
                     onChange={(e) => setProfile({ ...profile, degreeCourse: e.target.value })}
                     placeholder="e.g. B.Tech Computer Science, B.Sc, MBBS"
-                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                   />
                 </div>
                 <div>
@@ -329,7 +329,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     value={profile.universityName}
                     onChange={(e) => setProfile({ ...profile, universityName: e.target.value })}
                     placeholder="e.g. IIT / NIT / Delhi University"
-                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    className="w-full h-9 px-2.5 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                   />
                 </div>
               </div>
@@ -355,7 +355,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                     setProfile({ ...profile, targetExam: e.target.value as ExamTypeId })
                   }
                   data-testid="profile-target-exam-select"
-                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-bold text-ink"
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-bold text-ink"
                 >
                   {EXAM_OPTIONS.map((exam) => (
                     <option key={exam.id} value={exam.id}>
@@ -394,7 +394,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       examSession: e.target.value as StudentAcademicProfile['examSession']
                     })
                   }
-                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                 >
                   <option value="jee_main_2027_session_1">
                     Session 1 (20–28 Jan 2027)
@@ -418,7 +418,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       ageBand: e.target.value as StudentAcademicProfile['ageBand']
                     })
                   }
-                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                 >
                   <option value="">Not set</option>
                   <option value="under_16">Under 16</option>
@@ -478,7 +478,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       preferredLanguage: e.target.value as StudentAcademicProfile['preferredLanguage']
                     })
                   }
-                  className="w-full h-10 px-3 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                  className="w-full h-10 px-3 rounded-lg border border-line bg-white dark:bg-[#0B1020] text-xs font-semibold text-ink"
                 >
                   <option value="English">English</option>
                   <option value="Hindi + English (Hinglish)">Hindi + English (Hinglish)</option>

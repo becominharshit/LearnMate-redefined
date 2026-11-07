@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  Atom,
   BarChart2,
   TrendingUp,
   Award,
@@ -12,6 +13,9 @@ import {
   Download,
   Printer,
   Timer,
+  Flame,
+  FlaskConical,
+  Sigma,
 } from 'lucide-react';
 import type { StudyDocument, QuizAttempt, RevisionTask } from '../types/study';
 import {
@@ -19,6 +23,12 @@ import {
   computeOverallProgressSummary,
   generateStudyProgressReportText,
 } from '../utils/quizGrading';
+import {
+  JEE_SUBJECTS,
+  JeeSubject,
+  classifyJeeSubject,
+  computeStudyStreak,
+} from '../utils/jeeSubjects';
 import { studyStorage } from '../services/storageService';
 
 interface ProgressViewProps {
@@ -27,6 +37,20 @@ interface ProgressViewProps {
   onStartQuizForDocument: (doc: StudyDocument, mode: 'quiz' | 'adaptive') => void;
   onResetProgress: () => void;
 }
+
+const SUBJECT_STYLE: Record<
+  JeeSubject,
+  { icon: React.ComponentType<{ className?: string }>; text: string; soft: string; bar: string }
+> = {
+  Physics: { icon: Atom, text: 'text-physics', soft: 'bg-physics-soft', bar: 'bg-physics' },
+  Chemistry: {
+    icon: FlaskConical,
+    text: 'text-chemistry',
+    soft: 'bg-chemistry-soft',
+    bar: 'bg-chemistry',
+  },
+  Mathematics: { icon: Sigma, text: 'text-maths', soft: 'bg-maths-soft', bar: 'bg-maths' },
+};
 
 export const ProgressView: React.FC<ProgressViewProps> = ({
   documents,
@@ -51,6 +75,37 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
     (sum, s) => sum + (s.durationMinutes || 0),
     0
   );
+
+  const streak = useMemo(
+    () =>
+      computeStudyStreak([
+        ...attempts.map((a) => new Date(a.completedAt)),
+        ...allFocusSessions.map((s) => new Date(s.completedAt)),
+      ]),
+    [attempts, allFocusSessions]
+  );
+
+  const subjectStats = useMemo(() => {
+    const answers = filteredAttempts.flatMap((attempt) =>
+      attempt.answers
+        .filter((a) => a.selectedIndex >= 0)
+        .map((answer) => ({ ...answer, documentTitle: attempt.documentTitle }))
+    );
+    return JEE_SUBJECTS.map((subject) => {
+      const subjectAnswers = answers.filter(
+        (a) => classifyJeeSubject(`${a.topic} ${a.documentTitle}`) === subject
+      );
+      const subjectCorrect = subjectAnswers.filter((a) => a.isCorrect).length;
+      return {
+        subject,
+        attempted: subjectAnswers.length,
+        accuracy:
+          subjectAnswers.length > 0
+            ? Math.round((subjectCorrect / subjectAnswers.length) * 100)
+            : null,
+      };
+    });
+  }, [filteredAttempts]);
 
   const summary = computeOverallProgressSummary(filteredAttempts);
   const topicComparisons = computeTopicProgress(filteredAttempts);
@@ -91,29 +146,30 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
   };
 
   return (
-    <div className="max-w-[1160px] mx-auto px-4 sm:px-8 py-8 space-y-8">
+    <div className="max-w-[1160px] mx-auto px-4 sm:px-8 py-6 space-y-6" data-testid="progress-view">
       {/* Header & Material Filter */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200/80 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-line pb-5">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
-            Learning Progress
+          <p className="lm-kicker">Analytics &amp; Stats</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-ink">
+            JEE Study Progress
           </h1>
-          <p className="text-base text-slate-500 mt-1">
-            Real quiz attempts, adaptive practice scores, focus timer sessions, and topic-level improvement.
+          <p className="text-sm text-muted mt-1">
+            Real quiz attempts, subject accuracy, study streak, and topic-level mastery.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 lm-no-print">
-          <label htmlFor="progress-doc-filter" className="text-sm font-medium text-slate-600">
+        <div className="flex flex-wrap items-center gap-2 lm-no-print">
+          <label htmlFor="progress-doc-filter" className="text-xs font-semibold text-muted">
             Material:
           </label>
           <select
             id="progress-doc-filter"
             value={selectedDocFilter}
             onChange={(e) => setSelectedDocFilter(e.target.value)}
-            className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-[14px] font-medium text-slate-800 focus:outline-none focus:border-brand"
+            className="px-3 py-2 rounded-xl border border-line bg-white text-xs font-semibold text-ink focus:outline-none focus:border-brand max-w-[220px] truncate"
           >
-            <option value="all">All Study Materials ({attempts.length} attempts)</option>
+            <option value="all">All Materials ({attempts.length} attempts)</option>
             {documents.map((doc) => (
               <option key={doc.id} value={doc.id}>
                 {doc.title}
@@ -124,18 +180,18 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
           <button
             type="button"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[14px] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white hover:bg-soft text-ink text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <Printer className="w-4 h-4" />
-            <span>Print / Save PDF</span>
+            <Printer className="w-3.5 h-3.5" />
+            <span>Print</span>
           </button>
 
           <button
             type="button"
             onClick={handleDownloadReport}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-[14px] font-semibold shadow-2xs transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl lm-btn-accent text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-3.5 h-3.5" />
             <span>Download Report</span>
           </button>
 
@@ -144,7 +200,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
               type="button"
               onClick={onResetProgress}
               title="Clear saved quiz history"
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-slate-200 text-[14px] font-medium text-slate-500 hover:text-red-600 hover:border-red-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-line text-xs font-semibold text-muted hover:text-danger hover:border-danger/30 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset</span>
@@ -153,53 +209,102 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
         </div>
       </div>
 
-      {/* Real Focus Timer Sessions Strip when available */}
-      {filteredFocusSessions.length > 0 && (
-        <div className="p-4 rounded-2xl bg-[#F3F7FE] border border-blue-100 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#DCE8FD] text-brand flex items-center justify-center shrink-0">
-              <Timer className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-ink">
-                {filteredFocusSessions.length} Completed Focus{' '}
-                {filteredFocusSessions.length === 1 ? 'Session' : 'Sessions'} ({totalFocusMinutes}{' '}
-                mins)
+      {/* Top stats strip moved from Home: Study Streak, Focus Time, Subject Breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {subjectStats.map(({ subject, attempted, accuracy }) => {
+          const style = SUBJECT_STYLE[subject];
+          const Icon = style.icon;
+          return (
+            <div key={subject} className="lm-card-editorial p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-2 text-sm font-bold text-ink">
+                  <span
+                    className={`w-7 h-7 rounded-lg ${style.soft} ${style.text} flex items-center justify-center`}
+                  >
+                    <Icon className="w-4 h-4" />
+                  </span>
+                  {subject}
+                </span>
+                <span className="text-xs font-bold text-ink tabular-nums">
+                  {accuracy !== null ? `${accuracy}% accuracy` : 'No attempts yet'}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-soft overflow-hidden">
+                <div
+                  className={`h-full ${style.bar} transition-all`}
+                  style={{ width: `${accuracy !== null ? Math.max(6, accuracy) : 0}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-muted tabular-nums">
+                {attempted > 0
+                  ? `${attempted} question${attempted === 1 ? '' : 's'} answered`
+                  : 'Solve a practice set in this subject to see accuracy.'}
               </p>
-              <p className="text-xs text-muted">
-                Recorded from real Study Timer focus sessions
-              </p>
             </div>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="lm-card-editorial p-4 flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-warning-soft text-warning flex items-center justify-center shrink-0">
+            <Flame className="w-5 h-5" />
           </div>
-          <span className="text-xs font-semibold text-brand bg-white px-3 py-1 rounded-full border border-blue-200/80">
-            Latest: {new Date(filteredFocusSessions[0].completedAt).toLocaleDateString()}
-          </span>
+          <div>
+            <p className="text-sm font-bold text-ink tabular-nums">
+              {streak} {streak === 1 ? 'day' : 'days'} active study streak
+            </p>
+            <p className="text-xs text-muted">
+              Counted from real completed quizzes and focus timer sessions
+            </p>
+          </div>
         </div>
-      )}
+
+        <div className="lm-card-editorial p-4 flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-brand-soft text-brand flex items-center justify-center shrink-0">
+            <Timer className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-ink tabular-nums">
+              {filteredFocusSessions.length} Focus{' '}
+              {filteredFocusSessions.length === 1 ? 'Session' : 'Sessions'} ({totalFocusMinutes}{' '}
+              mins)
+            </p>
+            <p className="text-xs text-muted">
+              {filteredFocusSessions[0]
+                ? `Latest session on ${new Date(
+                    filteredFocusSessions[0].completedAt
+                  ).toLocaleDateString()}`
+                : 'Start the focus timer while studying to log time.'}
+            </p>
+          </div>
+        </div>
+      </div>
 
       {/* Honest Empty State when no quizzes have been submitted yet */}
       {filteredAttempts.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-slate-200/90 p-10 sm:p-14 text-center max-w-xl mx-auto space-y-5 shadow-xs">
-          <div className="w-16 h-16 rounded-2xl bg-success-soft text-success flex items-center justify-center mx-auto">
-            <BarChart2 className="w-8 h-8" />
+        <div className="lm-card-editorial p-8 sm:p-12 text-center max-w-xl mx-auto space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-success-soft text-success flex items-center justify-center mx-auto">
+            <BarChart2 className="w-7 h-7" />
           </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold text-slate-900">
+          <div className="space-y-1.5">
+            <h2 className="font-display text-lg font-bold text-ink">
               No Quiz Attempts Recorded Yet
             </h2>
-            <p className="text-base text-slate-500 leading-relaxed">
-              LearnMate never fabricates statistics. Complete a Diagnostic Quiz or Adaptive Practice session on your study material to track real scores and topic-level improvement over time.
+            <p className="text-xs sm:text-sm text-muted leading-relaxed">
+              LearnMate never invents statistics. Complete a practice set or chapter quiz on your
+              study material to track real scores and topic-level improvement over time.
             </p>
           </div>
           {documents[0] && (
-            <div className="pt-2">
+            <div className="pt-1">
               <button
                 type="button"
                 onClick={() => onStartQuizForDocument(documents[0], 'quiz')}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-brand hover:bg-brand-strong text-white text-[15px] font-semibold shadow-sm transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer"
               >
                 <BookOpen className="w-4 h-4" />
-                <span>Take Diagnostic Quiz on {documents[0].title}</span>
+                <span>Take Quiz on {documents[0].title}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -256,19 +361,19 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
           </div>
 
           {/* Topic-Level Improvement Breakdown */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-6 space-y-5 shadow-xs">
+          <div className="lm-card-editorial p-6 space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  Topic-Level Mastery & Improvement
+                <h2 className="text-base font-bold text-ink">
+                  Topic-Level Mastery &amp; Improvement
                 </h2>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted">
                   Comparing your first attempt on each topic against your most recent attempt.
                 </p>
               </div>
             </div>
 
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-line">
               {topicComparisons.map((item) => (
                 <div
                   key={item.topic}
@@ -276,8 +381,8 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                 >
                   <div className="space-y-1 min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold text-slate-900">{item.topic}</span>
-                      <span className="text-xs text-slate-500 tabular-nums">
+                      <span className="text-sm font-bold text-ink">{item.topic}</span>
+                      <span className="text-xs text-muted tabular-nums">
                         · {item.totalCorrect}/{item.totalQuestions} correct across {item.attemptsCount}{' '}
                         {item.attemptsCount === 1 ? 'attempt' : 'attempts'}
                       </span>
@@ -299,14 +404,14 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                     </div>
 
                     {/* Visual Progress Bar */}
-                    <div className="w-full max-w-md h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="w-full max-w-md h-2.5 rounded-full bg-soft overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 ${
                           item.latestScorePct >= 80
                             ? 'bg-success'
                             : item.latestScorePct >= 50
-                            ? 'bg-warning'
-                            : 'bg-danger'
+                              ? 'bg-warning'
+                              : 'bg-danger'
                         }`}
                         style={{ width: `${Math.max(6, item.latestScorePct)}%` }}
                       />
@@ -315,8 +420,8 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
 
                   <div className="flex items-center gap-4 shrink-0">
                     <div className="text-right tabular-nums">
-                      <p className="text-xs text-slate-500">First → Latest</p>
-                      <p className="text-sm font-bold text-slate-900">
+                      <p className="text-xs text-muted">First → Latest</p>
+                      <p className="text-sm font-bold text-ink">
                         {item.firstScorePct}% → {item.latestScorePct}%
                       </p>
                     </div>
@@ -327,9 +432,9 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
           </div>
 
           {/* Attempt History Log */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-6 space-y-4 shadow-xs">
-            <h2 className="text-lg font-bold text-slate-900">Attempt History</h2>
-            <div className="divide-y divide-slate-100">
+          <div className="lm-card-editorial p-6 space-y-4">
+            <h2 className="text-base font-bold text-ink">Attempt History</h2>
+            <div className="divide-y divide-line">
               {filteredAttempts.map((attempt) => (
                 <div
                   key={attempt.id}
@@ -337,14 +442,12 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                 >
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">
-                        {attempt.documentTitle}
-                      </span>
+                      <span className="text-sm font-bold text-ink">{attempt.documentTitle}</span>
                       <span className="text-xs font-semibold text-brand">
                         · {attempt.mode === 'adaptive' ? 'Adaptive Practice' : 'Diagnostic Quiz'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <div className="flex items-center gap-2 text-xs text-muted">
                       <Clock className="w-3.5 h-3.5" />
                       <span>{new Date(attempt.completedAt).toLocaleString()}</span>
                       {attempt.weakTopics.length > 0 && (
@@ -359,8 +462,8 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                         attempt.percentage >= 80
                           ? 'text-emerald-700'
                           : attempt.percentage >= 50
-                          ? 'text-amber-700'
-                          : 'text-red-600'
+                            ? 'text-amber-700'
+                            : 'text-red-600'
                       }`}
                     >
                       {attempt.score}/{attempt.totalQuestions} ({attempt.percentage}%)

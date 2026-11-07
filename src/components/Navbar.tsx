@@ -8,23 +8,25 @@ import {
   ChevronDown,
   Search,
   BarChart3,
-  FilePenLine,
   LogIn,
   LogOut,
   Clock,
   GraduationCap,
   LayoutDashboard,
-  MessageCircleQuestion,
   Compass,
-  Upload,
-  ScanLine,
   Flame,
+  Plus,
+  Settings,
+  UserRound,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { StudyDocument, LearnMateNotification, StudentAcademicProfile } from '../types/study';
+import { StudyDocument, LearnMateNotification, StudentAcademicProfile, ThemeMode } from '../types/study';
 import { EXAM_BLUEPRINTS } from '../utils/examSimulatorEngine';
 import { getNextJeeCountdown } from '../utils/jeeCalendar';
 import { CompactStudyUtilitiesWidget } from './CompactStudyUtilitiesWidget';
+import type { AddMaterialMode } from './AddMaterialModal';
 
 export type ActiveTab =
   | 'home'
@@ -32,6 +34,7 @@ export type ActiveTab =
   | 'study'
   | 'revision'
   | 'practice'
+  | 'resources'
   | 'explore'
   | 'ai-tutor'
   | 'create'
@@ -43,7 +46,7 @@ interface NavbarProps {
   onSelectTab: (tab: ActiveTab) => void;
   hasActiveDoc: boolean;
   activeDoc?: StudyDocument | null;
-  onOpenNotebookModal?: () => void;
+  onOpenAddMaterial?: (mode?: AddMaterialMode) => void;
   user?: User | null;
   isAuthReady?: boolean;
   isSyncing?: boolean;
@@ -55,6 +58,8 @@ interface NavbarProps {
   onMarkNotificationsRead?: () => void;
   onOpenProfileModal?: () => void;
   studentProfile?: StudentAcademicProfile;
+  themeMode?: ThemeMode;
+  onToggleTheme?: () => void;
 }
 
 type NavItem = {
@@ -67,25 +72,23 @@ const DESKTOP_NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'study', label: 'Study', icon: BookOpen },
   { id: 'practice', label: 'Practice', icon: Target },
-  { id: 'ai-tutor', label: 'AI Tutor', icon: MessageCircleQuestion },
   { id: 'revision', label: 'Revise', icon: ListChecks },
-  { id: 'create', label: 'Create', icon: Sparkles },
   { id: 'analytics', label: 'Progress', icon: BarChart3 },
 ];
 
-const MOBILE_NAV: NavItem[] = [
+const MOBILE_PRIMARY_NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'study', label: 'Study', icon: BookOpen },
   { id: 'practice', label: 'Practice', icon: Target },
-  { id: 'ai-tutor', label: 'Ask AI', icon: MessageCircleQuestion },
   { id: 'revision', label: 'Revise', icon: ListChecks },
 ];
 
 function isTabActive(item: ActiveTab, activeTab: ActiveTab): boolean {
   return (
     activeTab === item ||
-    (item === 'study' && activeTab === 'pdf-workspace') ||
-    (item === 'dashboard' && activeTab === 'home')
+    (item === 'study' && (activeTab === 'pdf-workspace' || activeTab === 'ai-tutor')) ||
+    (item === 'dashboard' && activeTab === 'home') ||
+    (item === 'resources' && activeTab === 'explore')
   );
 }
 
@@ -93,7 +96,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onSelectTab,
   activeDoc,
-  onOpenNotebookModal,
+  onOpenAddMaterial,
   user,
   isAuthReady,
   isSyncing,
@@ -105,10 +108,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   onMarkNotificationsRead,
   onOpenProfileModal,
   studentProfile,
+  themeMode = 'light',
+  onToggleTheme,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+
+  const isDark = themeMode === 'dark';
 
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -163,16 +170,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   const menuItemClass =
     'w-full px-4 py-2.5 text-left text-sm text-ink hover:bg-soft flex items-center gap-3 cursor-pointer transition-colors';
 
+  const meActive =
+    profileOpen ||
+    activeTab === 'resources' ||
+    activeTab === 'explore' ||
+    activeTab === 'create' ||
+    activeTab === 'analytics';
+
   return (
     <>
-      <header className="sticky top-0 z-40 w-full bg-white/85 backdrop-blur-xl border-b border-line lm-no-print">
-        <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-3">
+      <header className="sticky top-0 z-40 w-full bg-white/90 dark:bg-[#0B1020]/90 backdrop-blur-xl border-b border-line lm-no-print">
+        <div className="max-w-[1320px] mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center gap-2 sm:gap-3">
           {/* Brand */}
           <button
             type="button"
             onClick={() => onSelectTab('dashboard')}
             data-testid="navbar-brand-btn"
-            className="flex items-center gap-2.5 shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-brand rounded-xl"
+            className="flex items-center gap-2 shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-brand rounded-xl"
             aria-label="LearnMate home"
           >
             <span className="w-9 h-9 rounded-xl bg-linear-to-br from-brand to-violet-500 text-white grid place-items-center shadow-sm">
@@ -188,8 +202,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* Desktop navigation */}
-          <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-1 ml-4">
+          {/* Desktop navigation: Home · Study · Practice · Revise · Progress */}
+          <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-1 ml-3">
             {DESKTOP_NAV.map((item) => {
               const Icon = item.icon;
               const active = isTabActive(item.id, activeTab);
@@ -200,7 +214,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onSelectTab(item.id)}
                   data-testid={`nav-tab-${item.id}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
                     active ? 'bg-brand-soft text-brand' : 'text-muted hover:text-ink hover:bg-soft'
                   }`}
                 >
@@ -211,18 +225,57 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
-            {/* Exam countdown */}
+          <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+            {/* Persistent "+ Add material" button on every page */}
+            {onOpenAddMaterial && (
+              <button
+                type="button"
+                onClick={() => onOpenAddMaterial('pdf')}
+                data-testid="navbar-add-material-btn"
+                className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 rounded-full lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add material</span>
+              </button>
+            )}
+
+            {/* Exam countdown pill (xl screens) */}
             {countdown && (
               <div
-                className="hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-warning-soft border border-amber-200 text-xs font-semibold text-amber-800"
+                className="hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-warning-soft border border-amber-200 dark:border-amber-800/60 text-xs font-semibold text-amber-800 dark:text-amber-300"
                 title={`${countdown.label} starts ${countdown.startDate}`}
               >
-                <Flame className="w-3.5 h-3.5 text-warning" />
-                {countdown.inProgress
-                  ? `${countdown.label} is on. All the best!`
-                  : `${countdown.daysLeft} days to ${countdown.label}`}
+                <Flame className="w-3.5 h-3.5 text-warning shrink-0" />
+                <span className="whitespace-nowrap">
+                  {countdown.inProgress
+                    ? `${countdown.label} is on`
+                    : `${countdown.daysLeft}d to ${countdown.label}`}
+                </span>
               </div>
+            )}
+
+            {/* Light / Night Owl Mode Toggle */}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                data-testid="navbar-theme-toggle-btn"
+                aria-label={isDark ? 'Switch to Light mode' : 'Switch to Night Owl mode'}
+                title={isDark ? 'Switch to Light mode' : 'Switch to Night Owl mode'}
+                className="h-9 px-2.5 sm:px-3 rounded-full border border-line bg-white dark:bg-[#121A2E] hover:bg-soft flex items-center gap-1.5 text-muted hover:text-ink transition-colors cursor-pointer"
+              >
+                {isDark ? (
+                  <>
+                    <Sun className="w-4 h-4 text-amber-400" />
+                    <span className="hidden xl:inline text-xs font-semibold text-ink">Light</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-4 h-4 text-indigo-600" />
+                    <span className="hidden xl:inline text-xs font-semibold text-ink">Night Owl</span>
+                  </>
+                )}
+              </button>
             )}
 
             <CompactStudyUtilitiesWidget activeDocument={activeDoc} />
@@ -237,7 +290,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 aria-label="Notifications"
                 data-testid="navbar-notifications-btn"
-                className="relative w-9 h-9 rounded-full hover:bg-soft border border-line bg-white flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
+                className="relative w-9 h-9 rounded-full hover:bg-soft border border-line bg-white dark:bg-[#121A2E] flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
               >
                 <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
@@ -248,7 +301,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
 
               {notifOpen && (
-                <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-24px)] bg-white rounded-2xl shadow-xl border border-line overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-24px)] bg-white dark:bg-[#121A2E] rounded-2xl shadow-xl border border-line overflow-hidden z-50">
                   <div className="px-4 py-3 border-b border-line">
                     <span className="font-display text-sm font-bold text-ink">Notifications</span>
                   </div>
@@ -295,14 +348,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Profile menu */}
+            {/* Profile menu: Profile · Settings · Resources · Create · Sign out */}
             <div ref={profileRef} className="relative">
               <button
                 type="button"
                 onClick={() => setProfileOpen((prev) => !prev)}
                 data-testid="navbar-profile-btn"
                 aria-label="Open profile menu"
-                className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-white hover:bg-soft border border-line transition-colors cursor-pointer"
+                className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-white dark:bg-[#121A2E] hover:bg-soft border border-line transition-colors cursor-pointer"
               >
                 {user?.photoURL ? (
                   <img
@@ -316,20 +369,34 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {avatarInitial}
                   </span>
                 )}
-                <span className="hidden md:inline text-xs font-semibold text-ink max-w-[150px] truncate">
+                <span className="hidden md:inline text-xs font-semibold text-ink max-w-[140px] truncate">
                   {profileSubtitle}
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-muted" />
               </button>
 
               {profileOpen && (
-                <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-24px)] bg-white rounded-2xl shadow-xl border border-line py-1.5 z-50">
+                <div
+                  data-testid="profile-dropdown-menu"
+                  className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-24px)] bg-white dark:bg-[#121A2E] rounded-2xl shadow-xl border border-line py-1.5 z-50"
+                >
                   <div className="px-4 py-3 border-b border-line">
                     <div className="text-sm font-bold text-ink truncate">{displayName}</div>
                     <div className="text-xs text-muted truncate">
                       {isSyncing ? 'Syncing your progress…' : profileSubtitle}
                     </div>
                   </div>
+
+                  {countdown && (
+                    <div className="xl:hidden px-4 py-2 border-b border-line flex items-center gap-2 text-xs font-medium text-amber-800 dark:text-amber-300 bg-warning-soft/60">
+                      <Flame className="w-3.5 h-3.5 text-warning shrink-0" />
+                      <span>
+                        {countdown.inProgress
+                          ? `${countdown.label} is live`
+                          : `${countdown.daysLeft} days until ${countdown.label}`}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="px-3 py-2 border-b border-line">
                     <label className="flex items-center gap-2 bg-soft rounded-xl px-3 py-2">
@@ -343,7 +410,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       />
                     </label>
                     {filteredDocs.length > 0 && (
-                      <div className="mt-2 max-h-36 overflow-y-auto rounded-xl border border-line divide-y divide-line">
+                      <div className="mt-2 max-h-36 overflow-y-auto rounded-xl border border-line bg-white dark:bg-[#0B1020] divide-y divide-line">
                         {filteredDocs.map((doc) => (
                           <button
                             key={doc.id}
@@ -362,6 +429,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
                   </div>
 
+                  {/* Mobile quick link to Progress (since mobile bottom bar has 5 items: Home, Study, Practice, Revise, Me) */}
+                  <button
+                    type="button"
+                    onClick={() => go('analytics')}
+                    className={`${menuItemClass} lg:hidden`}
+                  >
+                    <BarChart3 className="w-4 h-4 text-muted" />
+                    Progress
+                  </button>
+
                   {onOpenProfileModal && (
                     <button
                       type="button"
@@ -370,43 +447,77 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setProfileOpen(false);
                       }}
                       data-testid="open-academic-profile-menu-btn"
-                      className={`${menuItemClass} font-semibold text-brand`}
+                      className={menuItemClass}
                     >
-                      <GraduationCap className="w-4 h-4" />
-                      My JEE profile &amp; goals
+                      <UserRound className="w-4 h-4 text-muted" />
+                      Profile
                     </button>
                   )}
-                  <button type="button" onClick={() => go('home')} className={menuItemClass}>
-                    <Upload className="w-4 h-4 text-muted" />
-                    Upload study material
-                  </button>
-                  <button type="button" onClick={() => go('analytics')} className={`${menuItemClass} lg:hidden`}>
-                    <BarChart3 className="w-4 h-4 text-muted" />
-                    Progress &amp; reports
-                  </button>
-                  <button type="button" onClick={() => go('create')} className={`${menuItemClass} lg:hidden`}>
-                    <Sparkles className="w-4 h-4 text-muted" />
-                    Create studio
-                  </button>
-                  <button type="button" onClick={() => go('pdf-workspace')} className={menuItemClass}>
-                    <FilePenLine className="w-4 h-4 text-muted" />
-                    PDF annotation studio
-                  </button>
-                  <button type="button" onClick={() => go('explore')} className={menuItemClass}>
-                    <Compass className="w-4 h-4 text-muted" />
-                    Explore resources
-                  </button>
+
+                  {onOpenProfileModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenProfileModal();
+                        setProfileOpen(false);
+                      }}
+                      data-testid="open-settings-menu-btn"
+                      className={menuItemClass}
+                    >
+                      <Settings className="w-4 h-4 text-muted" />
+                      Settings
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => {
-                      onOpenNotebookModal?.();
-                      setProfileOpen(false);
-                    }}
+                    onClick={() => go('resources')}
+                    data-testid="open-resources-menu-btn"
                     className={menuItemClass}
                   >
-                    <ScanLine className="w-4 h-4 text-muted" />
-                    Scan notes &amp; notebook
+                    <Compass className="w-4 h-4 text-muted" />
+                    Resources
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => go('create')}
+                    data-testid="open-create-menu-btn"
+                    className={menuItemClass}
+                  >
+                    <Sparkles className="w-4 h-4 text-muted" />
+                    Create
+                  </button>
+
+                  {onToggleTheme && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleTheme();
+                        setProfileOpen(false);
+                      }}
+                      data-testid="profile-theme-toggle-btn"
+                      className={menuItemClass}
+                    >
+                      {isDark ? (
+                        <>
+                          <Sun className="w-4 h-4 text-amber-400" />
+                          <span className="flex-1 text-left">Switch to Light mode</span>
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 text-[10px] font-bold">
+                            Night Owl On
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Moon className="w-4 h-4 text-indigo-600" />
+                          <span className="flex-1 text-left">Night Owl mode</span>
+                          <span className="px-2 py-0.5 rounded-md bg-soft text-muted text-[10px] font-bold">
+                            Off
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  )}
 
                   {isAuthReady && (
                     <div className="border-t border-line mt-1 pt-1">
@@ -417,6 +528,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                             onLogout?.();
                             setProfileOpen(false);
                           }}
+                          data-testid="profile-signout-btn"
                           className={`${menuItemClass} text-danger`}
                         >
                           <LogOut className="w-4 h-4" />
@@ -444,20 +556,23 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Mobile bottom tab bar */}
+      {/* Mobile bottom tab bar: Home · Study · Practice · Revise · Me */}
       <nav
         aria-label="Main navigation"
-        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-xl border-t border-line pb-[env(safe-area-inset-bottom)] lm-no-print"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-t border-line pb-[env(safe-area-inset-bottom)] lm-no-print"
       >
         <div className="grid grid-cols-5">
-          {MOBILE_NAV.map((item) => {
+          {MOBILE_PRIMARY_NAV.map((item) => {
             const Icon = item.icon;
-            const active = isTabActive(item.id, activeTab);
+            const active = !profileOpen && isTabActive(item.id, activeTab);
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => onSelectTab(item.id)}
+                onClick={() => {
+                  setProfileOpen(false);
+                  onSelectTab(item.id);
+                }}
                 data-testid={`mobile-nav-tab-${item.id}`}
                 aria-current={active ? 'page' : undefined}
                 className={`relative flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-semibold transition-colors cursor-pointer ${
@@ -472,6 +587,23 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             );
           })}
+
+          {/* 5th phone tab: Me */}
+          <button
+            type="button"
+            onClick={() => setProfileOpen((prev) => !prev)}
+            data-testid="mobile-nav-tab-me"
+            aria-expanded={profileOpen}
+            className={`relative flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-semibold transition-colors cursor-pointer ${
+              meActive ? 'text-brand' : 'text-muted'
+            }`}
+          >
+            {meActive && (
+              <span className="absolute top-0 h-0.5 w-8 rounded-full bg-brand" aria-hidden="true" />
+            )}
+            <UserRound className="w-5 h-5" />
+            Me
+          </button>
         </div>
       </nav>
     </>

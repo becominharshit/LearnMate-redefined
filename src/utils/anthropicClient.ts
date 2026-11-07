@@ -162,3 +162,127 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResponse> {
     clearTimeout(timer);
   }
 }
+
+export async function streamClaude(
+  req: Omit<ClaudeRequest, 'jsonSchema'>,
+  onDelta: (textChunk: string) => void
+): Promise<ClaudeResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), req.timeoutMs ?? 60_000);
+
+  try {
+    const body: Record<string, unknown> = {
+      model: req.model,
+      max_tokens: req.maxTokens,
+      messages: req.messages,
+      stream: true,
+    };
+    if (req.system) body.system = req.system;
+    if (req.effort) body.output_config = { effort: req.effort };
+
+    const baseUrl = (req.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '');
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': req.apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+          accept: 'text/event-stream',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw new ClaudeApiError('CLAUDE_TIMEOUT: the AI took too long to respond.');
+      }
+      throw new ClaudeApiError(
+        `Network error contacting the AI service: ${err instanceof Error ? err.message : String(err)}`,
+        503
+      );
+    }
+
+    if (!res.ok) {
+      const raw = await res.text().catch(() => '');
+      let apiMessage = raw.slice(0, 300) || `HTTP ${res.status}`;
+      try {
+        const parsed = raw ? (JSON.parse(raw) as { error?: { message?: string } }) : null;
+        if (parsed?.error?.message) apiMessage = parsed.error.message;
+      } catch {
+        // use raw text
+      }
+      const status = res.status === 529 ? 503 : res.status;
+      throw new ClaudeApiError(`Anthropic API error ${res.status}: ${apiMessage}`, status);
+    }
+
+    if (!res.body) {
+      throw new ClaudeApiError('Anthropic stream returned an empty response body.', 502);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+    let stopReason: string | null = null;
+    let resolvedModel = req.model;
+
+    const processLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) return;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === '[DONE]') return;
+      let evt: {
+        type?: string;
+        message?: { model?: string; stop_reason?: string | null };
+        delta?: { type?: string; text?: string; stop_reason?: string | null };
+        error?: { message?: string };
+      };
+      try {
+        evt = JSON.parse(payload);
+      } catch {
+        return;
+      }
+      if (evt.type === 'message_start' && evt.message?.model) {
+        resolvedModel = evt.message.model;
+      } else if (
+        evt.type === 'content_block_delta' &&
+        evt.delta?.type === 'text_delta' &&
+        typeof evt.delta.text === 'string'
+      ) {
+        fullText += evt.delta.text;
+        onDelta(evt.delta.text);
+      } else if (evt.type === 'message_delta' && evt.delta?.stop_reason !== undefined) {
+        stopReason = evt.delta.stop_reason ?? null;
+      } else if (evt.type === 'error') {
+        throw new ClaudeApiError(
+          `Anthropic stream error: ${evt.error?.message || 'stream interrupted'}`,
+          502
+        );
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        processLine(line);
+      }
+    }
+    if (buffer.trim()) {
+      processLine(buffer);
+    }
+
+    return {
+      text: fullText,
+      stopReason,
+      model: resolvedModel,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}

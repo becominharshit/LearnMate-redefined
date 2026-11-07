@@ -227,7 +227,7 @@ export const SampleChapterPage: React.FC<SampleChapterPageProps> = ({
               Four questions, with full explanations
             </h2>
             <p className="text-sm text-muted">
-              MCQ marking is +4 / −1. Numerical answers are +4 / 0, just like JEE Main.
+              Marking is +4 for a correct answer and −1 for a wrong one, for both MCQs and numerical answers, just like JEE Main.
             </p>
           </div>
           <div className="grid gap-4">

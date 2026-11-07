@@ -1,35 +1,27 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
-  Mic,
-  MicOff,
-  Volume2,
-  VolumeX,
   X,
   Send,
-  Sparkles,
-  BookOpen,
-  Radio,
-  Captions,
-  UserCheck,
-  Play,
-  Square,
+  Volume2,
+  VolumeX,
+  Keyboard,
+  PhoneOff,
   AlertCircle,
+  RotateCcw,
 } from 'lucide-react';
-import type { StudyDocument, TutorCitation } from '../types/study';
+import type { StudyDocument, VoiceTurn } from '../types/study';
+import { MathText } from './MathText';
+import { aiStudyClient } from '../services/aiClient';
+import { storageService } from '../services/storageService';
 import {
-  LearnMateBuddyAvatar,
-  type BuddyAvatarState,
-} from './LearnMateBuddyAvatar';
-import {
-  upsertStreamingTranscriptChunk,
-  finalizeActiveTranscriptTurn,
-  type VoiceTranscriptEntry,
+  assembleStudentSpeechTranscript,
+  formatSpokenTextForTts,
+  extractSpeechUnitsFromStream,
+  shouldAcceptTurnEvent,
+  shouldProcessSpeechRecognitionResult,
+  computeSilenceTimeoutMs,
+  canAcceptSessionCallback,
 } from '../utils/stabilityEngine';
-import { getApiIdToken } from '../firebase';
-
-interface TranscriptTurnItem extends VoiceTranscriptEntry {
-  citations?: TutorCitation[];
-}
 
 interface VoiceTutorModalProps {
   isOpen: boolean;
@@ -39,994 +31,1279 @@ interface VoiceTutorModalProps {
   onNavigateToCitation?: (pageNumber: number, quote?: string) => void;
 }
 
-function floatTo16BitPCMBase64(float32Array: Float32Array): string {
-  const buffer = new ArrayBuffer(float32Array.length * 2);
-  const view = new DataView(buffer);
-  for (let i = 0; i < float32Array.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32Array[i]));
-    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-  }
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return window.btoa(binary);
-}
-
-function base64ToFloat32PCM(base64: string): Float32Array {
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  const view = new DataView(bytes.buffer);
-  const sampleCount = Math.floor(bytes.byteLength / 2);
-  const float32 = new Float32Array(sampleCount);
-  for (let i = 0; i < sampleCount; i++) {
-    const int16 = view.getInt16(i * 2, true);
-    float32[i] = int16 / 32768;
-  }
-  return float32;
-}
+export type VoiceControlState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
   isOpen,
   onClose,
   activeDocument: studyDoc,
-  weakTopics,
+  weakTopics: _weakTopics,
   onNavigateToCitation,
 }) => {
-  // Explicit Voice State Machine: Idle -> Requesting Permission -> Listening -> Thinking -> Speaking -> Idle
-  const [voiceState, setVoiceState] = useState<BuddyAvatarState>('idle');
-  const [sessionActive, setSessionActive] = useState<boolean>(false);
+  // Voice state: 'idle' | 'listening' | 'thinking' | 'speaking'
+  const [voiceState, setVoiceState] = useState<VoiceControlState>('idle');
   const [isMicMuted, setIsMicMuted] = useState<boolean>(false);
   const [isTutorAudioMuted, setIsTutorAudioMuted] = useState<boolean>(false);
-  const [showCaptions, setShowCaptions] = useState<boolean>(true);
-  const [showAvatar, setShowAvatar] = useState<boolean>(true);
+  const [showKeyboardInput, setShowKeyboardInput] = useState<boolean>(false);
+  const [typedInput, setTypedInput] = useState<string>('');
+  const [micPermissionError, setMicPermissionError] = useState<string | null>(null);
 
-  const [statusNote, setStatusNote] = useState<string>(
-    'Connecting to LearnMate Live Voice Tutor...'
-  );
-  const [micPermissionNote, setMicPermissionNote] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState<TranscriptTurnItem[]>([]);
-  const [quickPromptInput, setQuickPromptInput] = useState<string>('');
-  const [inputEnergy, setInputEnergy] = useState<number>(0);
-  const [outputEnergy, setOutputEnergy] = useState<number>(0);
+  // Audio energy visualizers
+  const [micEnergy, setMicEnergy] = useState<number>(0);
+  const [tutorEnergy, setTutorEnergy] = useState<number>(0);
+  const [reducedMotion, setReducedMotion] = useState<boolean>(false);
 
-  // Refs to prevent stale closures in WebSocket & Web Audio callbacks
-  const wsRef = useRef<WebSocket | null>(null);
-  const isMicMutedRef = useRef<boolean>(false);
-  const isTutorAudioMutedRef = useRef<boolean>(false);
-  const voiceStateRef = useRef<BuddyAvatarState>('idle');
-  const sessionActiveRef = useRef<boolean>(false);
+  // Full Persistent Conversation History
+  const [conversation, setConversation] = useState<VoiceTurn[]>([]);
 
-  // Web Audio output pipeline (GainNode + AnalyserNode for real-time lip-sync energy)
-  const playbackCtxRef = useRef<AudioContext | null>(null);
-  const outputGainRef = useRef<GainNode | null>(null);
-  const outputAnalyserRef = useRef<AnalyserNode | null>(null);
-  const nextPlayTimeRef = useRef<number>(0);
-  const activeSourcesCountRef = useRef<number>(0);
-  const rafEnergyIdRef = useRef<number | null>(null);
-  const synthIntervalRef = useRef<number | null>(null);
+  // ---------------------------------------------------------------------------
+  // SESSION LIFECYCLE REFS
+  // ---------------------------------------------------------------------------
+  const isSessionActiveRef = useRef<boolean>(false);
+  const sessionEpochRef = useRef<number>(0);
+  const turnSequenceIdRef = useRef<number>(0);
+  const isTurnActiveRef = useRef<boolean>(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Microphone capture pipeline
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const micCtxRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  // Speaker Echo Gate & Cooldown
+  const isPlaybackActiveRef = useRef<boolean>(false);
+  const recognitionSuspendedRef = useRef<boolean>(false);
+  const playbackFinishedAtRef = useRef<number>(0);
+  const cooldownTimeoutRef = useRef<number | null>(null);
+
+  // Speech Recognition Tracking
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
-  const captionsContainerRef = useRef<HTMLDivElement | null>(null);
+  const isStartingRecRef = useRef<boolean>(false);
+  const activeStudentTurnIdRef = useRef<string | null>(null);
+  const committedSpeechRef = useRef<string>('');
+  const interimSpeechRef = useRef<string>('');
+  const silenceTimerRef = useRef<number | null>(null);
 
-  const updateVoiceState = useCallback((next: BuddyAvatarState) => {
-    voiceStateRef.current = next;
-    setVoiceState(next);
-  }, []);
+  // TTS Speech Queue Tracking
+  const ttsQueueRef = useRef<Array<{ text: string; turnSeq: number; epoch: number }>>([]);
+  const isTtsSpeakingRef = useRef<boolean>(false);
+  const isFirstSpeechUnitRef = useRef<boolean>(true);
+  const synthIntervalRef = useRef<number | null>(null);
+  const historyContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const isMicMutedRef = useRef(isMicMuted);
+  const isTutorAudioMutedRef = useRef(isTutorAudioMuted);
+  const voiceStateRef = useRef(voiceState);
 
   useEffect(() => {
     isMicMutedRef.current = isMicMuted;
   }, [isMicMuted]);
 
   useEffect(() => {
-    isTutorAudioMutedRef.current = isTutorAudioMuted;
-    if (outputGainRef.current && playbackCtxRef.current) {
-      outputGainRef.current.gain.setValueAtTime(
-        isTutorAudioMuted ? 0 : 1,
-        playbackCtxRef.current.currentTime
-      );
-    }
-    if (isTutorAudioMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      if (synthIntervalRef.current) {
-        window.clearInterval(synthIntervalRef.current);
-        synthIntervalRef.current = null;
-      }
-      setOutputEnergy(0);
-    }
-  }, [isTutorAudioMuted]);
+    voiceStateRef.current = voiceState;
+  }, [voiceState]);
 
-  // Auto-scroll live captions internally without scrolling the outer document/modal header
+  // Reduced motion preference
   useEffect(() => {
-    if (showCaptions && captionsContainerRef.current) {
-      const container = captionsContainerRef.current;
-      container.scrollTo({
-        top: container.scrollHeight,
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReducedMotion(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
+  const updateVoiceState = useCallback((next: VoiceControlState) => {
+    voiceStateRef.current = next;
+    setVoiceState(next);
+  }, []);
+
+  // Auto-scroll transcript to bottom
+  useEffect(() => {
+    if (historyContainerRef.current) {
+      const el = historyContainerRef.current;
+      el.scrollTo({
+        top: el.scrollHeight,
         behavior: 'smooth',
       });
     }
-  }, [transcript, showCaptions]);
+  }, [conversation]);
 
-  const stopOutputEnergyMonitor = useCallback(() => {
-    if (rafEnergyIdRef.current !== null) {
-      window.cancelAnimationFrame(rafEnergyIdRef.current);
-      rafEnergyIdRef.current = null;
+  // ---------------------------------------------------------------------------
+  // SINGLE UNIFIED TEARDOWN PATH FOR ALL EXITS
+  // (End session, Close X, Escape key, Unmount)
+  // ---------------------------------------------------------------------------
+  const teardownVoiceSession = useCallback(() => {
+    // 1. Invalidate session epoch FIRST so all async callbacks are immediately dead
+    isSessionActiveRef.current = false;
+    sessionEpochRef.current += 1;
+    turnSequenceIdRef.current += 1;
+    isTurnActiveRef.current = false;
+
+    // 2. Immediately stop audio playback and clear queue
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
     }
-    if (synthIntervalRef.current !== null) {
-      window.clearInterval(synthIntervalRef.current);
+    ttsQueueRef.current = [];
+    isTtsSpeakingRef.current = false;
+    isPlaybackActiveRef.current = false;
+    recognitionSuspendedRef.current = true;
+    playbackFinishedAtRef.current = 0;
+
+    // 3. Clear all timers and intervals
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (cooldownTimeoutRef.current) {
+      clearTimeout(cooldownTimeoutRef.current);
+      cooldownTimeoutRef.current = null;
+    }
+    if (synthIntervalRef.current) {
+      clearInterval(synthIntervalRef.current);
       synthIntervalRef.current = null;
     }
-    setOutputEnergy(0);
-  }, []);
 
-  const startOutputEnergyMonitor = useCallback(() => {
-    if (rafEnergyIdRef.current !== null) return;
-    const sampleBuffer = new Uint8Array(128);
+    // 4. Abort streaming network request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
 
-    const tick = () => {
-      const analyser = outputAnalyserRef.current;
-      if (!analyser || activeSourcesCountRef.current <= 0) {
-        rafEnergyIdRef.current = null;
-        setOutputEnergy(0);
-        return;
-      }
-
-      analyser.getByteTimeDomainData(sampleBuffer);
-      let sumSq = 0;
-      for (let i = 0; i < sampleBuffer.length; i++) {
-        const centered = (sampleBuffer[i] - 128) / 128;
-        sumSq += centered * centered;
-      }
-      const rms = Math.sqrt(sumSq / sampleBuffer.length);
-      const normalized = isTutorAudioMutedRef.current
-        ? 0
-        : Math.min(1, rms * 4.2);
-      setOutputEnergy(normalized);
-
-      rafEnergyIdRef.current = window.requestAnimationFrame(tick);
-    };
-
-    rafEnergyIdRef.current = window.requestAnimationFrame(tick);
-  }, []);
-
-  const stopMicrophoneCapture = useCallback(() => {
+    // 5. Abort microphone capture
     if (recognitionRef.current) {
       try {
-        recognitionRef.current.stop();
+        recognitionRef.current.abort();
       } catch {
         // ignore
       }
       recognitionRef.current = null;
     }
-    if (processorRef.current) {
-      try {
-        processorRef.current.disconnect();
-      } catch {
-        // ignore
-      }
-      processorRef.current = null;
-    }
-    if (micCtxRef.current) {
-      try {
-        void micCtxRef.current.close();
-      } catch {
-        // ignore
-      }
-      micCtxRef.current = null;
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
-    }
-    setInputEnergy(0);
-  }, []);
+    isStartingRecRef.current = false;
 
-  const stopAllAudio = useCallback(() => {
-    stopMicrophoneCapture();
-    stopOutputEnergyMonitor();
-    activeSourcesCountRef.current = 0;
-
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    if (wsRef.current) {
-      try {
-        wsRef.current.close();
-      } catch {
-        // ignore
-      }
-      wsRef.current = null;
-    }
-    if (playbackCtxRef.current) {
-      try {
-        void playbackCtxRef.current.close();
-      } catch {
-        // ignore
-      }
-      playbackCtxRef.current = null;
-      outputGainRef.current = null;
-      outputAnalyserRef.current = null;
-    }
-    sessionActiveRef.current = false;
-    setSessionActive(false);
+    // 6. Reset visual state
+    setMicEnergy(0);
+    setTutorEnergy(0);
     updateVoiceState('idle');
-  }, [stopMicrophoneCapture, stopOutputEnergyMonitor, updateVoiceState]);
+  }, [updateVoiceState]);
 
-  const ensurePlaybackGraph = useCallback(() => {
-    if (!playbackCtxRef.current) {
-      const AudioContextClass =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext;
-      const ctx = new AudioContextClass({ sampleRate: 24000 });
-      const gain = ctx.createGain();
-      gain.gain.value = isTutorAudioMutedRef.current ? 0 : 1;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.55;
+  const teardownVoiceSessionRef = useRef(teardownVoiceSession);
+  teardownVoiceSessionRef.current = teardownVoiceSession;
 
-      gain.connect(analyser);
-      analyser.connect(ctx.destination);
-
-      playbackCtxRef.current = ctx;
-      outputGainRef.current = gain;
-      outputAnalyserRef.current = analyser;
-      nextPlayTimeRef.current = ctx.currentTime;
+  // Speaker audio mute toggle
+  useEffect(() => {
+    isTutorAudioMutedRef.current = isTutorAudioMuted;
+    if (isTutorAudioMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      ttsQueueRef.current = [];
+      isTtsSpeakingRef.current = false;
+      isPlaybackActiveRef.current = false;
+      playbackFinishedAtRef.current = Date.now();
+      if (synthIntervalRef.current) {
+        clearInterval(synthIntervalRef.current);
+        synthIntervalRef.current = null;
+      }
+      setTutorEnergy(0);
+      if (voiceStateRef.current === 'speaking') {
+        updateVoiceState('idle');
+      }
     }
-    if (playbackCtxRef.current.state === 'suspended') {
-      void playbackCtxRef.current.resume();
-    }
-    return {
-      ctx: playbackCtxRef.current,
-      gain: outputGainRef.current!,
+  }, [isTutorAudioMuted, updateVoiceState]);
+
+  // Handle Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        teardownVoiceSessionRef.current();
+        onClose();
+      }
     };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Load persistent conversation history on mount/document switch without replaying audio
+  useEffect(() => {
+    if (!isOpen) return;
+
+    isSessionActiveRef.current = true;
+    sessionEpochRef.current += 1;
+    isPlaybackActiveRef.current = false;
+    playbackFinishedAtRef.current = 0;
+
+    const savedTurns = storageService.getVoiceTutorMessages(studyDoc.id);
+    if (savedTurns && savedTurns.length > 0) {
+      // Ensure all loaded turns are non-streaming and no audio is replayed
+      setConversation(
+        savedTurns.map((t: VoiceTurn) => ({
+          ...t,
+          isStreaming: false,
+        }))
+      );
+    } else {
+      const welcomeTurn: VoiceTurn = {
+        id: `welcome-${studyDoc.id}`,
+        role: 'assistant',
+        text: `Hi! I'm LearnMate Buddy, your voice tutor for ${studyDoc.title.replace(
+          /\.pdf$/i,
+          ''
+        )}. Tap the circle to ask me any doubt, formula, or concept from your notes!`,
+        isStreaming: false,
+        isFinal: true,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setConversation([welcomeTurn]);
+      storageService.saveVoiceTutorMessages(studyDoc.id, [welcomeTurn]);
+    }
+  }, [isOpen, studyDoc.id, studyDoc.title]);
+
+  /**
+   * Suspends speech recognition safely to eliminate speaker echo at the source.
+   */
+  const suspendSpeechRecognition = useCallback(() => {
+    recognitionSuspendedRef.current = true;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {
+        // ignore
+      }
+    }
+    setMicEnergy(0);
   }, []);
 
-  const playPcm24kChunk = useCallback(
-    (base64Data: string) => {
-      try {
-        const { ctx, gain } = ensurePlaybackGraph();
-        const floatSamples = base64ToFloat32PCM(base64Data);
-        if (floatSamples.length === 0) return;
+  /**
+   * Starts Speech Recognition safely:
+   * - Shows "Listening" ONLY when recognition is ready (onstart event).
+   * - Captures student question from first words.
+   * - Gated during playback and cooldown.
+   */
+  const startSpeechRecognition = useCallback(() => {
+    if (!isSessionActiveRef.current || isMicMutedRef.current || isPlaybackActiveRef.current) {
+      return;
+    }
+    if (isStartingRecRef.current) return;
 
-        const audioBuffer = ctx.createBuffer(1, floatSamples.length, 24000);
-        audioBuffer.getChannelData(0).set(floatSamples);
-
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(gain);
-
-        const startAt = Math.max(ctx.currentTime, nextPlayTimeRef.current);
-        source.start(startAt);
-        nextPlayTimeRef.current = startAt + audioBuffer.duration;
-
-        activeSourcesCountRef.current += 1;
-        updateVoiceState('speaking');
-        startOutputEnergyMonitor();
-
-        source.onended = () => {
-          activeSourcesCountRef.current = Math.max(0, activeSourcesCountRef.current - 1);
-          if (activeSourcesCountRef.current === 0) {
-            stopOutputEnergyMonitor();
-            updateVoiceState(
-              sessionActiveRef.current && !isMicMutedRef.current && micStreamRef.current
-                ? 'listening'
-                : 'idle'
-            );
-          }
-        };
-      } catch {
-        // ignore audio decode error
-      }
-    },
-    [ensurePlaybackGraph, startOutputEnergyMonitor, stopOutputEnergyMonitor, updateVoiceState]
-  );
-
-  const speakWithBrowserSynthesis = useCallback(
-    (text: string) => {
-      if (isTutorAudioMutedRef.current) {
-        updateVoiceState(
-          sessionActiveRef.current && !isMicMutedRef.current && micStreamRef.current
-            ? 'listening'
-            : 'idle'
-        );
-        return;
-      }
-      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-        updateVoiceState('idle');
-        return;
-      }
-      try {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.02;
-        utterance.pitch = 1.0;
-
-        utterance.onstart = () => {
-          updateVoiceState('speaking');
-          if (synthIntervalRef.current) window.clearInterval(synthIntervalRef.current);
-          // Modulate energy from syllable cadence while browser TTS is speaking
-          let step = 0;
-          synthIntervalRef.current = window.setInterval(() => {
-            step += 1;
-            const wave = 0.25 + 0.35 * Math.abs(Math.sin(step * 0.85));
-            setOutputEnergy(isTutorAudioMutedRef.current ? 0 : wave);
-          }, 90);
-        };
-
-        const finishSpeech = () => {
-          if (synthIntervalRef.current) {
-            window.clearInterval(synthIntervalRef.current);
-            synthIntervalRef.current = null;
-          }
-          setOutputEnergy(0);
-          updateVoiceState(
-            sessionActiveRef.current && !isMicMutedRef.current && micStreamRef.current
-              ? 'listening'
-              : 'idle'
-          );
-        };
-
-        utterance.onend = finishSpeech;
-        utterance.onerror = finishSpeech;
-        window.speechSynthesis.speak(utterance);
-      } catch {
-        setOutputEnergy(0);
-        updateVoiceState('idle');
-      }
-    },
-    [updateVoiceState]
-  );
-
-  const sendSpokenOrTypedQuestion = useCallback(
-    (questionText: string) => {
-      const cleaned = questionText.trim();
-      if (!cleaned) return;
-
-      // Finalize any open student turn and record the clean question
-      setTranscript((prev) => {
-        const finalized = finalizeActiveTranscriptTurn(prev, 'user');
-        return [
-          ...finalized,
-          {
-            id: `turn-student-${Date.now()}`,
-            role: 'user',
-            text: cleaned,
-            isFinal: true,
-          },
-        ];
-      });
-
-      updateVoiceState('thinking');
-
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'voice_question',
-            question: cleaned,
-          })
-        );
-      }
-    },
-    [updateVoiceState]
-  );
-
-  const startMicrophoneCapture = useCallback(async () => {
-    setMicPermissionNote(null);
-
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices ||
-      typeof navigator.mediaDevices.getUserMedia !== 'function'
-    ) {
-      setMicPermissionNote(
-        'Your browser or preview environment does not support microphone capture. You can continue using the typed input or quick prompts below.'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecClass) {
+      setMicPermissionError(
+        'Speech recognition is not supported in this browser. Use the Type button below to ask questions.'
       );
+      setShowKeyboardInput(true);
       updateVoiceState('idle');
       return;
     }
 
-    updateVoiceState('requesting_permission');
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-          sampleRate: 16000,
-        },
-      });
-      micStreamRef.current = stream;
-
-      const AudioContextClass =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext;
-      const micCtx = new AudioContextClass({ sampleRate: 16000 });
-      if (micCtx.state === 'suspended') {
-        await micCtx.resume();
-      }
-      micCtxRef.current = micCtx;
-
-      const source = micCtx.createMediaStreamSource(stream);
-      const processor = micCtx.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      processor.onaudioprocess = (event) => {
-        if (isMicMutedRef.current || !sessionActiveRef.current) {
-          setInputEnergy(0);
-          return;
-        }
-        const inputData = event.inputBuffer.getChannelData(0);
-        let sum = 0;
-        for (let i = 0; i < inputData.length; i++) {
-          sum += inputData[i] * inputData[i];
-        }
-        const rms = Math.sqrt(sum / inputData.length);
-        setInputEnergy(Math.min(1, rms * 8));
-
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const base64Pcm = floatTo16BitPCMBase64(inputData);
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'audio',
-              data: base64Pcm,
-            })
-          );
-        }
-      };
-
-      source.connect(processor);
-      processor.connect(micCtx.destination);
-
-      // Start Web Speech API recognition in parallel for instant live student captions
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRec) {
-        const recognition = new SpeechRec();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        recognition.onresult = (evt: any) => {
-          if (isMicMutedRef.current) return;
-          for (let i = evt.resultIndex; i < evt.results.length; i++) {
-            const res = evt.results[i];
-            const text = res?.[0]?.transcript?.trim();
-            if (!text) continue;
-            if (res.isFinal) {
-              sendSpokenOrTypedQuestion(text);
-            } else {
-              setTranscript((prev) =>
-                upsertStreamingTranscriptChunk(prev, {
-                  role: 'user',
-                  chunkText: text,
-                  isFinal: false,
-                })
-              );
-            }
-          }
-        };
-        recognition.onerror = () => {
-          // ignore speech recognition fallback error
-        };
+      isStartingRecRef.current = true;
+      if (recognitionRef.current) {
         try {
-          recognition.start();
-          recognitionRef.current = recognition;
+          recognitionRef.current.abort();
         } catch {
           // ignore
         }
+        recognitionRef.current = null;
       }
 
-      setIsMicMuted(false);
-      isMicMutedRef.current = false;
-      updateVoiceState('listening');
-      setStatusNote('Microphone active: speak naturally or choose a topic prompt.');
-    } catch (err) {
-      const errName = err instanceof Error ? err.name : '';
-      if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
-        setMicPermissionNote(
-          'No microphone device was detected on your system. You can still interact with LearnMate Buddy using the text input below.'
-        );
-      } else if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
-        setMicPermissionNote(
-          'Microphone permission was denied. Allow microphone access in your browser address bar, or ask questions using the text input below.'
-        );
-      } else {
-        setMicPermissionNote(
-          'Microphone could not be started in this preview frame. You can ask questions using the text box or quick prompts below.'
-        );
-      }
-      updateVoiceState('idle');
-    }
-  }, [sendSpokenOrTypedQuestion, updateVoiceState]);
+      const currentEpoch = sessionEpochRef.current;
+      const rec = new SpeechRecClass();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-IN';
 
-  const startLiveSession = useCallback(() => {
-    stopAllAudio();
-    sessionActiveRef.current = true;
-    setSessionActive(true);
-    setMicPermissionNote(null);
-    updateVoiceState('idle');
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/live`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = async () => {
-      // The server only answers after it has verified the student's login token.
-      const idToken = await getApiIdToken().catch(() => null);
-      ws.send(
-        JSON.stringify({
-          type: 'setup',
-          idToken,
-          title: studyDoc.title,
-          pages: studyDoc.pages,
-          weakTopics,
-        })
-      );
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'error') {
-          setStatusNote(msg.message || 'Please sign in again to use the voice tutor.');
+      rec.onstart = () => {
+        isStartingRecRef.current = false;
+        if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          try { rec.abort(); } catch { /* ignore */ }
           return;
         }
-        if (msg.type === 'status') {
-          setStatusNote('AI voice tutor ready. Answers are written by AI and can contain mistakes.');
-          const greeting = `Hi! I'm LearnMate Buddy, your voice tutor for ${studyDoc.title.replace(
-            /\.pdf$/i,
-            ''
-          )}. ${
-            weakTopics.length > 0
-              ? `We can focus on ${weakTopics.slice(0, 2).join(' and ')} or any page you'd like.`
-              : 'Ask me to explain any concept, quiz you verbally, or walk through a formula.'
-          }`;
-          setTranscript([
-            {
-              id: 'welcome-turn',
-              role: 'assistant',
-              text: greeting,
-              isFinal: true,
-            },
-          ]);
-        } else if (msg.type === 'audio' && msg.data) {
-          playPcm24kChunk(msg.data);
-        } else if (msg.type === 'output_transcription' && msg.text) {
-          setTranscript((prev) =>
-            upsertStreamingTranscriptChunk(prev, {
-              role: 'assistant',
-              chunkText: msg.text,
-              isFinal: Boolean(msg.finished),
-            })
-          );
-        } else if (msg.type === 'input_transcription' && msg.text) {
-          setTranscript((prev) =>
-            upsertStreamingTranscriptChunk(prev, {
-              role: 'user',
-              chunkText: msg.text,
-              isFinal: Boolean(msg.finished),
-            })
-          );
-        } else if (msg.type === 'transcript' && msg.text) {
-          setTranscript((prev) =>
-            upsertStreamingTranscriptChunk(prev, {
-              role: msg.role === 'user' ? 'user' : 'assistant',
-              chunkText: msg.text,
-              isFinal: false,
-            })
-          );
-        } else if (msg.type === 'voice_response' && msg.text) {
-          setTranscript((prev) => [
-            ...finalizeActiveTranscriptTurn(prev, 'assistant'),
-            {
-              id: `turn-tutor-${Date.now()}`,
-              role: 'assistant',
-              text: msg.text,
-              citations: msg.citations,
-              isFinal: true,
-            },
-          ]);
-          speakWithBrowserSynthesis(msg.text);
-        } else if (msg.type === 'interrupted') {
-          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
-          }
-          stopOutputEnergyMonitor();
-          setTranscript((prev) => finalizeActiveTranscriptTurn(prev, 'assistant', true));
-          updateVoiceState(
-            !isMicMutedRef.current && micStreamRef.current ? 'listening' : 'idle'
-          );
-        } else if (msg.type === 'turn_complete') {
-          setTranscript((prev) => finalizeActiveTranscriptTurn(prev, 'assistant'));
-          if (activeSourcesCountRef.current === 0) {
-            stopOutputEnergyMonitor();
-            updateVoiceState(
-              !isMicMutedRef.current && micStreamRef.current ? 'listening' : 'idle'
-            );
+
+        setMicPermissionError(null);
+        recognitionSuspendedRef.current = false;
+
+        // Show "Listening" ONLY when recognition is ready!
+        if (!isPlaybackActiveRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
+          updateVoiceState('listening');
+        }
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rec.onresult = (event: any) => {
+        if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          return;
+        }
+
+        // Speaker-echo gating at source
+        const decision = shouldProcessSpeechRecognitionResult({
+          isPlaybackActive: isPlaybackActiveRef.current || recognitionSuspendedRef.current,
+          playbackFinishedAt: playbackFinishedAtRef.current,
+          now: Date.now(),
+          cooldownMs: 600,
+          turnSequenceId: turnSequenceIdRef.current,
+          expectedTurnSequenceId: turnSequenceIdRef.current,
+        });
+
+        if (!decision.allowProcessing) {
+          return;
+        }
+
+        if (isMicMutedRef.current) return;
+
+        let newlyFinalizedChunk = '';
+        let currentInterim = '';
+        let hasFinalChunk = false;
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          if (res.isFinal) {
+            newlyFinalizedChunk += res[0].transcript + ' ';
+            hasFinalChunk = true;
+          } else {
+            currentInterim += res[0].transcript;
           }
         }
+
+        const assembled = assembleStudentSpeechTranscript({
+          existingCommitted: committedSpeechRef.current,
+          newFinalChunk: newlyFinalizedChunk,
+          interimChunk: currentInterim,
+        });
+
+        committedSpeechRef.current = assembled.committed;
+        interimSpeechRef.current = currentInterim;
+
+        const displayParagraph = assembled.displayParagraph;
+        if (!displayParagraph) return;
+
+        setMicEnergy(0.65);
+
+        // If no active student turn exists, create one in the conversation
+        if (!activeStudentTurnIdRef.current) {
+          const newStudentTurnId = `student-${Date.now()}`;
+          activeStudentTurnIdRef.current = newStudentTurnId;
+
+          setConversation((prev) => [
+            ...prev,
+            {
+              id: newStudentTurnId,
+              role: 'user',
+              text: displayParagraph,
+              isStreaming: true,
+              isFinal: false,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+        } else {
+          const currentId = activeStudentTurnIdRef.current;
+          setConversation((prev) =>
+            prev.map((t) =>
+              t.id === currentId
+                ? { ...t, text: displayParagraph, isStreaming: true }
+                : t
+            )
+          );
+        }
+
+        // Measure & reduce delay: compute optimal silence timeout
+        const wordCount = displayParagraph.split(/\s+/).filter(Boolean).length;
+        const silenceTimeoutMs = computeSilenceTimeoutMs({
+          isFinal: hasFinalChunk,
+          wordCount,
+        });
+
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+        }
+        silenceTimerRef.current = window.setTimeout(() => {
+          commitAndSubmitStudentTurnRef.current();
+        }, silenceTimeoutMs);
+      };
+
+      rec.onerror = (e: { error?: string }) => {
+        isStartingRecRef.current = false;
+        if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          return;
+        }
+
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          setMicPermissionError(
+            'Microphone access denied. Please allow microphone access or use the Type button below.'
+          );
+          setIsMicMuted(true);
+          setShowKeyboardInput(true);
+          updateVoiceState('idle');
+        }
+      };
+
+      rec.onend = () => {
+        isStartingRecRef.current = false;
+        setMicEnergy(0);
+
+        if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          return;
+        }
+
+        // If session is active and not in playback/cooldown, restart cleanly
+        if (!isMicMutedRef.current && !isPlaybackActiveRef.current && !recognitionSuspendedRef.current) {
+          try {
+            rec.start();
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      rec.start();
+      recognitionRef.current = rec;
+    } catch {
+      isStartingRecRef.current = false;
+      setMicPermissionError('Could not start speech recognition. Please type below.');
+      setShowKeyboardInput(true);
+      updateVoiceState('idle');
+    }
+  }, [updateVoiceState]);
+
+  const startSpeechRecognitionRef = useRef(startSpeechRecognition);
+  startSpeechRecognitionRef.current = startSpeechRecognition;
+
+  /**
+   * Resumes recognition after Buddy's speech playback finishes and cooldown has passed.
+   */
+  const scheduleRecognitionResume = useCallback(() => {
+    if (cooldownTimeoutRef.current) {
+      clearTimeout(cooldownTimeoutRef.current);
+    }
+
+    const currentEpoch = sessionEpochRef.current;
+    // 600ms cooldown to discard any acoustic reflections or buffered echo
+    cooldownTimeoutRef.current = window.setTimeout(() => {
+      if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+        return;
+      }
+      if (isPlaybackActiveRef.current || isMicMutedRef.current) return;
+
+      recognitionSuspendedRef.current = false;
+      committedSpeechRef.current = '';
+      interimSpeechRef.current = '';
+      startSpeechRecognitionRef.current();
+    }, 600);
+  }, []);
+
+  /**
+   * Reliable Circle Interruption Handler:
+   * Tapping the circle while Buddy is thinking or speaking immediately stops
+   * playback and streaming, keeps the visible partial reply, and opens a fresh listening turn.
+   */
+  const handleCircleInterrupt = useCallback(() => {
+    if (!isSessionActiveRef.current) return;
+
+    // 1. Invalidate current turn sequence to reject stale SSE events
+    isTurnActiveRef.current = false;
+    turnSequenceIdRef.current += 1;
+
+    // 2. Abort network fetch
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // 3. Immediately cancel browser speech synthesis & clear queue
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
       } catch {
-        // ignore malformed message
+        // ignore
       }
-    };
+    }
+    ttsQueueRef.current = [];
+    isTtsSpeakingRef.current = false;
+    isPlaybackActiveRef.current = false;
+    playbackFinishedAtRef.current = 0; // Bypassed because user explicitly tapped to interrupt
 
-    ws.onerror = () => {
-      setStatusNote('Voice tutor active (grounded speech synthesis mode)');
-    };
-  }, [
-    playPcm24kChunk,
-    speakWithBrowserSynthesis,
-    stopAllAudio,
-    stopOutputEnergyMonitor,
-    studyDoc.pages,
-    studyDoc.title,
-    updateVoiceState,
-    weakTopics,
-  ]);
+    if (synthIntervalRef.current) {
+      clearInterval(synthIntervalRef.current);
+      synthIntervalRef.current = null;
+    }
+    setTutorEnergy(0);
 
-  const handleCloseModal = useCallback(() => {
-    stopAllAudio();
-    onClose();
-  }, [stopAllAudio, onClose]);
+    // 4. Mark any ongoing assistant turn as interrupted in conversation
+    setConversation((prev) => {
+      const lastIdx = prev.length - 1;
+      if (lastIdx >= 0 && prev[lastIdx].role === 'assistant' && prev[lastIdx].isStreaming) {
+        const updated = [...prev];
+        updated[lastIdx] = {
+          ...updated[lastIdx],
+          isStreaming: false,
+          interrupted: true,
+        };
+        storageService.saveVoiceTutorMessages(studyDoc.id, updated);
+        return updated;
+      }
+      return prev;
+    });
 
-  useEffect(() => {
-    if (!isOpen) {
-      stopAllAudio();
+    // 5. Open fresh listening turn
+    recognitionSuspendedRef.current = false;
+    committedSpeechRef.current = '';
+    interimSpeechRef.current = '';
+    activeStudentTurnIdRef.current = null;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    // 6. Reset state to idle briefly while mic starts
+    updateVoiceState('idle');
+
+    if (!isMicMutedRef.current) {
+      startSpeechRecognitionRef.current();
+    }
+  }, [studyDoc.id, updateVoiceState]);
+
+  const handleCircleInterruptRef = useRef(handleCircleInterrupt);
+  handleCircleInterruptRef.current = handleCircleInterrupt;
+
+  /**
+   * Sentence-by-Sentence Speech Synthesis Player:
+   * Speaks early phrases as they arrive (~400-600ms latency) while keeping recognition suspended.
+   */
+  const playNextSentenceInQueue = useCallback(() => {
+    const currentEpoch = sessionEpochRef.current;
+    if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+      ttsQueueRef.current = [];
+      isTtsSpeakingRef.current = false;
       return;
     }
-    startLiveSession();
-    return () => {
-      stopAllAudio();
-    };
-  }, [isOpen, startLiveSession, stopAllAudio]);
 
-  // Close on Escape key and lock background body scroll while open
-  useEffect(() => {
-    if (!isOpen) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        handleCloseModal();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [isOpen, handleCloseModal]);
-
-  const handleToggleMic = async () => {
-    if (!sessionActive) {
-      startLiveSession();
-    }
-    // If microphone stream isn't started yet, request permission and start it
-    if (!micStreamRef.current) {
-      await startMicrophoneCapture();
+    if (isTutorAudioMutedRef.current || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      ttsQueueRef.current = [];
+      isTtsSpeakingRef.current = false;
+      isPlaybackActiveRef.current = false;
+      playbackFinishedAtRef.current = Date.now();
+      updateVoiceState('idle');
+      scheduleRecognitionResume();
       return;
     }
-    const nextMuted = !isMicMuted;
-    setIsMicMuted(nextMuted);
-    isMicMutedRef.current = nextMuted;
-    if (nextMuted) {
-      setInputEnergy(0);
-      if (voiceState === 'listening') {
+
+    if (ttsQueueRef.current.length === 0) {
+      isTtsSpeakingRef.current = false;
+      isPlaybackActiveRef.current = false;
+      playbackFinishedAtRef.current = Date.now();
+
+      if (synthIntervalRef.current) {
+        clearInterval(synthIntervalRef.current);
+        synthIntervalRef.current = null;
+      }
+      setTutorEnergy(0);
+
+      // Playback completed; schedule clean recognition resumption after cooldown
+      updateVoiceState('idle');
+      scheduleRecognitionResume();
+      return;
+    }
+
+    const item = ttsQueueRef.current.shift();
+    if (!item) return;
+
+    // Check that this utterance belongs to the active turn sequence and session epoch
+    if (item.turnSeq !== turnSequenceIdRef.current || item.epoch !== sessionEpochRef.current) {
+      playNextSentenceInQueue();
+      return;
+    }
+
+    const spokenText = item.text.trim();
+    if (!spokenText) {
+      playNextSentenceInQueue();
+      return;
+    }
+
+    isTtsSpeakingRef.current = true;
+    isPlaybackActiveRef.current = true;
+    suspendSpeechRecognition();
+    updateVoiceState('speaking');
+
+    try {
+      const utterance = new SpeechSynthesisUtterance(spokenText);
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice =
+        voices.find((v) => v.lang.startsWith('en-IN')) ||
+        voices.find((v) => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google'))) ||
+        voices.find((v) => v.lang.startsWith('en')) ||
+        null;
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+
+      utterance.onstart = () => {
+        if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+          return;
+        }
+
+        if (synthIntervalRef.current) clearInterval(synthIntervalRef.current);
+        let step = 0;
+        synthIntervalRef.current = window.setInterval(() => {
+          step++;
+          const wave = 0.3 + 0.5 * Math.abs(Math.sin(step * 0.9));
+          setTutorEnergy(isTutorAudioMutedRef.current ? 0 : wave);
+        }, 75);
+      };
+
+      const finishAndNext = () => {
+        if (synthIntervalRef.current) {
+          clearInterval(synthIntervalRef.current);
+          synthIntervalRef.current = null;
+        }
+        setTutorEnergy(0);
+
+        if (canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          playNextSentenceInQueue();
+        }
+      };
+
+      utterance.onend = finishAndNext;
+      utterance.onerror = finishAndNext;
+
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      playNextSentenceInQueue();
+    }
+  }, [scheduleRecognitionResume, suspendSpeechRecognition, updateVoiceState]);
+
+  const playNextSentenceRef = useRef(playNextSentenceInQueue);
+  playNextSentenceRef.current = playNextSentenceInQueue;
+
+  const enqueueSentenceForTts = useCallback(
+    (sentence: string, turnSeq: number) => {
+      const currentEpoch = sessionEpochRef.current;
+      if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+        return;
+      }
+
+      const cleaned = formatSpokenTextForTts(sentence);
+      if (!cleaned) return;
+
+      ttsQueueRef.current.push({ text: cleaned, turnSeq, epoch: currentEpoch });
+      if (!isTtsSpeakingRef.current) {
+        playNextSentenceRef.current();
+      }
+    },
+    []
+  );
+
+  /**
+   * Submits student question to AI Tutor:
+   * Streams answer deltas into transcript and speaks early speech units (~400ms).
+   */
+  const submitQuestionToTutor = useCallback(
+    async (questionText: string) => {
+      const cleanedQuestion = questionText.trim();
+      if (!cleanedQuestion || !isSessionActiveRef.current) return;
+
+      suspendSpeechRecognition();
+
+      turnSequenceIdRef.current += 1;
+      const currentTurnSeq = turnSequenceIdRef.current;
+      const currentEpoch = sessionEpochRef.current;
+      isTurnActiveRef.current = true;
+      isFirstSpeechUnitRef.current = true;
+
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
+      updateVoiceState('thinking');
+
+      const tutorTurnId = `tutor-${Date.now()}`;
+
+      // Append assistant turn to conversation
+      const newAssistantTurn: VoiceTurn = {
+        id: tutorTurnId,
+        role: 'assistant',
+        text: '',
+        isStreaming: true,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      setConversation((prev) => {
+        const next = [...prev, newAssistantTurn];
+        storageService.saveVoiceTutorMessages(studyDoc.id, next);
+        return next;
+      });
+
+      try {
+        const historyContext = conversation
+          .slice(-6)
+          .map((c) => ({ role: c.role, content: c.text }));
+
+        let accumulatedAnswer = '';
+        let streamSentenceBuffer = '';
+
+        const response = await aiStudyClient.askTutorStream(
+          {
+            title: studyDoc.title,
+            pages: studyDoc.pages,
+            question: cleanedQuestion,
+            history: historyContext,
+            isVoiceTutor: true,
+            signal: abortController.signal,
+          },
+          (delta) => {
+            if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+              return;
+            }
+            if (!shouldAcceptTurnEvent(currentTurnSeq, turnSequenceIdRef.current, isTurnActiveRef.current)) {
+              return;
+            }
+
+            accumulatedAnswer += delta;
+            streamSentenceBuffer += delta;
+
+            // Update transcript text live
+            setConversation((prev) =>
+              prev.map((t) =>
+                t.id === tutorTurnId ? { ...t, text: accumulatedAnswer, isStreaming: true } : t
+              )
+            );
+
+            // Extract early speech units (start speaking at first natural phrase/clause)
+            const { units, remainder } = extractSpeechUnitsFromStream(
+              streamSentenceBuffer,
+              isFirstSpeechUnitRef.current,
+              false
+            );
+            streamSentenceBuffer = remainder;
+
+            if (units.length > 0) {
+              isFirstSpeechUnitRef.current = false;
+              for (const unit of units) {
+                enqueueSentenceForTts(unit, currentTurnSeq);
+              }
+            }
+          }
+        );
+
+        if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          return;
+        }
+        if (!shouldAcceptTurnEvent(currentTurnSeq, turnSequenceIdRef.current, isTurnActiveRef.current)) {
+          return;
+        }
+
+        // Flush any remaining buffer text
+        if (streamSentenceBuffer.trim()) {
+          const { units } = extractSpeechUnitsFromStream(streamSentenceBuffer, isFirstSpeechUnitRef.current, true);
+          for (const unit of units) {
+            enqueueSentenceForTts(unit, currentTurnSeq);
+          }
+        }
+
+        const finalAnswer = response.answer || accumulatedAnswer || 'I understand your doubt.';
+
+        setConversation((prev) => {
+          const updated = prev.map((t) =>
+            t.id === tutorTurnId
+              ? {
+                  ...t,
+                  text: finalAnswer,
+                  citations: response.citations || [],
+                  isStreaming: false,
+                  isFinal: true,
+                }
+              : t
+          );
+          storageService.saveVoiceTutorMessages(studyDoc.id, updated);
+          return updated;
+        });
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return;
+        }
+        if (!canAcceptSessionCallback({ isSessionActive: isSessionActiveRef.current, currentEpoch, expectedEpoch: sessionEpochRef.current })) {
+          return;
+        }
+        if (!shouldAcceptTurnEvent(currentTurnSeq, turnSequenceIdRef.current, isTurnActiveRef.current)) {
+          return;
+        }
+
+        const errMsg = err instanceof Error ? err.message : String(err);
+        setConversation((prev) => {
+          const updated = prev.map((t) =>
+            t.id === tutorTurnId
+              ? {
+                  ...t,
+                  text: errMsg.includes('sign in')
+                    ? 'Please sign in to ask doubts to LearnMate Buddy.'
+                    : `I encountered an issue answering: ${errMsg}`,
+                  isStreaming: false,
+                  isFinal: true,
+                }
+              : t
+          );
+          storageService.saveVoiceTutorMessages(studyDoc.id, updated);
+          return updated;
+        });
+
+        isPlaybackActiveRef.current = false;
+        playbackFinishedAtRef.current = Date.now();
+        updateVoiceState('idle');
+        scheduleRecognitionResume();
+      }
+    },
+    [conversation, enqueueSentenceForTts, scheduleRecognitionResume, studyDoc.id, studyDoc.pages, studyDoc.title, suspendSpeechRecognition, updateVoiceState]
+  );
+
+  const submitQuestionRef = useRef(submitQuestionToTutor);
+  submitQuestionRef.current = submitQuestionToTutor;
+
+  /**
+   * Finalizes student speech turn and submits to tutor. Commits exactly once.
+   */
+  const commitAndSubmitStudentTurn = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    const studentTurnId = activeStudentTurnIdRef.current;
+    const recognizedText = [committedSpeechRef.current, interimSpeechRef.current]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    activeStudentTurnIdRef.current = null;
+    committedSpeechRef.current = '';
+    interimSpeechRef.current = '';
+    setMicEnergy(0);
+
+    if (!recognizedText) {
+      if (studentTurnId) {
+        setConversation((prev) => prev.filter((t) => t.id !== studentTurnId));
+      }
+      return;
+    }
+
+    setConversation((prev) => {
+      const updated = prev.map((t) =>
+        t.id === studentTurnId
+          ? { ...t, text: recognizedText, isStreaming: false, isFinal: true }
+          : t
+      );
+      storageService.saveVoiceTutorMessages(studyDoc.id, updated);
+      return updated;
+    });
+
+    void submitQuestionRef.current(recognizedText);
+  }, [studyDoc.id]);
+
+  const commitAndSubmitStudentTurnRef = useRef(commitAndSubmitStudentTurn);
+  commitAndSubmitStudentTurnRef.current = commitAndSubmitStudentTurn;
+
+  // Primary Voice Control Handler: Tap the circle
+  const handleCircleClick = () => {
+    if (voiceState === 'speaking' || voiceState === 'thinking') {
+      // Tap circle to interrupt Buddy immediately
+      handleCircleInterrupt();
+    } else if (voiceState === 'listening') {
+      // If student was talking, commit immediately without waiting for silence timer
+      if (committedSpeechRef.current.trim() || interimSpeechRef.current.trim()) {
+        commitAndSubmitStudentTurn();
+      } else {
+        // Toggle mic off
+        setIsMicMuted(true);
+        suspendSpeechRecognition();
         updateVoiceState('idle');
       }
-    } else if (voiceState === 'idle') {
-      updateVoiceState('listening');
+    } else {
+      // Idle: Tap to speak
+      setIsMicMuted(false);
+      startSpeechRecognition();
     }
   };
 
-  const handleToggleSession = () => {
-    if (sessionActive) {
-      stopAllAudio();
-      setStatusNote('Voice session ended. Click Start Session to reconnect.');
-    } else {
-      startLiveSession();
+  // Submit typed question from keyboard bar
+  const handleSendTyped = (textToSend?: string) => {
+    const text = (textToSend ?? typedInput).trim();
+    if (!text) return;
+
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    activeStudentTurnIdRef.current = null;
+    committedSpeechRef.current = '';
+    interimSpeechRef.current = '';
+
+    setTypedInput('');
+
+    const userTurnId = `student-typed-${Date.now()}`;
+    const userTurn: VoiceTurn = {
+      id: userTurnId,
+      role: 'user',
+      text,
+      isStreaming: false,
+      isFinal: true,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setConversation((prev) => {
+      const next = [...prev, userTurn];
+      storageService.saveVoiceTutorMessages(studyDoc.id, next);
+      return next;
+    });
+
+    void submitQuestionToTutor(text);
+  };
+
+  // Clear conversation history
+  const handleClearHistory = () => {
+    if (confirm('Clear voice conversation history with LearnMate Buddy?')) {
+      handleCircleInterrupt();
+      const resetTurn: VoiceTurn = {
+        id: `welcome-${Date.now()}`,
+        role: 'assistant',
+        text: `Conversation cleared. I am ready for your next doubt on ${studyDoc.title.replace(
+          /\.pdf$/i,
+          ''
+        )}!`,
+        isStreaming: false,
+        isFinal: true,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setConversation([resetTurn]);
+      storageService.saveVoiceTutorMessages(studyDoc.id, [resetTurn]);
     }
   };
+
+  // Handle Close / End session click
+  const handleCloseSession = () => {
+    teardownVoiceSession();
+    onClose();
+  };
+
+  // Session lifecycle mount / unmount cleanup
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Start recognition cleanly on open
+    startSpeechRecognition();
+
+    return () => {
+      teardownVoiceSessionRef.current();
+    };
+  }, [isOpen, startSpeechRecognition]);
+
+  // Compute live waveform bar heights (5 bars: outer to center to outer)
+  const waveformHeights = useMemo(() => {
+    if (reducedMotion) {
+      if (voiceState === 'speaking') return [16, 26, 38, 26, 16];
+      if (voiceState === 'listening') return [14, 22, 32, 22, 14];
+      if (voiceState === 'thinking') return [12, 18, 26, 18, 12];
+      return [10, 18, 28, 18, 10]; // resting
+    }
+
+    if (voiceState === 'speaking') {
+      const e = Math.min(1, Math.max(0.1, tutorEnergy));
+      return [
+        Math.round(12 + 16 * e * 0.8),
+        Math.round(18 + 24 * e * 0.9),
+        Math.round(26 + 32 * e),
+        Math.round(18 + 24 * e * 0.9),
+        Math.round(12 + 16 * e * 0.8),
+      ];
+    }
+
+    if (voiceState === 'listening') {
+      const e = Math.min(1, Math.max(0.1, micEnergy));
+      return [
+        Math.round(12 + 12 * e),
+        Math.round(18 + 18 * e),
+        Math.round(28 + 24 * e),
+        Math.round(18 + 18 * e),
+        Math.round(12 + 12 * e),
+      ];
+    }
+
+    if (voiceState === 'thinking') {
+      return [14, 22, 32, 22, 14];
+    }
+
+    // Default resting heights
+    return [10, 18, 28, 18, 10];
+  }, [micEnergy, reducedMotion, tutorEnergy, voiceState]);
 
   if (!isOpen) return null;
 
-  const suggestedVoicePrompts = [
-    weakTopics[0]
-      ? `Explain ${weakTopics[0]} simply with an example`
-      : `Summarize Page 1 of ${studyDoc.title}`,
-    'Quiz me verbally with one quick question',
-    'What is the most common mistake students make here?',
-  ];
-
   return (
-    <div
-      className="fixed inset-0 z-50 h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="LearnMate Live Voice Tutor"
-      data-testid="voice-tutor-modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          handleCloseModal();
-        }
-      }}
-    >
-      <div
-        className="bg-white rounded-3xl shadow-2xl border border-slate-200/90 w-full max-w-xl max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2.5rem)] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Pinned Top Header — shrink-0 & sticky so Close button never moves off-screen */}
-        <div className="shrink-0 sticky top-0 z-20 px-4 sm:px-6 py-3.5 border-b border-slate-100 flex items-center justify-between gap-2 bg-gradient-to-r from-brand/10 via-warning/10 to-success/10 backdrop-blur-md">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-brand text-white flex items-center justify-center shadow-xs shrink-0">
-              <Radio className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-bold text-ink">
-                  Live Voice Tutor
-                </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-brand-soft text-brand">
-                  LearnMate Buddy
-                </span>
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 select-none">
+      <div className="bg-white dark:bg-[#121A2E] rounded-3xl border border-slate-200/90 dark:border-[#26324F] shadow-2xl max-w-2xl w-full h-[88vh] max-h-[780px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+        {/* ============================================================ */}
+        {/* 1. TOP HEADER (Matching attached mockup)                     */}
+        {/* ============================================================ */}
+        <header className="px-6 py-4 flex items-center justify-between border-b border-slate-100 dark:border-[#26324F] bg-white dark:bg-[#121A2E] shrink-0">
+          <div className="flex items-center gap-3.5">
+            {/* Waveform Logo Badge */}
+            <div className="w-10 h-10 rounded-2xl bg-[#EEF0FD] dark:bg-indigo-950/60 border border-indigo-100/90 dark:border-indigo-800/60 flex items-center justify-center text-indigo-700 dark:text-indigo-300 shadow-2xs shrink-0">
+              <div className="flex items-center gap-[3px] h-5">
+                <span className="w-[3px] h-2 bg-indigo-600 rounded-full" />
+                <span className="w-[3px] h-3.5 bg-indigo-600 rounded-full" />
+                <span className="w-[3px] h-5 bg-indigo-600 rounded-full" />
+                <span className="w-[3px] h-3.5 bg-indigo-600 rounded-full" />
+                <span className="w-[3px] h-2 bg-indigo-600 rounded-full" />
               </div>
-              <p className="text-xs text-muted truncate max-w-[200px] sm:max-w-[300px]">
-                {statusNote}
+            </div>
+
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 leading-snug tracking-tight">
+                LearnMate Buddy
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-normal truncate max-w-[260px] sm:max-w-md">
+                {studyDoc.title}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={handleToggleSession}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                sessionActive
-                  ? 'bg-red-50 text-danger hover:bg-red-100 border border-red-200/70'
-                  : 'bg-brand-soft text-brand hover:bg-blue-100 border border-blue-200/70'
+              onClick={handleClearHistory}
+              title="Reset conversation"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1A2440] transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleCloseSession}
+              aria-label="Close"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1A2440] transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </header>
+
+        {/* ============================================================ */}
+        {/* 2. CENTERED HERO VOICE CONTROL (Matching attached mockup)    */}
+        {/* ============================================================ */}
+        <div className="py-5 sm:py-7 px-4 flex flex-col items-center justify-center border-b border-slate-100 dark:border-[#26324F] shrink-0 bg-white dark:bg-[#121A2E]">
+          {/* Accessible Concentric Circle Button */}
+          <div className="relative flex items-center justify-center">
+            {/* Outer subtle ring */}
+            <div
+              className={`w-24 h-24 sm:w-28 sm:h-28 rounded-full border border-indigo-100/90 dark:border-indigo-800/40 bg-[#F4F6FE] dark:bg-[#1A2440]/80 flex items-center justify-center transition-all ${
+                voiceState === 'listening' ? 'ring-4 ring-indigo-100 dark:ring-indigo-900/40' : ''
               }`}
             >
-              {sessionActive ? (
-                <>
-                  <Square className="w-3 h-3 fill-current" />
-                  <span className="hidden xs:inline">End Session</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-3 h-3 fill-current" />
-                  <span className="hidden xs:inline">Start Session</span>
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              data-testid="close-voice-tutor-button"
-              onClick={handleCloseModal}
-              aria-label="Close Live Voice Tutor"
-              title="Close Live Voice Tutor (Esc)"
-              className="w-9 h-9 rounded-full bg-white/90 hover:bg-slate-100 border border-slate-200/80 text-slate-600 hover:text-ink flex items-center justify-center shadow-2xs transition-colors cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Middle Area (Avatar + Controls + Live Captions) */}
-        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
-          {/* Animated 2D Avatar & Controls Bar */}
-          <div className="shrink-0 px-4 sm:px-6 pt-3 pb-3 flex flex-col items-center bg-gradient-to-b from-slate-50/70 to-white border-b border-slate-100">
-            {showAvatar && (
-              <div className="mb-2.5 scale-95 sm:scale-100 origin-center">
-                <LearnMateBuddyAvatar
-                  state={voiceState}
-                  outputEnergy={outputEnergy}
-                  inputEnergy={inputEnergy}
-                />
-              </div>
-            )}
-
-            {/* Primary Interactive Voice Controls */}
-            <div className="flex flex-wrap items-center justify-center gap-2">
+              {/* Primary Interactive Circle */}
               <button
                 type="button"
-                onClick={handleToggleMic}
-                className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold transition-all shadow-2xs cursor-pointer ${
-                  micStreamRef.current && !isMicMuted
-                    ? 'bg-danger hover:bg-[#D93025] text-white'
-                    : 'bg-brand hover:bg-brand-strong text-white'
-                }`}
+                onClick={handleCircleClick}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleCircleClick();
+                  }
+                }}
+                aria-label={
+                  voiceState === 'speaking' || voiceState === 'thinking'
+                    ? 'Tap the circle to interrupt Buddy'
+                    : voiceState === 'listening'
+                    ? 'Listening to student. Tap to submit or mute'
+                    : 'Tap to speak'
+                }
+                className="w-18 h-18 sm:w-22 sm:h-22 rounded-full bg-[#E5E9FC] hover:bg-[#DCE1FB] dark:bg-indigo-900/40 dark:hover:bg-indigo-900/60 border border-indigo-200/70 dark:border-indigo-700/50 shadow-2xs flex items-center justify-center cursor-pointer transition-transform active:scale-95 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-500/40"
               >
-                {micStreamRef.current && !isMicMuted ? (
-                  <>
-                    <MicOff className="w-3.5 h-3.5" />
-                    <span>Mute Mic</span>
-                  </>
-                ) : (
-                  <>
-                    <Mic className="w-3.5 h-3.5" />
-                    <span>{micStreamRef.current ? 'Unmute Mic' : 'Enable Mic'}</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsTutorAudioMuted((m) => !m)}
-                aria-pressed={isTutorAudioMuted}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${
-                  isTutorAudioMuted
-                    ? 'bg-amber-50 border-amber-200 text-amber-800'
-                    : 'bg-white border-slate-200 text-ink hover:bg-slate-50'
-                }`}
-              >
-                {isTutorAudioMuted ? (
-                  <>
-                    <VolumeX className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Tutor Muted</span>
-                  </>
-                ) : (
-                  <>
-                    <Volume2 className="w-3.5 h-3.5 text-success" />
-                    <span>Mute Tutor Audio</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowCaptions((c) => !c)}
-                aria-pressed={showCaptions}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${
-                  showCaptions
-                    ? 'bg-brand-soft border-blue-200 text-brand'
-                    : 'bg-white border-slate-200 text-muted hover:bg-slate-50'
-                }`}
-              >
-                <Captions className="w-3.5 h-3.5" />
-                <span>{showCaptions ? 'Hide Captions' : 'Show Captions'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowAvatar((a) => !a)}
-                aria-pressed={showAvatar}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${
-                  showAvatar
-                    ? 'bg-brand-soft border-blue-200 text-brand'
-                    : 'bg-white border-slate-200 text-muted hover:bg-slate-50'
-                }`}
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-                <span>{showAvatar ? 'Hide Avatar' : 'Show Avatar'}</span>
+                {/* 5 Audio Waveform Bars */}
+                <div className="flex items-center gap-[3.5px] sm:gap-[4px] h-9 sm:h-10">
+                  {waveformHeights.map((h, i) => (
+                    <span
+                      key={i}
+                      className="w-[3px] sm:w-[3.5px] bg-indigo-700 dark:bg-indigo-400 rounded-full transition-all duration-150"
+                      style={{
+                        height: `${h}px`,
+                      }}
+                    />
+                  ))}
+                </div>
               </button>
             </div>
-
-            {micPermissionNote && (
-              <div className="mt-2.5 flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200/80 px-3.5 py-2 rounded-xl max-w-md">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>{micPermissionNote}</span>
-              </div>
-            )}
           </div>
 
-          {/* Synchronized Live Captions Transcript */}
-          {showCaptions && (
-            <div
-              ref={captionsContainerRef}
-              className="flex-1 overflow-y-auto px-4 sm:px-6 py-3 space-y-3 min-h-[120px] bg-slate-50/50"
-              data-testid="live-voice-captions"
-            >
-              {transcript.length === 0 ? (
-                <p className="text-xs text-center text-muted py-6">
-                  Live captions will appear here as you and LearnMate Buddy speak.
-                </p>
-              ) : (
-                transcript.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`flex flex-col ${
-                      item.role === 'user' ? 'items-end' : 'items-start'
-                    }`}
-                  >
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1 px-1">
-                      {item.role === 'user' ? 'You (Student)' : 'LearnMate Buddy'}
-                    </span>
-                    <div
-                      className={`max-w-[88%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                        item.role === 'user'
-                          ? 'bg-brand text-white rounded-br-xs'
-                          : 'bg-white border border-slate-200/90 text-ink rounded-bl-xs shadow-2xs'
-                      }`}
-                    >
-                      <p>{item.text}</p>
-                      {item.citations && item.citations.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {item.citations.map((cit: TutorCitation, idx: number) => (
-                            <button
-                              key={`${cit.pageNumber}-${idx}`}
-                              type="button"
-                              onClick={() => {
-                                if (onNavigateToCitation) {
-                                  onNavigateToCitation(cit.pageNumber, cit.quote);
-                                }
-                              }}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-soft text-brand text-[11px] font-semibold hover:bg-blue-100 cursor-pointer"
-                            >
-                              <BookOpen className="w-3 h-3" />
-                              <span>Page {cit.pageNumber}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
+          {/* Status Headline and Action Hint */}
+          <div className="mt-3 text-center">
+            <h3 className="text-base sm:text-lg font-bold text-indigo-900 dark:text-indigo-200 tracking-tight">
+              {voiceState === 'speaking'
+                ? 'Buddy is speaking'
+                : voiceState === 'listening'
+                ? 'Listening'
+                : voiceState === 'thinking'
+                ? 'Thinking...'
+                : isMicMuted
+                ? 'Microphone muted'
+                : 'Tap to speak'}
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 font-normal">
+              {voiceState === 'speaking'
+                ? 'Tap the circle to interrupt'
+                : voiceState === 'listening'
+                ? 'Speak your question'
+                : voiceState === 'thinking'
+                ? 'Preparing answer...'
+                : isMicMuted
+                ? 'Unmute mic or type below'
+                : 'Tap to speak'}
+            </p>
+          </div>
+
+          {micPermissionError && (
+            <div className="mt-2.5 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span>{micPermissionError}</span>
             </div>
           )}
         </div>
 
-        {/* Pinned Bottom Quick Spoken Prompts + Typed Text Fallback Input */}
-        <div className="shrink-0 p-3.5 sm:p-4 bg-white border-t border-slate-100 space-y-2.5">
-          <div className="flex flex-wrap gap-1.5">
-            {suggestedVoicePrompts.map((prompt) => (
-              <button
-                key={prompt}
-                type="button"
-                onClick={() => sendSpokenOrTypedQuestion(prompt)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-canvas hover:bg-brand-soft hover:text-brand border border-slate-200/80 text-xs font-medium text-ink transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3 text-brand shrink-0" />
-                <span className="truncate max-w-[230px]">{prompt}</span>
-              </button>
-            ))}
-          </div>
+        {/* ============================================================ */}
+        {/* 3. SCROLLABLE LEFT-ALIGNED TRANSCRIPT (Matching mockup)      */}
+        {/* ============================================================ */}
+        <div
+          ref={historyContainerRef}
+          data-testid="voice-conversation-thread"
+          className="flex-1 overflow-y-auto px-6 sm:px-8 py-5 space-y-6 bg-white dark:bg-[#0B1020]"
+        >
+          {conversation.map((turn) => {
+            const isUser = turn.role === 'user';
+            return (
+              <div key={turn.id} className="text-left space-y-1 animate-in fade-in duration-150">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  {isUser ? 'You' : 'Buddy'}
+                </h4>
+                {isUser ? (
+                  <p className="text-sm sm:text-base text-slate-800 dark:text-slate-200 leading-relaxed font-normal">
+                    {turn.text}
+                    {turn.isStreaming && (
+                      <span className="inline-block w-1.5 h-3.5 ml-1 bg-indigo-600 animate-pulse align-middle" />
+                    )}
+                  </p>
+                ) : (
+                  <div>
+                    <div className="text-sm sm:text-base text-slate-800 dark:text-slate-200 leading-relaxed font-normal">
+                      <MathText text={turn.text} />
+                      {turn.isStreaming && (
+                        <span className="inline-block w-1.5 h-3.5 ml-1 bg-indigo-600 animate-pulse align-middle" />
+                      )}
+                    </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!quickPromptInput.trim()) return;
-              sendSpokenOrTypedQuestion(quickPromptInput);
-              setQuickPromptInput('');
-            }}
-            className="flex items-center gap-2"
-          >
-            <input
-              type="text"
-              value={quickPromptInput}
-              onChange={(e) => setQuickPromptInput(e.target.value)}
-              placeholder="Ask by speaking or type a question for LearnMate Buddy..."
-              aria-label="Ask by speaking or type a question for LearnMate Buddy"
-              className="flex-1 px-4 py-2.5 rounded-xl bg-canvas border border-slate-200/90 text-sm text-ink placeholder:text-slate-400 focus:outline-none focus:border-brand"
-            />
-            <button
-              type="submit"
-              disabled={!quickPromptInput.trim()}
-              aria-label="Send voice question"
-              className="px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-strong disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>Ask</span>
-            </button>
-          </form>
+                    {/* Clickable page citations formatted as Page X ↗ */}
+                    {turn.citations && turn.citations.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-3">
+                        {turn.citations.map((cit, cIdx) => (
+                          <button
+                            key={cIdx}
+                            type="button"
+                            onClick={() => {
+                              if (onNavigateToCitation) {
+                                onNavigateToCitation(cit.pageNumber, cit.quote);
+                              }
+                            }}
+                            className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold text-sm hover:underline cursor-pointer inline-flex items-center gap-1 transition-colors"
+                          >
+                            <span>Page {cit.pageNumber}</span>
+                            <span className="text-xs">↗</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
+
+        {/* ============================================================ */}
+        {/* 4. OPTIONAL KEYBOARD TEXT INPUT BAR                         */}
+        {/* ============================================================ */}
+        {showKeyboardInput && (
+          <div className="px-6 py-3 bg-slate-50 dark:bg-[#1A2440] border-t border-slate-200 dark:border-[#26324F] shrink-0">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendTyped();
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={typedInput}
+                onChange={(e) => setTypedInput(e.target.value)}
+                placeholder="Type your question or doubt here..."
+                className="flex-1 h-10 px-4 rounded-xl bg-white dark:bg-[#121A2E] border border-slate-300 dark:border-[#26324F] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 outline-none transition-all"
+              />
+              <button
+                type="submit"
+                disabled={!typedInput.trim()}
+                className="h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+              >
+                <span>Send</span>
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* 5. FOOTER: [Type] [Mute speaker] [End session] (Mockup)     */}
+        {/* ============================================================ */}
+        <footer className="px-6 py-4 bg-white dark:bg-[#121A2E] border-t border-slate-100 dark:border-[#26324F] grid grid-cols-3 gap-3 shrink-0">
+          {/* Button 1: Type */}
+          <button
+            type="button"
+            onClick={() => setShowKeyboardInput((k) => !k)}
+            className={`py-2.5 px-3 rounded-2xl border text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs ${
+              showKeyboardInput
+                ? 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                : 'bg-white dark:bg-[#1A2440] text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-[#26324F] hover:bg-slate-50 dark:hover:bg-[#223055]'
+            }`}
+          >
+            <Keyboard className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+            <span>Type</span>
+          </button>
+
+          {/* Button 2: Mute speaker */}
+          <button
+            type="button"
+            onClick={() => setIsTutorAudioMuted((m) => !m)}
+            className={`py-2.5 px-3 rounded-2xl border text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs ${
+              isTutorAudioMuted
+                ? 'bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                : 'bg-white dark:bg-[#1A2440] text-slate-700 dark:text-slate-200 border-slate-200/90 dark:border-[#26324F] hover:bg-slate-50 dark:hover:bg-[#223055]'
+            }`}
+          >
+            {isTutorAudioMuted ? (
+              <VolumeX className="w-4 h-4 text-amber-700 dark:text-amber-300" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+            )}
+            <span>{isTutorAudioMuted ? 'Unmute' : 'Mute speaker'}</span>
+          </button>
+
+          {/* Button 3: End session */}
+          <button
+            type="button"
+            onClick={handleCloseSession}
+            className="py-2.5 px-3 rounded-2xl border border-slate-200/90 dark:border-[#26324F] bg-white dark:bg-[#1A2440] hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:border-rose-200 dark:hover:border-rose-900 hover:text-rose-700 dark:hover:text-rose-300 text-slate-700 dark:text-slate-200 text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+          >
+            <PhoneOff className="w-4 h-4" />
+            <span>End session</span>
+          </button>
+        </footer>
       </div>
     </div>
   );

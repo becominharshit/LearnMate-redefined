@@ -912,3 +912,300 @@ export function finalizeActiveTranscriptTurn(
     return entry;
   });
 }
+
+export interface AssembleSpeechTranscriptParams {
+  existingCommitted: string;
+  newFinalChunk?: string;
+  interimChunk?: string;
+}
+
+export interface AssembleSpeechTranscriptResult {
+  committed: string;
+  displayParagraph: string;
+}
+
+/**
+ * Assembles live recognized student speech without flickering, word loss, or duplication.
+ * Keeps finalized words stable while allowing provisional suffix revisions.
+ */
+export function assembleStudentSpeechTranscript({
+  existingCommitted,
+  newFinalChunk,
+  interimChunk,
+}: AssembleSpeechTranscriptParams): AssembleSpeechTranscriptResult {
+  let committed = (existingCommitted || '').trim();
+  const finalChunk = (newFinalChunk || '').trim();
+  const interim = (interimChunk || '').trim();
+
+  if (finalChunk) {
+    if (!committed) {
+      committed = finalChunk;
+    } else if (finalChunk.toLowerCase().startsWith(committed.toLowerCase())) {
+      committed = finalChunk;
+    } else if (committed.toLowerCase().endsWith(finalChunk.toLowerCase())) {
+      // Chunk is already committed
+    } else {
+      // Check for partial overlapping words at boundary
+      const committedWords = committed.split(/\s+/);
+      const chunkWords = finalChunk.split(/\s+/);
+      let overlapCount = 0;
+      const maxOverlap = Math.min(committedWords.length, chunkWords.length);
+      for (let k = 1; k <= maxOverlap; k++) {
+        const endSub = committedWords.slice(-k).join(' ').toLowerCase();
+        const startSub = chunkWords.slice(0, k).join(' ').toLowerCase();
+        if (endSub === startSub) {
+          overlapCount = k;
+        }
+      }
+      if (overlapCount > 0) {
+        const nonOverlapping = chunkWords.slice(overlapCount).join(' ');
+        if (nonOverlapping) {
+          committed = `${committed} ${nonOverlapping}`;
+        }
+      } else {
+        committed = `${committed} ${finalChunk}`;
+      }
+    }
+  }
+
+  const displayParagraph = [committed, interim].filter(Boolean).join(' ');
+  return { committed, displayParagraph };
+}
+
+/**
+ * Strips raw metadata, citations, markdown artifacts, and converts LaTeX math
+ * into spoken-friendly phrases for browser text-to-speech.
+ */
+export function formatSpokenTextForTts(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/---METADATA---[\s\S]*$/, '')
+    .replace(/\[Page\s*\d+[^\]]*\]/gi, '')
+    .replace(/[*#_`~]/g, '')
+    // Common LaTeX structures to natural spoken words
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '$1 over $2')
+    .replace(/\\sqrt\{([^}]+)\}/g, 'square root of $1')
+    .replace(/\\cdot/g, ' dot ')
+    .replace(/\\times/g, ' times ')
+    .replace(/\\pm/g, ' plus or minus ')
+    .replace(/\\oint/g, 'integral')
+    .replace(/\\int/g, 'integral')
+    .replace(/\\sum/g, 'sum')
+    .replace(/\\infty/g, 'infinity')
+    .replace(/\\approx/g, 'approximately')
+    .replace(/\\neq/g, 'not equal to')
+    .replace(/\\leq/g, 'less than or equal to')
+    .replace(/\\geq/g, 'greater than or equal to')
+    .replace(/\\([a-zA-Z]+)/g, '$1')
+    .replace(/[{}]/g, '')
+    .replace(/\$\$([^\$]+)\$\$/g, '$1')
+    .replace(/\$([^\$]+)\$/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Extracts complete sentences from streaming assistant output so speech synthesis
+ * can speak natural sentences with minimal latency (~500ms instead of waiting for full stream).
+ */
+export function extractSentencesFromStream(
+  buffer: string,
+  isStreamFinished = false
+): { completeSentences: string[]; remainder: string } {
+  const completeSentences: string[] = [];
+  let remaining = buffer;
+  const sentenceRegex = /([^\.\?\!\n]+[\.\?\!]+)(\s+|$)/;
+  let match: RegExpExecArray | null;
+  while ((match = sentenceRegex.exec(remaining)) !== null) {
+    const sentence = match[1].trim();
+    if (sentence) {
+      completeSentences.push(sentence);
+    }
+    remaining = remaining.slice(match.index + match[0].length);
+  }
+  if (isStreamFinished && remaining.trim()) {
+    completeSentences.push(remaining.trim());
+    remaining = '';
+  }
+  return { completeSentences, remainder: remaining };
+}
+
+/**
+ * Detects whether recognized audio is speaker echo from Buddy's own voice playback.
+ * Prevents Buddy from interrupting itself or answering its own spoken words.
+ */
+export function isSpeakerEcho(
+  recognizedText: string,
+  currentlySpokenPhrases: string[],
+  threshold = 0.7
+): boolean {
+  if (!recognizedText || !currentlySpokenPhrases || currentlySpokenPhrases.length === 0) return false;
+  const cleanRec = recognizedText.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  if (!cleanRec) return false;
+  const recWords = cleanRec.split(/\s+/).filter(Boolean);
+  if (recWords.length < 2) return false;
+
+  const spokenCorpus = currentlySpokenPhrases
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '');
+  const spokenWords = new Set(spokenCorpus.split(/\s+/).filter(Boolean));
+
+  let matchedWords = 0;
+  for (const w of recWords) {
+    if (spokenWords.has(w)) matchedWords++;
+  }
+  const ratio = matchedWords / recWords.length;
+  return ratio >= threshold;
+}
+
+/**
+ * Turn-based synchronization guard ensuring late events (from aborted SSE streams or delayed TTS)
+ * are discarded if the turn has already changed or been interrupted.
+ */
+export function shouldAcceptTurnEvent(
+  eventTurnId: number,
+  activeTurnId: number,
+  isTurnActive: boolean
+): boolean {
+  return eventTurnId === activeTurnId && isTurnActive;
+}
+
+export interface SpeechRecognitionGuardParams {
+  isPlaybackActive: boolean;
+  playbackFinishedAt: number;
+  now: number;
+  cooldownMs?: number;
+  turnSequenceId: number;
+  expectedTurnSequenceId: number;
+}
+
+export interface SpeechRecognitionGuardDecision {
+  allowProcessing: boolean;
+  reason: 'playback_active' | 'in_cooldown' | 'stale_turn_sequence' | 'allowed';
+}
+
+/**
+ * Enforces speaker-echo rejection at the source:
+ * Suspends recognition during Buddy's playback and briefly after it ends (cooldown),
+ * rejecting any stale recognition callbacks before they can alter the transcript or trigger requests.
+ */
+export function shouldProcessSpeechRecognitionResult(
+  params: SpeechRecognitionGuardParams
+): SpeechRecognitionGuardDecision {
+  const {
+    isPlaybackActive,
+    playbackFinishedAt,
+    now,
+    cooldownMs = 600,
+    turnSequenceId,
+    expectedTurnSequenceId,
+  } = params;
+
+  if (isPlaybackActive) {
+    return { allowProcessing: false, reason: 'playback_active' };
+  }
+
+  if (playbackFinishedAt > 0 && now - playbackFinishedAt < cooldownMs) {
+    return { allowProcessing: false, reason: 'in_cooldown' };
+  }
+
+  if (turnSequenceId !== expectedTurnSequenceId) {
+    return { allowProcessing: false, reason: 'stale_turn_sequence' };
+  }
+
+  return { allowProcessing: true, reason: 'allowed' };
+}
+
+/**
+ * Extracts natural speech units from streaming assistant text.
+ * When isFirstUnit is true, breaks at natural clause boundaries (comma, colon, semicolon, etc.)
+ * after 3+ words so audio playback starts immediately (~400-600ms) rather than waiting
+ * seconds for a full period-terminated sentence.
+ */
+export function extractSpeechUnitsFromStream(
+  buffer: string,
+  isFirstUnit = false,
+  isStreamFinished = false
+): { units: string[]; remainder: string } {
+  const units: string[] = [];
+  let remaining = buffer;
+
+  // If first unit of this turn, allow an early break at a natural clause punctuation
+  if (isFirstUnit && !isStreamFinished) {
+    // 1. Look for an early natural clause break after 2+ words ending in a comma, colon, semicolon, or dash
+    const clauseMatch = /^(\s*(?:\S+\s+){1,10}\S+[,;:—\n]+)(\s+|$)/.exec(remaining);
+    if (clauseMatch) {
+      const unit = clauseMatch[1].trim();
+      if (unit) {
+        units.push(unit);
+        remaining = remaining.slice(clauseMatch[0].length);
+        return { units, remainder: remaining };
+      }
+    }
+
+    // 2. Check if an early complete sentence is already available
+    const earlySentence = /([^\.\?\!\n]+[\.\?\!]+)(\s+|$)/.exec(remaining);
+    if (earlySentence && earlySentence.index === 0) {
+      const unit = earlySentence[1].trim();
+      if (unit) {
+        units.push(unit);
+        remaining = remaining.slice(earlySentence[0].length);
+        return { units, remainder: remaining };
+      }
+    }
+  }
+
+  // Extract complete sentences from remaining buffer
+  const sentenceRegex = /([^\.\?\!\n]+[\.\?\!]+)(\s+|$)/;
+  let match: RegExpExecArray | null;
+  while ((match = sentenceRegex.exec(remaining)) !== null) {
+    const sentence = match[1].trim();
+    if (sentence) {
+      units.push(sentence);
+    }
+    remaining = remaining.slice(match.index + match[0].length);
+  }
+
+  // If stream has ended, flush any leftover non-empty text
+  if (isStreamFinished && remaining.trim()) {
+    units.push(remaining.trim());
+    remaining = '';
+  }
+
+  return { units, remainder: remaining };
+}
+
+/**
+ * Computes the optimal silence detection delay.
+ * Allows short mid-phrase pauses without premature submission, while dropping
+ * dead latency from 1400ms to 750-800ms when speech has concluded.
+ */
+export function computeSilenceTimeoutMs(params: {
+  isFinal: boolean;
+  wordCount: number;
+}): number {
+  const { isFinal, wordCount } = params;
+  if (!isFinal) {
+    // Student may be pausing mid-question; give 1100ms breathing room
+    return 1100;
+  }
+  if (wordCount <= 2) {
+    // Short question (e.g. "Why?", "What about copper?")
+    return 800;
+  }
+  // Standard completed sentence
+  return 750;
+}
+
+/**
+ * Strict gate ensuring that late callbacks from network streams, timers, or TTS
+ * are rejected immediately once the session has ended or a new epoch has started.
+ */
+export function canAcceptSessionCallback(params: {
+  isSessionActive: boolean;
+  currentEpoch: number;
+  expectedEpoch: number;
+}): boolean {
+  return params.isSessionActive && params.currentEpoch === params.expectedEpoch;
+}

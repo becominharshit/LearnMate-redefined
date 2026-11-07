@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   StickyNote,
   Layers,
@@ -29,6 +29,11 @@ import {
   Eye,
   X,
   FileText,
+  AlertTriangle,
+  Calendar,
+  BookOpen,
+  Search,
+  Target,
 } from 'lucide-react';
 import type {
   StudyDocument,
@@ -40,6 +45,8 @@ import type {
   MindMapNode,
   OnePageRevisionSheet,
   QuickReviseBundle,
+  MistakeInsight,
+  RevisionTask,
 } from '../types/study';
 import { aiStudyClient } from '../services/aiClient';
 import { studyStorage } from '../services/storageService';
@@ -56,23 +63,38 @@ import {
   generateRevisionNotesPdfBytes,
   triggerPdfDownload,
 } from '../utils/pdfGenerator';
+import { MathText } from './MathText';
 
-export type QuickReviseSubTab = 'sticky' | 'flashcards' | 'mindmap' | 'onepage';
+export type QuickReviseSubTab =
+  | 'flashcards'
+  | 'mindmap'
+  | 'onepage'
+  | 'mistakes'
+  | 'formulas'
+  | 'sticky';
 
 interface QuickReviseViewProps {
   activeDocument: StudyDocument;
   initialSubTab?: QuickReviseSubTab;
   onNavigateToCitation: (pageNumber: number, quote?: string) => void;
   onAskTutorAboutConcept?: (prompt: string) => void;
+  onOpenPractice?: () => void;
 }
 
 export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   activeDocument,
-  initialSubTab = 'sticky',
+  initialSubTab = 'flashcards',
   onNavigateToCitation,
   onAskTutorAboutConcept,
+  onOpenPractice,
 }) => {
-  const [subTab, setSubTab] = useState<QuickReviseSubTab>(initialSubTab);
+  const normalizedInitialTab: QuickReviseSubTab =
+    initialSubTab === 'sticky' ? 'flashcards' : initialSubTab;
+  const [subTab, setSubTab] = useState<QuickReviseSubTab>(normalizedInitialTab);
+
+  useEffect(() => {
+    setSubTab(initialSubTab === 'sticky' ? 'flashcards' : initialSubTab);
+  }, [initialSubTab]);
 
   // Shared QuickReviseBundle State
   const [stickyNotes, setStickyNotes] = useState<StickyNoteItem[]>([]);
@@ -84,7 +106,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   const [isLoadingMindMap, setIsLoadingMindMap] = useState(false);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
 
-  // Sticky Notes Interactive State
+  // Sticky Notes Interactive State (merged inside Flashcards tab)
   const [selectedPageFilter, setSelectedPageFilter] = useState<number | 'all'>('all');
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -101,6 +123,19 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [selectedNode, setSelectedNode] = useState<MindMapNode | null>(null);
+
+  // Mistakes & Revision Plan State (moved from Study sub-modes into Revise)
+  const [mistakeInsights, setMistakeInsights] = useState<MistakeInsight[]>(() =>
+    studyStorage.getMistakeInsights(activeDocument.id)
+  );
+  const [revisionPlan, setRevisionPlan] = useState<RevisionTask[]>(() =>
+    studyStorage.getRevisionPlan(activeDocument.id)
+  );
+  const [isAnalyzingMistakes, setIsAnalyzingMistakes] = useState(false);
+
+  // Formula Book State
+  const [formulaSearch, setFormulaSearch] = useState('');
+  const [addedFormulaTerm, setAddedFormulaTerm] = useState<string | null>(null);
 
   // Real PDF Download & Preview State
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -130,7 +165,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
     studyStorage.saveQuickReviseBundle(merged);
   };
 
-  // Load cached QuickReviseBundle or generate on demand for the active tab
+  // Load cached QuickReviseBundle, mistakes, and revision plan when document changes
   useEffect(() => {
     const cached = studyStorage.getQuickReviseBundle(activeDocument.id, contentVersion);
     if (cached) {
@@ -146,6 +181,8 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       setOnePageRevision(null);
       setSelectedNode(null);
     }
+    setMistakeInsights(studyStorage.getMistakeInsights(activeDocument.id));
+    setRevisionPlan(studyStorage.getRevisionPlan(activeDocument.id));
     setCurrentCardIdx(0);
     setIsCardFlipped(false);
     setFlashcardFilter('all');
@@ -164,7 +201,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
     ) {
       void handleGenerateStickyAndFlashcards(false);
     } else if (
-      (subTab === 'mindmap' || subTab === 'onepage') &&
+      (subTab === 'mindmap' || subTab === 'onepage' || subTab === 'formulas') &&
       (!cached || !cached.mindMap || !cached.onePageRevision) &&
       !mindMap &&
       !isLoadingMindMap
@@ -201,7 +238,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
         setAiNotice(res.aiNotice);
       }
 
-      // If regeneration hit a fallback while the student already had notes, preserve their existing notes
       if (forceRefresh && res.aiNotice && stickyNotes.length > 0) {
         setAiNotice(`${res.aiNotice} Generation failed. Your existing notes are safe.`);
         return;
@@ -305,6 +341,46 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
     }
   };
 
+  /* ---------------- Mistakes & Revision Plan Analysis ---------------- */
+  const handleAnalyzeLatestQuizMistakes = async () => {
+    const attempts = studyStorage.getQuizAttempts(activeDocument.id);
+    const latest = attempts[0];
+    if (!latest) return;
+
+    setIsAnalyzingMistakes(true);
+    setAiNotice(null);
+    try {
+      const res = await aiStudyClient.analyzeMistakesAndPlan({
+        documentId: activeDocument.id,
+        title: activeDocument.title,
+        pages: activeDocument.pages,
+        attempt: latest,
+      });
+      studyStorage.saveMistakeInsights(activeDocument.id, res.mistakes);
+      studyStorage.saveRevisionPlan(activeDocument.id, res.revisionPlan);
+      setMistakeInsights(res.mistakes);
+      setRevisionPlan(res.revisionPlan);
+    } catch (err) {
+      setAiNotice(
+        err instanceof Error
+          ? err.message
+          : 'Could not diagnose mistakes right now. Please try again.'
+      );
+    } finally {
+      setIsAnalyzingMistakes(false);
+    }
+  };
+
+  const handleToggleRevisionTask = (taskId: string) => {
+    const updated = revisionPlan.map((t) =>
+      t.id === taskId
+        ? { ...t, completed: !t.completed, updatedAt: new Date().toISOString() }
+        : t
+    );
+    setRevisionPlan(updated);
+    studyStorage.saveRevisionPlan(activeDocument.id, updated);
+  };
+
   /* ---------------- Sticky Notes Actions ---------------- */
   const handleCopyNote = async (note: StickyNoteItem) => {
     const text = `${note.title}\n${note.content}${note.formula ? `\nFormula: ${note.formula}` : ''} (${note.sourceLabel})`;
@@ -360,6 +436,23 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
     setStickyNotes(updated);
     persistBundle({ stickyNotes: updated });
     handleStartEditNote(newNote);
+  };
+
+  const handlePromoteStickyToFlashcard = (note: StickyNoteItem) => {
+    const newCard: FlashcardItem = {
+      id: `fc-note-${Date.now()}`,
+      frontQuestion: `What is the key takeaway or formula for "${note.title}"?`,
+      backAnswer: note.formula ? `${note.content} (${note.formula})` : note.content,
+      topic: note.title,
+      sourcePage: note.sourcePage,
+      sourceLabel: note.sourceLabel,
+      status: 'unreviewed',
+    };
+    const updated = [newCard, ...flashcards];
+    setFlashcards(updated);
+    persistBundle({ flashcards: updated });
+    setCurrentCardIdx(0);
+    setIsCardFlipped(false);
   };
 
   /* ---------------- Flashcards Actions ---------------- */
@@ -560,7 +653,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   const currentPageNum = typeof selectedPageFilter === 'number' ? selectedPageFilter : 1;
   const totalPagesCount = Math.max(1, activeDocument.pages.length || 1);
 
-  // The document's own topics, or its page titles when it has not been analysed into topics yet.
   const canonicalTopicsList =
     activeDocument.topics.length > 0
       ? activeDocument.topics.map((t, idx) => ({
@@ -575,13 +667,92 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           name: p.title || `Page ${p.pageNumber}`,
           page: p.pageNumber,
         }));
+
   const subjectLabel =
-    classifyJeeSubject(`${activeDocument.title} ${activeDocument.topics.map((t) => t.name).join(' ')}`) ||
-    'Revise';
+    classifyJeeSubject(
+      `${activeDocument.title} ${activeDocument.topics.map((t) => t.name).join(' ')}`
+    ) || 'Revise';
+
+  // Formula Book entries extracted from onePageRevision + stickyNotes with formulas
+  const formulaBookItems = useMemo(() => {
+    const items: Array<{
+      term: string;
+      formulaOrDef: string;
+      sourcePage: number;
+      sourceLabel: string;
+    }> = [];
+    const seen = new Set<string>();
+
+    if (onePageRevision?.formulasAndDefinitions) {
+      for (const f of onePageRevision.formulasAndDefinitions) {
+        const key = `${f.term.toLowerCase()}::${f.formulaOrDef.toLowerCase()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          items.push({
+            term: f.term,
+            formulaOrDef: f.formulaOrDef,
+            sourcePage: 1,
+            sourceLabel: f.sourceLabel || 'Page 1',
+          });
+        }
+      }
+    }
+
+    for (const note of stickyNotes) {
+      if (note.formula) {
+        const key = `${note.title.toLowerCase()}::${note.formula.toLowerCase()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          items.push({
+            term: note.title,
+            formulaOrDef: note.formula,
+            sourcePage: note.sourcePage,
+            sourceLabel: note.sourceLabel,
+          });
+        }
+      }
+    }
+
+    const q = formulaSearch.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(
+      (i) =>
+        i.term.toLowerCase().includes(q) ||
+        i.formulaOrDef.toLowerCase().includes(q)
+    );
+  }, [onePageRevision, stickyNotes, formulaSearch]);
+
+  const handleAddFormulaToFlashcard = (item: {
+    term: string;
+    formulaOrDef: string;
+    sourcePage: number;
+    sourceLabel: string;
+  }) => {
+    const newCard: FlashcardItem = {
+      id: `fc-formula-${Date.now()}`,
+      frontQuestion: `State the formula or definition for: ${item.term}`,
+      backAnswer: item.formulaOrDef,
+      topic: item.term,
+      sourcePage: item.sourcePage,
+      sourceLabel: item.sourceLabel,
+      status: 'unreviewed',
+    };
+    const updated = [newCard, ...flashcards];
+    setFlashcards(updated);
+    persistBundle({ flashcards: updated });
+    setAddedFormulaTerm(item.term);
+    setTimeout(() => setAddedFormulaTerm(null), 2000);
+  };
+
+  const attempts = studyStorage.getQuizAttempts(activeDocument.id);
+  const latestAttempt = attempts[0] || null;
+  const latestWrongCount = latestAttempt
+    ? latestAttempt.answers.filter((g) => !g.isCorrect).length
+    : 0;
 
   return (
     <div className="space-y-6 flex-1 flex flex-col">
-      {/* Editorial Header matching Image 1 ("Revise with clarity.") */}
+      {/* Editorial Header */}
       <div className="space-y-4 border-b border-line pb-0 no-print">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-2">
           <div className="space-y-1.5">
@@ -592,7 +763,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               Revise with clarity.
             </h1>
             <p className="lm-editorial-subtitle text-base sm:text-lg text-body">
-              Turn your notes into concise, visual reminders.
+              Flashcards, sticky notes, mind map, summary sheet, mistake DNA, and formula book.
             </p>
           </div>
 
@@ -669,22 +840,25 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           </div>
         )}
 
-        {/* 4 Editorial Underline Tabs matching Image 1 */}
+        {/* 5 Revise Tabs (Phase 3: Flashcards · Mind map · Summary sheet · Mistakes · Formula Book) */}
         <div
           role="tablist"
-          aria-label="Quick Revise Tools"
-          className="flex items-center gap-6 overflow-x-auto"
+          aria-label="Revise Tools"
+          className="flex items-center gap-5 sm:gap-6 overflow-x-auto"
         >
           {(
             [
-              { id: 'sticky', label: 'Sticky Notes', icon: StickyNote },
               { id: 'flashcards', label: 'Flashcards', icon: Layers },
-              { id: 'mindmap', label: 'Mind Map', icon: Network },
-              { id: 'onepage', label: 'One-Page Revision', icon: FileSpreadsheet },
+              { id: 'mindmap', label: 'Mind map', icon: Network },
+              { id: 'onepage', label: 'Summary sheet', icon: FileSpreadsheet },
+              { id: 'mistakes', label: 'Mistakes', icon: AlertTriangle },
+              { id: 'formulas', label: 'Formula Book', icon: BookOpen },
             ] as const
           ).map((tabItem) => {
             const Icon = tabItem.icon;
-            const active = subTab === tabItem.id;
+            const active =
+              subTab === tabItem.id ||
+              (tabItem.id === 'flashcards' && subTab === 'sticky');
             return (
               <button
                 key={tabItem.id}
@@ -735,515 +909,483 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       )}
 
       {/* =================================================================
-          1. STICKY NOTES VIEW matching Image 1 (Left Chapter/Page Sidebar + 3-Col Grid)
+          1. FLASHCARDS & STICKY NOTES (Merged per Phase 3 item 7)
          ================================================================= */}
-      {subTab === 'sticky' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1">
-          {/* Left Chapter & Page Navigation Sidebar matching Image 1 */}
-          <aside className="lg:col-span-3 lm-card-editorial p-4 space-y-4 no-print">
-            <div className="flex items-center justify-between gap-2 pb-3 border-b border-soft">
-              <div className="flex items-center gap-2 min-w-0">
-                <FileText className="w-4 h-4 text-brand shrink-0" />
-                <span className="text-xs font-semibold text-ink truncate">
-                  {activeDocument.title}
+      {(subTab === 'flashcards' || subTab === 'sticky') && (
+        <div className="space-y-8 flex-1">
+          {/* Interactive Flip-Card Deck */}
+          <div className="space-y-5 max-w-2xl mx-auto w-full">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs font-semibold">
+                <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Know it: {knowItCount}
+                </span>
+                <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                  Review again: {reviewAgainCount}
                 </span>
               </div>
-            </div>
 
-            {/* Page Switcher `< 2 / 4 >` */}
-            <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-canvas border border-line text-xs font-medium text-ink">
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedPageFilter(Math.max(1, currentPageNum - 1))
-                }
-                className="p-1 rounded hover:bg-brand-soft text-muted hover:text-ink cursor-pointer"
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedPageFilter('all')}
-                className="tabular-nums font-medium cursor-pointer"
-                title="Click to show all pages"
-              >
-                {selectedPageFilter === 'all'
-                  ? `1–${totalPagesCount} / ${totalPagesCount}`
-                  : `${currentPageNum} / ${totalPagesCount}`}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedPageFilter(Math.min(totalPagesCount, currentPageNum + 1))
-                }
-                className="p-1 rounded hover:bg-brand-soft text-muted hover:text-ink cursor-pointer"
-                aria-label="Next page"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Chapter / Section List */}
-            <div className="space-y-1">
-              {canonicalTopicsList.map((topic, idx) => {
-                const isSelected =
-                  selectedPageFilter === 'all'
-                    ? idx === 1
-                    : selectedPageFilter === topic.page;
-                return (
-                  <button
-                    key={topic.id}
-                    type="button"
-                    onClick={() =>
-                      setSelectedPageFilter(
-                        selectedPageFilter === topic.page ? 'all' : topic.page
-                      )
-                    }
-                    className={`w-full text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-start gap-2 cursor-pointer ${
-                      isSelected
-                        ? 'bg-brand-soft text-brand font-semibold border-l-2 border-brand'
-                        : 'text-muted hover:bg-canvas hover:text-ink'
-                    }`}
-                  >
-                    <span className="tabular-nums opacity-80">{topic.code}</span>
-                    <span className="leading-snug">{topic.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </aside>
-
-          {/* Right 9 Columns: Sticky Notes Action Bar + 3-Column Kalam Sticky Grid */}
-          <div className="lg:col-span-9 space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-2 no-print">
-              <span className="text-xs font-medium text-muted">
-                <strong className="text-ink">{stickyNotes.length} notes</strong> from{' '}
-                {activeDocument.title.replace(/\.pdf$/i, '')}
-              </span>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleAddBlankNote}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
+                  onClick={() => {
+                    setFlashcardFilter((prev) =>
+                      prev === 'all' ? 'review_again' : 'all'
+                    );
+                    setCurrentCardIdx(0);
+                    setIsCardFlipped(false);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border cursor-pointer ${
+                    flashcardFilter === 'review_again'
+                      ? 'bg-amber-100 border-amber-300 text-amber-900'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
                 >
-                  <Plus className="w-3.5 h-3.5 text-muted" />
-                  <span>Add Note</span>
+                  {flashcardFilter === 'review_again'
+                    ? `Showing Review Again (${reviewAgainCount})`
+                    : 'Filter: Review Again'}
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
+                  onClick={handleShuffleFlashcards}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
                 >
-                  <Printer className="w-3.5 h-3.5 text-muted" />
-                  <span>Print</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={isLoadingNotes}
-                  onClick={() => void handleGenerateStickyAndFlashcards(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg lm-btn-accent text-xs font-semibold cursor-pointer disabled:opacity-60"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingNotes ? 'animate-spin' : ''}`} />
-                  <span>Regenerate</span>
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>Shuffle</span>
                 </button>
               </div>
             </div>
 
             {isLoadingNotes ? (
-              <div className="py-16 text-center space-y-3">
+              <div className="py-12 text-center space-y-3">
                 <Loader2 className="w-7 h-7 animate-spin text-brand mx-auto" />
-                <p className="text-sm font-medium text-ink">
-                  Distilling concise sticky notes from {activeDocument.title}...
+                <p className="text-sm font-medium text-slate-700">
+                  Preparing active-recall flashcards and sticky notes...
                 </p>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 print-sheet">
-                {stickyNotes.map((note, idx) => {
-                  const colorClass =
-                    note.color === 'pink'
-                      ? 'lm-sticky-pink'
-                      : note.color === 'blue'
-                      ? 'lm-sticky-blue'
-                      : note.color === 'green'
-                      ? 'lm-sticky-green'
-                      : 'lm-sticky-yellow';
-                  const isEditing = editingNoteId === note.id;
-                  const showVennIllustration =
-                    idx === 5 || note.title.toLowerCase().includes('venn');
-
-                  return (
-                    <div
-                      key={note.id}
-                      data-testid="sticky-note-card"
-                      className={`rounded-xl border p-5 transition-transform hover:-translate-y-0.5 flex flex-col justify-between min-h-[215px] ${colorClass}`}
-                    >
-                      {isEditing ? (
-                        <div className="space-y-2">
-                          <input
-                            type="text"
-                            value={editTitle}
-                            onChange={(e) => setEditTitle(e.target.value)}
-                            placeholder="Short title"
-                            className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-sm font-bold text-ink"
-                          />
-                          <textarea
-                            rows={3}
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            placeholder="10-30 words concise note"
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-black/15 text-sm text-ink"
-                          />
-                          <input
-                            type="text"
-                            value={editFormula}
-                            onChange={(e) => setEditFormula(e.target.value)}
-                            placeholder="Optional formula (e.g. P(A|B) = P(A∩B)/P(B))"
-                            className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-xs text-ink"
-                          />
-                          <div className="flex justify-end gap-1.5 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => setEditingNoteId(null)}
-                              className="px-2.5 py-1 rounded-md bg-white/70 text-xs font-semibold text-muted cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveEditNote(note.id)}
-                              className="px-2.5 py-1 rounded-md lm-btn-accent text-xs font-semibold cursor-pointer"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="space-y-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <h3 className="lm-sticky-font text-xl font-bold leading-snug text-ink">
-                                {note.title}
-                              </h3>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onNavigateToCitation(note.sourcePage, note.content)
-                                }
-                                className="px-2 py-0.5 rounded bg-black/5 hover:bg-black/10 text-[11px] font-medium text-muted shrink-0 cursor-pointer"
-                                title="Jump to source in material"
-                              >
-                                {note.sourceLabel}
-                              </button>
-                            </div>
-
-                            <p className="lm-sticky-font text-[16px] leading-relaxed text-[#1F2937]">
-                              {note.content}
-                            </p>
-
-                            {showVennIllustration && (
-                              <div className="pt-1 flex justify-center">
-                                <svg viewBox="0 0 150 75" className="w-36 h-16">
-                                  <circle
-                                    cx="58"
-                                    cy="38"
-                                    r="25"
-                                    fill="rgba(59, 130, 246, 0.14)"
-                                    stroke="#3B82F6"
-                                    strokeWidth="1.4"
-                                  />
-                                  <circle
-                                    cx="92"
-                                    cy="38"
-                                    r="25"
-                                    fill="rgba(234, 179, 8, 0.22)"
-                                    stroke="#CA8A04"
-                                    strokeWidth="1.4"
-                                  />
-                                  <text x="42" y="42" fontSize="11" fill="#1E3A8A" fontWeight="bold">
-                                    A
-                                  </text>
-                                  <text x="102" y="42" fontSize="11" fill="#854D0E" fontWeight="bold">
-                                    B
-                                  </text>
-                                  <text x="67" y="41" fontSize="9" fill="#0F172A" fontWeight="bold">
-                                    A∩B
-                                  </text>
-                                </svg>
-                              </div>
-                            )}
-
-                            {note.formula && (
-                              <div className="px-3 py-1.5 rounded-lg bg-white/60 border border-black/10 text-sm font-serif-editorial italic text-ink">
-                                {note.formula}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="pt-3 mt-2 border-t border-black/5 flex items-center justify-between gap-1 no-print">
-                            <span className="text-[11px] text-muted">{note.sourceLabel}</span>
-
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleStartEditNote(note)}
-                                aria-label={`Edit sticky note ${note.title}`}
-                                title="Edit Sticky Note"
-                                className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void handleCopyNote(note)}
-                                aria-label={`Copy sticky note ${note.title}`}
-                                title="Copy Note"
-                                className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
-                              >
-                                {copiedNoteId === note.id ? (
-                                  <Check className="w-3.5 h-3.5 text-success" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteNote(note.id)}
-                                aria-label={`Delete sticky note ${note.title}`}
-                                title="Delete Note"
-                                className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
+            ) : !activeFlashcard ? (
+              <div className="p-8 rounded-2xl bg-canvas border border-slate-200 text-center space-y-3">
+                <CheckCircle2 className="w-8 h-8 text-success mx-auto" />
+                <h3 className="text-base font-bold text-ink">
+                  No cards in &ldquo;Review again&rdquo;
+                </h3>
+                <p className="text-xs text-muted">
+                  All flashcards are marked as known or unreviewed.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFlashcardFilter('all')}
+                  className="px-4 py-2 rounded-full bg-brand text-white text-xs font-semibold cursor-pointer"
+                >
+                  Show All Flashcards ({flashcards.length})
+                </button>
               </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* =================================================================
-          2. FLASHCARDS VIEW (Flip on Click/Keyboard, Know It / Review Again)
-         ================================================================= */}
-      {subTab === 'flashcards' && (
-        <div className="space-y-6 flex-1 flex flex-col justify-between max-w-2xl mx-auto w-full">
-          {/* Top Progress & Filter Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs font-semibold">
-              <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Know it: {knowItCount}
-              </span>
-              <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                Review again: {reviewAgainCount}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setFlashcardFilter((prev) =>
-                    prev === 'all' ? 'review_again' : 'all'
-                  );
-                  setCurrentCardIdx(0);
-                  setIsCardFlipped(false);
-                }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border cursor-pointer ${
-                  flashcardFilter === 'review_again'
-                    ? 'bg-amber-100 border-amber-300 text-amber-900'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                {flashcardFilter === 'review_again'
-                  ? `Showing Review Again (${reviewAgainCount})`
-                  : 'Filter: Review Again'}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleShuffleFlashcards}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
-              >
-                <Shuffle className="w-3.5 h-3.5" />
-                <span>Shuffle</span>
-              </button>
-            </div>
-          </div>
-
-          {isLoadingNotes ? (
-            <div className="py-16 text-center space-y-3">
-              <Loader2 className="w-7 h-7 animate-spin text-brand mx-auto" />
-              <p className="text-sm font-medium text-slate-700">
-                Preparing active-recall flashcards...
-              </p>
-            </div>
-          ) : !activeFlashcard ? (
-            <div className="p-8 rounded-2xl bg-canvas border border-slate-200 text-center space-y-3">
-              <CheckCircle2 className="w-8 h-8 text-success mx-auto" />
-              <h3 className="text-base font-bold text-ink">
-                No cards in &ldquo;Review again&rdquo;
-              </h3>
-              <p className="text-xs text-muted">
-                All flashcards are marked as known or unreviewed.
-              </p>
-              <button
-                type="button"
-                onClick={() => setFlashcardFilter('all')}
-                className="px-4 py-2 rounded-full bg-brand text-white text-xs font-semibold cursor-pointer"
-              >
-                Show All Flashcards ({flashcards.length})
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* Interactive Flip Card */}
-              <div
-                role="button"
-                tabIndex={0}
-                data-testid="flashcard-interactive"
-                aria-label={
-                  isCardFlipped
-                    ? `Flashcard Answer: ${activeFlashcard.backAnswer}. Click or press Space to flip.`
-                    : `Flashcard Question: ${activeFlashcard.frontQuestion}. Click or press Space to flip.`
-                }
-                onClick={() => setIsCardFlipped((f) => !f)}
-                onKeyDown={(e) => {
-                  if (e.key === ' ' || e.key === 'Enter') {
-                    e.preventDefault();
-                    setIsCardFlipped((f) => !f);
+            ) : (
+              <>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  data-testid="flashcard-interactive"
+                  aria-label={
+                    isCardFlipped
+                      ? `Flashcard Answer: ${activeFlashcard.backAnswer}. Click or press Space to flip.`
+                      : `Flashcard Question: ${activeFlashcard.frontQuestion}. Click or press Space to flip.`
                   }
-                }}
-                className={`relative rounded-3xl border-2 p-7 sm:p-9 min-h-[250px] flex flex-col justify-between transition-all cursor-pointer select-none shadow-sm ${
-                  isCardFlipped
-                    ? 'bg-success-soft border-success/50'
-                    : 'bg-brand-soft border-brand/40 hover:border-brand'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[11px] ${
-                      isCardFlipped
-                        ? 'bg-success text-white'
-                        : 'bg-brand text-white'
-                    }`}
-                  >
-                    {isCardFlipped ? 'Back · Explanation' : 'Front · Question'}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-500 font-medium">
-                      {activeFlashcard.topic}
+                  onClick={() => setIsCardFlipped((f) => !f)}
+                  onKeyDown={(e) => {
+                    if (e.key === ' ' || e.key === 'Enter') {
+                      e.preventDefault();
+                      setIsCardFlipped((f) => !f);
+                    }
+                  }}
+                  className={`relative rounded-3xl border-2 p-7 sm:p-9 min-h-[240px] flex flex-col justify-between transition-all cursor-pointer select-none shadow-sm ${
+                    isCardFlipped
+                      ? 'bg-success-soft border-success/50'
+                      : 'bg-brand-soft border-brand/40 hover:border-brand'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[11px] ${
+                        isCardFlipped
+                          ? 'bg-success text-white'
+                          : 'bg-brand text-white'
+                      }`}
+                    >
+                      {isCardFlipped ? 'Back · Explanation' : 'Front · Question'}
                     </span>
-                    {activeFlashcard.intervalDays !== undefined && (
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold text-[11px]">
-                        SM-2: {activeFlashcard.intervalDays}d interval
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-500 font-medium">
+                        {activeFlashcard.topic}
                       </span>
-                    )}
+                      {activeFlashcard.intervalDays !== undefined && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold text-[11px]">
+                          SM-2: {activeFlashcard.intervalDays}d interval
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNavigateToCitation(
+                            activeFlashcard.sourcePage,
+                            activeFlashcard.backAnswer
+                          );
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-brand font-semibold hover:underline cursor-pointer"
+                      >
+                        {activeFlashcard.sourceLabel}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="my-6 text-center px-2">
+                    <MathText
+                      text={
+                        isCardFlipped
+                          ? activeFlashcard.backAnswer
+                          : activeFlashcard.frontQuestion
+                      }
+                      className="text-lg sm:text-xl font-semibold text-ink leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-muted">
+                    <span className="tabular-nums font-semibold">
+                      Card {currentCardIdx + 1} of {visibleFlashcards.length}
+                    </span>
+                    <span className="inline-flex items-center gap-1 font-medium text-brand">
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>Click or press Space to flip</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Self-Check & Navigation Controls */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <button
+                    type="button"
+                    disabled={currentCardIdx === 0}
+                    onClick={() => {
+                      setCurrentCardIdx((i) => Math.max(0, i - 1));
+                      setIsCardFlipped(false);
+                    }}
+                    className="inline-flex items-center gap-1 px-4 py-2 rounded-full border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span>Previous</span>
+                  </button>
+
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onNavigateToCitation(
-                          activeFlashcard.sourcePage,
-                          activeFlashcard.backAnswer
-                        );
-                      }}
-                      className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-brand font-semibold hover:underline cursor-pointer"
+                      onClick={() => handleMarkFlashcard('review_again')}
+                      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                        activeFlashcard.status === 'review_again'
+                          ? 'bg-warning text-ink'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200'
+                      }`}
                     >
-                      {activeFlashcard.sourceLabel}
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Review again</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleMarkFlashcard('know_it')}
+                      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                        activeFlashcard.status === 'know_it'
+                          ? 'bg-success text-white'
+                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Know it</span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={currentCardIdx >= visibleFlashcards.length - 1}
+                    onClick={() => {
+                      setCurrentCardIdx((i) =>
+                        Math.min(visibleFlashcards.length - 1, i + 1)
+                      );
+                      setIsCardFlipped(false);
+                    }}
+                    className="inline-flex items-center gap-1 px-4 py-2 rounded-full border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Sticky Notes Board (Merged below Flashcards) */}
+          <div className="pt-6 border-t border-line">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Chapter & Page Navigation Sidebar */}
+              <aside className="lg:col-span-3 lm-card-editorial p-4 space-y-4 no-print">
+                <div className="flex items-center justify-between gap-2 pb-3 border-b border-soft">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <StickyNote className="w-4 h-4 text-brand shrink-0" />
+                    <span className="text-xs font-semibold text-ink truncate">
+                      Sticky Notes · {activeDocument.title}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Page Switcher */}
+                <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-canvas border border-line text-xs font-medium text-ink">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedPageFilter(Math.max(1, currentPageNum - 1))
+                    }
+                    className="p-1 rounded hover:bg-brand-soft text-muted hover:text-ink cursor-pointer"
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPageFilter('all')}
+                    className="tabular-nums font-medium cursor-pointer"
+                    title="Click to show all pages"
+                  >
+                    {selectedPageFilter === 'all'
+                      ? `1–${totalPagesCount} / ${totalPagesCount}`
+                      : `${currentPageNum} / ${totalPagesCount}`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedPageFilter(Math.min(totalPagesCount, currentPageNum + 1))
+                    }
+                    className="p-1 rounded hover:bg-brand-soft text-muted hover:text-ink cursor-pointer"
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Chapter / Section List */}
+                <div className="space-y-1">
+                  {canonicalTopicsList.map((topic, idx) => {
+                    const isSelected =
+                      selectedPageFilter === 'all'
+                        ? idx === 0
+                        : selectedPageFilter === topic.page;
+                    return (
+                      <button
+                        key={topic.id}
+                        type="button"
+                        onClick={() =>
+                          setSelectedPageFilter(
+                            selectedPageFilter === topic.page ? 'all' : topic.page
+                          )
+                        }
+                        className={`w-full text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-start gap-2 cursor-pointer ${
+                          isSelected
+                            ? 'bg-brand-soft text-brand font-semibold border-l-2 border-brand'
+                            : 'text-muted hover:bg-canvas hover:text-ink'
+                        }`}
+                      >
+                        <span className="tabular-nums opacity-80">{topic.code}</span>
+                        <span className="leading-snug">{topic.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              {/* Right 9 Columns: Sticky Notes Grid */}
+              <div className="lg:col-span-9 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-2 no-print">
+                  <span className="text-xs font-medium text-muted">
+                    <strong className="text-ink">{stickyNotes.length} sticky notes</strong>{' '}
+                    from {activeDocument.title.replace(/\.pdf$/i, '')}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAddBlankNote}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-muted" />
+                      <span>Add Note</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-muted" />
+                      <span>Print</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoadingNotes}
+                      onClick={() => void handleGenerateStickyAndFlashcards(true)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg lm-btn-accent text-xs font-semibold cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingNotes ? 'animate-spin' : ''}`} />
+                      <span>Regenerate</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="my-6 text-center px-2">
-                  <p className="text-lg sm:text-xl font-semibold text-ink leading-relaxed">
-                    {isCardFlipped
-                      ? activeFlashcard.backAnswer
-                      : activeFlashcard.frontQuestion}
-                  </p>
-                </div>
+                {!isLoadingNotes && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 print-sheet">
+                    {stickyNotes.map((note) => {
+                      const colorClass =
+                        note.color === 'pink'
+                          ? 'lm-sticky-pink'
+                          : note.color === 'blue'
+                          ? 'lm-sticky-blue'
+                          : note.color === 'green'
+                          ? 'lm-sticky-green'
+                          : 'lm-sticky-yellow';
+                      const isEditing = editingNoteId === note.id;
 
-                <div className="flex items-center justify-between text-xs text-muted">
-                  <span className="tabular-nums font-semibold">
-                    Card {currentCardIdx + 1} of {visibleFlashcards.length}
-                  </span>
-                  <span className="inline-flex items-center gap-1 font-medium text-brand">
-                    <RotateCw className="w-3.5 h-3.5" />
-                    <span>Click or press Space to flip</span>
-                  </span>
-                </div>
+                      return (
+                        <div
+                          key={note.id}
+                          data-testid="sticky-note-card"
+                          className={`rounded-xl border p-5 transition-transform hover:-translate-y-0.5 flex flex-col justify-between min-h-[215px] ${colorClass}`}
+                        >
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <input
+                                type="text"
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                                placeholder="Short title"
+                                className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-sm font-bold text-ink"
+                              />
+                              <textarea
+                                rows={3}
+                                value={editContent}
+                                onChange={(e) => setEditContent(e.target.value)}
+                                placeholder="10-30 words concise note"
+                                className="w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-black/15 text-sm text-ink"
+                              />
+                              <input
+                                type="text"
+                                value={editFormula}
+                                onChange={(e) => setEditFormula(e.target.value)}
+                                placeholder="Optional formula"
+                                className="w-full px-2.5 py-1 rounded-lg bg-white/80 border border-black/15 text-xs text-ink"
+                              />
+                              <div className="flex justify-end gap-1.5 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingNoteId(null)}
+                                  className="px-2.5 py-1 rounded-md bg-white/70 text-xs font-semibold text-muted cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveEditNote(note.id)}
+                                  className="px-2.5 py-1 rounded-md lm-btn-accent text-xs font-semibold cursor-pointer"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="space-y-2.5">
+                                <div className="flex items-start justify-between gap-2">
+                                  <h3 className="lm-sticky-font text-xl font-bold leading-snug text-ink">
+                                    {note.title}
+                                  </h3>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      onNavigateToCitation(note.sourcePage, note.content)
+                                    }
+                                    className="px-2 py-0.5 rounded bg-black/5 hover:bg-black/10 text-[11px] font-medium text-muted shrink-0 cursor-pointer"
+                                    title="Jump to source in material"
+                                  >
+                                    {note.sourceLabel}
+                                  </button>
+                                </div>
+
+                                <p className="lm-sticky-font text-[16px] leading-relaxed text-[#1F2937]">
+                                  {note.content}
+                                </p>
+
+                                {note.formula && (
+                                  <div className="px-3 py-1.5 rounded-lg bg-white/60 border border-black/10 text-sm font-serif-editorial italic text-ink">
+                                    <MathText text={note.formula} />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="pt-3 mt-2 border-t border-black/5 flex items-center justify-between gap-1 no-print">
+                                <button
+                                  type="button"
+                                  onClick={() => handlePromoteStickyToFlashcard(note)}
+                                  className="text-[11px] font-semibold text-brand hover:underline cursor-pointer"
+                                  title="Add this sticky note to your flashcard deck"
+                                >
+                                  + Add to cards
+                                </button>
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditNote(note)}
+                                    aria-label={`Edit sticky note ${note.title}`}
+                                    title="Edit Sticky Note"
+                                    className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCopyNote(note)}
+                                    aria-label={`Copy sticky note ${note.title}`}
+                                    title="Copy Note"
+                                    className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
+                                  >
+                                    {copiedNoteId === note.id ? (
+                                      <Check className="w-3.5 h-3.5 text-success" />
+                                    ) : (
+                                      <Copy className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteNote(note.id)}
+                                    aria-label={`Delete sticky note ${note.title}`}
+                                    title="Delete Note"
+                                    className="p-1.5 rounded-lg hover:bg-black/10 text-muted hover:text-ink transition-colors cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-
-              {/* Self-Check & Navigation Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={currentCardIdx === 0}
-                  onClick={() => {
-                    setCurrentCardIdx((i) => Math.max(0, i - 1));
-                    setIsCardFlipped(false);
-                  }}
-                  className="inline-flex items-center gap-1 px-4 py-2 rounded-full border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  <span>Previous</span>
-                </button>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleMarkFlashcard('review_again')}
-                    className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                      activeFlashcard.status === 'review_again'
-                        ? 'bg-warning text-ink'
-                        : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200'
-                    }`}
-                  >
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Review again</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleMarkFlashcard('know_it')}
-                    className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                      activeFlashcard.status === 'know_it'
-                        ? 'bg-success text-white'
-                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Know it</span>
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={currentCardIdx >= visibleFlashcards.length - 1}
-                  onClick={() => {
-                    setCurrentCardIdx((i) =>
-                      Math.min(visibleFlashcards.length - 1, i + 1)
-                    );
-                    setIsCardFlipped(false);
-                  }}
-                  className="inline-flex items-center gap-1 px-4 py-2 rounded-full border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
-                >
-                  <span>Next</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </>
-          )}
+            </div>
+          </div>
         </div>
       )}
 
       {/* =================================================================
-          3. INTERACTIVE MIND MAP VIEW (SVG Radial Layout + Node Inspector)
+          2. INTERACTIVE MIND MAP VIEW
          ================================================================= */}
       {subTab === 'mindmap' && (
         <div className="space-y-4 flex-1 flex flex-col">
@@ -1312,7 +1454,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-              {/* Interactive SVG Canvas */}
               <div className="xl:col-span-8 rounded-2xl bg-canvas border border-slate-200/90 overflow-hidden relative min-h-[420px] flex items-center justify-center">
                 {(() => {
                   const width = 980;
@@ -1376,7 +1517,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                         transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
                         style={{ transformOrigin: 'center' }}
                       >
-                        {/* Edges */}
                         {mindMap.edges.map((edge, eIdx) => {
                           const p1 = posMap.get(edge.from);
                           const p2 = posMap.get(edge.to);
@@ -1397,7 +1537,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                           );
                         })}
 
-                        {/* Nodes */}
                         {mindMap.nodes.map((node) => {
                           const pos = posMap.get(node.id);
                           if (!pos) return null;
@@ -1449,7 +1588,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 })()}
               </div>
 
-              {/* Selected Node Explanation Inspector */}
               <div className="xl:col-span-4 rounded-2xl bg-white border border-slate-200/90 p-5 space-y-3.5 shadow-2xs">
                 {selectedNode ? (
                   <>
@@ -1511,7 +1649,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       )}
 
       {/* =================================================================
-          4. ONE-PAGE REVISION SHEET (Print-Optimized A4 Summary)
+          3. SUMMARY SHEET (One-Page Revision Sheet)
          ================================================================= */}
       {subTab === 'onepage' && (
         <div className="space-y-4 flex-1">
@@ -1562,7 +1700,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             <div className="py-16 text-center space-y-3">
               <Loader2 className="w-7 h-7 animate-spin text-danger mx-auto" />
               <p className="text-sm font-medium text-slate-700">
-                Compiling one-page revision sheet for {activeDocument.title}...
+                Compiling summary sheet for {activeDocument.title}...
               </p>
             </div>
           ) : (
@@ -1570,11 +1708,10 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               data-testid="one-page-revision-sheet"
               className="print-sheet bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-8 space-y-6 shadow-xs"
             >
-              {/* Sheet Header */}
               <div className="border-b border-slate-200 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <span className="text-[11px] font-bold uppercase tracking-wider text-brand">
-                    LearnMate One-Page Revision Sheet
+                    LearnMate Summary Sheet
                   </span>
                   <h3 className="text-xl font-bold text-ink mt-0.5">
                     {onePageRevision.chapterTitle}
@@ -1585,9 +1722,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 </div>
               </div>
 
-              {/* 2-Column Essential Concepts & Formulas */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Essential Concepts */}
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-ink border-l-4 border-brand pl-2.5">
                     Essential Concepts
@@ -1620,10 +1755,9 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                   </div>
                 </div>
 
-                {/* Key Formulas & Definitions */}
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-ink border-l-4 border-success pl-2.5">
-                    Important Formulas & Definitions
+                    Important Formulas &amp; Definitions
                   </h4>
                   <div className="space-y-2.5">
                     {onePageRevision.formulasAndDefinitions.map((f, idx) => (
@@ -1639,16 +1773,15 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             {f.sourceLabel}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-700 lm-math-expr leading-relaxed">
-                          {f.formulaOrDef}
-                        </p>
+                        <div className="text-xs text-slate-700 leading-relaxed">
+                          <MathText text={f.formulaOrDef} />
+                        </div>
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
 
-              {/* Key Relationships & Common Mistakes */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-2.5">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-ink border-l-4 border-warning pl-2.5">
@@ -1677,7 +1810,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 </div>
               </div>
 
-              {/* Short Self-Check Recall Questions */}
               <div className="space-y-2.5 pt-2 border-t border-slate-100">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-ink">
                   Quick Recall Questions
@@ -1704,7 +1836,297 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       )}
 
       {/* =================================================================
-          5. PREVIEW REVISION NOTES MODAL BEFORE PDF DOWNLOAD
+          4. MISTAKES & REVISION PLAN (Moved from Study into Revise per Phase 3 item 6 & 7)
+         ================================================================= */}
+      {subTab === 'mistakes' && (
+        <div className="space-y-6 flex-1">
+          <div className="rounded-2xl bg-white border border-line p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-danger">
+                  Mistake DNA &amp; Recovery Plan
+                </span>
+                <h2 className="text-lg font-bold text-ink mt-0.5">
+                  Root-cause analysis of wrong answers
+                </h2>
+                <p className="text-xs text-muted mt-0.5">
+                  Identifies why a question went wrong (formula confusion, sign error, concept gap) and builds a targeted JEE revision plan.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {latestWrongCount > 0 && (
+                  <button
+                    type="button"
+                    disabled={isAnalyzingMistakes}
+                    onClick={() => void handleAnalyzeLatestQuizMistakes()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                  >
+                    {isAnalyzingMistakes ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Diagnosing mistakes...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Diagnose Latest Attempt ({latestWrongCount} wrong)</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                {onOpenPractice && (
+                  <button
+                    type="button"
+                    onClick={onOpenPractice}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-canvas hover:bg-slate-100 text-xs font-semibold text-ink cursor-pointer"
+                  >
+                    <Target className="w-3.5 h-3.5 text-brand" />
+                    <span>Open Practice Quiz</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {mistakeInsights.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-canvas border border-line text-center space-y-2.5">
+                <CheckCircle2 className="w-8 h-8 text-success mx-auto" />
+                <h3 className="text-sm font-bold text-ink">
+                  No mistake diagnostics recorded for this material yet
+                </h3>
+                <p className="text-xs text-muted max-w-md mx-auto">
+                  Take a Practice quiz on {activeDocument.title}. Any wrong answers can be diagnosed here into root causes and a prioritized revision plan.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {mistakeInsights.map((item, idx) => (
+                  <div
+                    key={item.questionId || idx}
+                    className="p-4 rounded-2xl bg-canvas border border-line space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-red-50 text-danger border border-red-200 text-[11px] font-bold">
+                        {item.topic}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToCitation(item.sourcePage, item.sourceQuote || item.topic)}
+                        className="text-xs font-semibold text-brand hover:underline cursor-pointer"
+                      >
+                        Page {item.sourcePage}
+                      </button>
+                    </div>
+                    <MathText text={item.question} className="text-xs font-semibold text-ink" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <div className="p-2 rounded-lg bg-red-50/70 border border-red-200 text-red-900">
+                        <span className="font-semibold block">Your Answer:</span>
+                        <MathText text={item.selectedOption} variant="inline" />
+                      </div>
+                      <div className="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-900">
+                        <span className="font-semibold block">Correct Answer:</span>
+                        <MathText text={item.correctOption} variant="inline" />
+                      </div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-950">
+                      <strong>Why it happened:</strong>{' '}
+                      <MathText text={item.likelyMisconception} variant="inline" />
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 text-xs text-emerald-950">
+                      <strong>Concept to review:</strong>{' '}
+                      <MathText text={item.coreConceptFix} variant="inline" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Personalized Revision Plan Section */}
+          {revisionPlan.length > 0 && (
+            <div className="rounded-2xl bg-white border border-line p-5 sm:p-6 shadow-xs space-y-4">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-brand" />
+                <h3 className="text-base font-bold text-ink">
+                  Prioritized Revision Plan ({revisionPlan.filter((t) => !t.completed).length} remaining)
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {revisionPlan.map((task) => (
+                  <div
+                    key={task.id}
+                    className={`p-4 rounded-xl border space-y-2 transition-all ${
+                      task.completed
+                        ? 'bg-slate-50 border-slate-200 opacity-75'
+                        : 'bg-canvas border-line'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={task.completed}
+                          onChange={() => handleToggleRevisionTask(task.id)}
+                          className="mt-0.5 w-4 h-4 rounded text-success focus:ring-success"
+                        />
+                        <span
+                          className={`text-xs font-bold ${
+                            task.completed ? 'line-through text-muted' : 'text-ink'
+                          }`}
+                        >
+                          {task.topic}
+                        </span>
+                      </label>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase shrink-0 ${
+                          task.priority === 'high'
+                            ? 'bg-red-100 text-red-800'
+                            : task.priority === 'medium'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}
+                      >
+                        {task.priority}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed pl-6">
+                      {task.recommendedAction}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 pl-6">
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToCitation(task.sourcePage, task.conceptSummary)}
+                        className="px-2 py-0.5 rounded bg-white border border-line text-[11px] font-semibold text-brand hover:bg-brand-soft cursor-pointer"
+                      >
+                        Review Page {task.sourcePage}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =================================================================
+          5. FORMULA BOOK (Phase 3 entry point + chapter formulas, Phase 4 full syllabus browser)
+         ================================================================= */}
+      {subTab === 'formulas' && (
+        <div className="space-y-5 flex-1">
+          <div className="rounded-2xl bg-white border border-line p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-brand">
+                  JEE Formula Book · {subjectLabel}
+                </span>
+                <h2 className="text-lg font-bold text-ink mt-0.5">
+                  Formulas &amp; Identities in {activeDocument.title.replace(/\.pdf$/i, '')}
+                </h2>
+                <p className="text-xs text-muted mt-0.5">
+                  Every formula extracted from your current study material. Add any formula directly to your spaced-repetition flashcards.
+                </p>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="search"
+                  value={formulaSearch}
+                  onChange={(e) => setFormulaSearch(e.target.value)}
+                  placeholder="Search formula or term..."
+                  className="w-full pl-8 pr-3 py-2 rounded-xl bg-canvas border border-line text-xs text-ink focus:outline-none focus:border-brand"
+                />
+              </div>
+            </div>
+
+            {isLoadingMindMap && formulaBookItems.length === 0 ? (
+              <div className="py-12 text-center space-y-2">
+                <Loader2 className="w-6 h-6 animate-spin text-brand mx-auto" />
+                <p className="text-xs text-muted">
+                  Extracting formulas and definitions from {activeDocument.title}...
+                </p>
+              </div>
+            ) : formulaBookItems.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-canvas border border-line text-center space-y-2">
+                <BookOpen className="w-7 h-7 text-muted mx-auto" />
+                <p className="text-sm font-semibold text-ink">
+                  No matching formulas found
+                </p>
+                <p className="text-xs text-muted">
+                  Try clearing your search or click Regenerate on the Summary sheet to extract chapter formulas.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {formulaBookItems.map((item, idx) => (
+                  <div
+                    key={`${item.term}-${idx}`}
+                    className="p-4 rounded-2xl bg-canvas border border-line flex flex-col justify-between gap-3"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-ink">
+                          {item.term}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onNavigateToCitation(item.sourcePage, item.term)
+                          }
+                          className="text-[11px] font-semibold text-brand hover:underline cursor-pointer"
+                        >
+                          {item.sourceLabel}
+                        </button>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white border border-line text-sm text-ink">
+                        <MathText text={item.formulaOrDef} />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleAddFormulaToFlashcard(item)}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline cursor-pointer"
+                      >
+                        {addedFormulaTerm === item.term ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-success" />
+                            <span className="text-success">Added to Flashcards</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add to flashcards</span>
+                          </>
+                        )}
+                      </button>
+
+                      {onAskTutorAboutConcept && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onAskTutorAboutConcept(
+                              `Explain the formula for "${item.term}" (${item.formulaOrDef}), state the units and conditions where it holds, and show one JEE Main example.`
+                            )
+                          }
+                          className="text-xs font-medium text-muted hover:text-ink cursor-pointer"
+                        >
+                          Ask Tutor →
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================
+          PREVIEW REVISION NOTES MODAL BEFORE PDF DOWNLOAD
          ================================================================= */}
       {previewModalOpen && onePageRevision && (
         <div
@@ -1718,7 +2140,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           }}
         >
           <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-4xl w-full max-h-[88vh] flex flex-col overflow-hidden">
-            {/* Modal Header */}
             <div className="px-6 py-4 bg-canvas border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-brand">
@@ -1758,7 +2179,6 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               </div>
             </div>
 
-            {/* Simulated Multi-Page A4 Preview Body */}
             <div className="p-6 overflow-y-auto space-y-6 bg-slate-100/70 flex-1">
               <div className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-8 shadow-sm max-w-3xl mx-auto space-y-5">
                 <div className="p-4 rounded-xl bg-brand-soft/70 border border-brand/30">

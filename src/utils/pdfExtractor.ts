@@ -13,6 +13,11 @@ export interface ExtractedPdfResult {
   pdfDataUrl: string;
 }
 
+export type PdfPageOcrHandler = (
+  imageDataUrl: string,
+  pageNumber: number
+) => Promise<{ title?: string; content?: string } | null>;
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -22,11 +27,32 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+/** Renders a PDF.js page object onto an offscreen canvas to produce an image data URL for OCR. */
+async function renderPageToImageDataUrl(page: pdfjsLib.PDFPageProxy): Promise<string> {
+  if (typeof document === 'undefined') return '';
+  try {
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.min(1600, Math.round(viewport.width));
+    canvas.height = Math.min(2200, Math.round(viewport.height));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Extracts page-indexed text from an uploaded PDF file using PDF.js.
- * Validates file type, size (<= 20 MB), and page count (<= 20 pages).
+ * If a page contains sparse/scanned text (handwritten notes), it automatically
+ * renders the page to canvas and runs the provided ocrHandler.
  */
-export async function extractPagesFromPdf(file: File): Promise<ExtractedPdfResult> {
+export async function extractPagesFromPdf(
+  file: File,
+  ocrHandler?: PdfPageOcrHandler
+): Promise<ExtractedPdfResult> {
   if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
     throw new Error('Please select a valid PDF file (.pdf).');
   }
@@ -72,29 +98,49 @@ export async function extractPagesFromPdf(file: File): Promise<ExtractedPdfResul
     }
     if (currentLine.trim()) lines.push(currentLine.trim());
 
-    const pageText = lines.join('\n').trim();
-    const firstNonEmpty = lines.find((l) => l.length > 3) || `Page ${pageNum}`;
-    const cleanTitle =
+    let pageText = lines.join('\n').trim();
+    let firstNonEmpty = lines.find((l) => l.length > 3) || `Page ${pageNum}`;
+    let cleanTitle =
       firstNonEmpty.length <= 68 ? firstNonEmpty : `${firstNonEmpty.slice(0, 65)}...`;
+
+    // If digital text is missing or sparse (< 40 characters), this is likely a scanned/handwritten page
+    if (pageText.length < 40 && ocrHandler) {
+      const pageImage = await renderPageToImageDataUrl(page);
+      if (pageImage) {
+        try {
+          const ocrResult = await ocrHandler(pageImage, pageNum);
+          if (ocrResult?.content && ocrResult.content.trim()) {
+            pageText = ocrResult.content.trim();
+            if (ocrResult.title && ocrResult.title.trim()) {
+              cleanTitle = ocrResult.title.trim().slice(0, 68);
+            }
+          }
+        } catch (err) {
+          console.warn(`[PDF OCR] Page ${pageNum} OCR transcription failed:`, err);
+        }
+      }
+    }
 
     pages.push({
       pageNumber: pageNum,
       title: cleanTitle,
-      content: pageText || `[Page ${pageNum} contains visual diagrams or non-selectable text]`,
+      content: pageText || `[Page ${pageNum} contains visual diagrams or handwritten notes]`,
     });
   }
 
   const totalExtractedChars = pages.reduce((sum, p) => sum + p.content.length, 0);
   if (totalExtractedChars < 20) {
     throw new Error(
-      'Could not extract readable text from this PDF. It may be a scanned image without OCR.'
+      'Could not extract readable text from this PDF. Please ensure handwritten pages are clearly photographed or legible.'
     );
   }
 
-  // Keep base64 PDF data URL if reasonably sized (< 4MB) for canvas page rendering
+  // Always keep base64 PDF data URL so the authentic PDF can be rendered in PDF View & Annotate Studio
   let pdfDataUrl = '';
-  if (file.size <= 4 * 1024 * 1024) {
+  try {
     pdfDataUrl = await readFileAsDataUrl(file);
+  } catch {
+    // Non-fatal if data URL conversion fails
   }
 
   return {

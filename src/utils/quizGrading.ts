@@ -582,6 +582,94 @@ export function splitTextIntoPages(rawText: string): StudyPage[] {
 }
 
 /**
+ * Parses a pasted YouTube transcript into timestamped StudyPage segments (up to 10 segments).
+ * Supports standard YouTube transcript formats where timestamps like "0:00", "02:15", "[12:04]"
+ * or "1:04:20" appear on their own line or at the beginning of a line.
+ */
+export function parseTranscriptIntoTimestampedPages(rawTranscript: string): StudyPage[] {
+  const cleaned = (rawTranscript || '').replace(/\r\n/g, '\n').trim();
+  if (!cleaned) return [];
+
+  const parseClockToSeconds = (clock: string): number => {
+    const parts = clock.split(':').map((n) => Number(n));
+    if (parts.some((n) => Number.isNaN(n))) return 0;
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return 0;
+  };
+
+  const lines = cleaned.split('\n').map((l) => l.trim()).filter(Boolean);
+  const entries: Array<{ seconds: number; text: string }> = [];
+  let pendingSeconds: number | null = null;
+
+  for (const line of lines) {
+    const standaloneMatch = line.match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?$/);
+    if (standaloneMatch) {
+      pendingSeconds = parseClockToSeconds(standaloneMatch[1]);
+      continue;
+    }
+
+    const prefixMatch = line.match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*[-–—:]?\s*(.+)$/);
+    if (prefixMatch) {
+      entries.push({
+        seconds: parseClockToSeconds(prefixMatch[1]),
+        text: prefixMatch[2].trim(),
+      });
+      pendingSeconds = null;
+      continue;
+    }
+
+    entries.push({
+      seconds: pendingSeconds ?? (entries.length > 0 ? entries[entries.length - 1].seconds : 0),
+      text: line,
+    });
+    pendingSeconds = null;
+  }
+
+  if (entries.length === 0) return [];
+
+  const maxSegments = 10;
+  const targetChars = Math.max(500, Math.ceil(cleaned.length / maxSegments));
+  const pages: StudyPage[] = [];
+  let chunkTexts: string[] = [];
+  let chunkStartSeconds = entries[0].seconds;
+  let chunkLen = 0;
+
+  const flushChunk = () => {
+    if (chunkTexts.length === 0) return;
+    const content = chunkTexts.join(' ');
+    const label = formatTimestamp(chunkStartSeconds);
+    const snippet = chunkTexts[0].replace(/^[#*\-\s]+/, '').trim();
+    const shortHeading =
+      snippet.length > 48 ? `${snippet.slice(0, 45).trim()}…` : snippet || `Segment ${pages.length + 1}`;
+    pages.push({
+      pageNumber: pages.length + 1,
+      title: `${label} — ${shortHeading}`,
+      content,
+      timestampSeconds: chunkStartSeconds,
+      timestampLabel: label,
+    });
+    chunkTexts = [];
+    chunkLen = 0;
+  };
+
+  for (const entry of entries) {
+    if (chunkTexts.length === 0) {
+      chunkStartSeconds = entry.seconds;
+    }
+    chunkTexts.push(entry.text);
+    chunkLen += entry.text.length + 1;
+
+    if (chunkLen >= targetChars && pages.length < maxSegments - 1) {
+      flushChunk();
+    }
+  }
+  flushChunk();
+
+  return pages;
+}
+
+/**
  * Deterministic quiz grading against validated question answer keys.
  */
 export function gradeQuizSubmission(params: {

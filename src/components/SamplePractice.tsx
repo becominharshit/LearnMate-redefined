@@ -81,7 +81,7 @@ export const SampleQuestionCard: React.FC<SampleQuestionCardProps> = ({
             isMcq ? 'bg-brand-soft text-brand' : 'bg-success-soft text-success'
           }`}
         >
-          {isMcq ? 'MCQ · +4 / −1' : 'Numerical · +4 / 0'}
+          {isMcq ? 'MCQ · +4 / −1' : 'Numerical · +4 / −1'}
         </span>
         <span className="px-2.5 py-1 rounded-full bg-soft text-muted text-[10px] font-semibold">
           {question.topic}
@@ -208,7 +208,7 @@ export const SampleQuestionCard: React.FC<SampleQuestionCardProps> = ({
       {!checked && !isMcq && (
         <p className="flex items-center gap-1.5 text-[11px] text-muted">
           <PenLine className="w-3.5 h-3.5" />
-          JEE Main numerical answers have no negative marking.
+          In JEE Main a wrong numerical answer also costs 1 mark, so skip it if you are guessing.
         </p>
       )}
     </article>

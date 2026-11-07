@@ -16,6 +16,7 @@ import {
 import type {
   StudyDocument,
   TutorMessage,
+  VoiceTurn,
   QuizQuestion,
   QuizAttempt,
   MistakeInsight,
@@ -114,6 +115,9 @@ export interface IStudyStorageRepository {
   getPdfAnnotations(documentId: string): PdfAnnotationItem[];
   savePdfAnnotations(documentId: string, annotations: PdfAnnotationItem[]): void;
 
+  getVoiceTutorMessages(documentId: string): VoiceTurn[];
+  saveVoiceTutorMessages(documentId: string, messages: VoiceTurn[]): void;
+
   getStudentProfile(): StudentAcademicProfile;
   saveStudentProfile(profile: StudentAcademicProfile): StudentAcademicProfile;
 
@@ -141,6 +145,7 @@ const KEYS = {
   DOCUMENTS: 'learnmate_documents_v1',
   ACTIVE_DOC_ID: 'learnmate_active_doc_id_v1',
   TUTOR_PREFIX: 'learnmate_tutor_v1_',
+  VOICE_TUTOR_PREFIX: 'learnmate_voice_tutor_v1_',
   QUIZ_CACHE_PREFIX: 'learnmate_quiz_cache_v1_',
   ATTEMPTS: 'learnmate_quiz_attempts_v1',
   MISTAKES_PREFIX: 'learnmate_mistakes_v1_',
@@ -858,6 +863,14 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     void this.persistStudyStateToCloud(documentId);
   }
 
+  getVoiceTutorMessages(documentId: string): VoiceTurn[] {
+    return safeReadJson<VoiceTurn[]>(`${KEYS.VOICE_TUTOR_PREFIX}${documentId}`, []);
+  }
+
+  saveVoiceTutorMessages(documentId: string, messages: VoiceTurn[]): void {
+    safeWriteJson(`${KEYS.VOICE_TUTOR_PREFIX}${documentId}`, messages);
+  }
+
   getCachedQuiz(documentId: string, mode: string): QuizQuestion[] | null {
     return safeReadJson<QuizQuestion[] | null>(
       `${KEYS.QUIZ_CACHE_PREFIX}${documentId}_${mode}`,
@@ -973,6 +986,21 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   saveThemeMode(mode: ThemeMode): void {
     try {
       localStorage.setItem(KEYS.THEME, mode);
+      if (typeof document !== 'undefined') {
+        const isDark =
+          mode === 'dark' ||
+          (mode === 'system' &&
+            typeof window !== 'undefined' &&
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+        if (isDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      }
+      this.notifyListeners();
     } catch {
       // ignore
     }
@@ -1442,5 +1470,6 @@ where C = Consumption, I = Investment, G = Government Purchases, and (X − M) =
 ];
 
 export const studyStorage: IStudyStorageRepository = new HybridCloudStudyRepository();
+export const storageService: IStudyStorageRepository = studyStorage;
 
 

@@ -175,7 +175,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/25 backdrop-blur-[2px] p-4 lm-no-print"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/80 backdrop-blur-xs p-4 lm-no-print"
             onMouseDown={(e) => {
               if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
                 setOpen(false);
@@ -188,10 +188,10 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
               role="dialog"
               aria-modal="true"
               aria-label="Study Tools"
-              className="w-full max-w-[490px] rounded-2xl bg-[#FFFFFF] border border-line shadow-2xl overflow-hidden"
+              className="w-full max-w-[520px] rounded-2xl bg-white dark:bg-[#121A2E] text-ink border border-line shadow-2xl overflow-hidden"
             >
             {/* Editorial Modal Header matching Image 5 */}
-            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+            <div className="flex items-center justify-between px-5 sm:px-6 pt-5 pb-3">
               <h2 className="font-serif-editorial text-2xl font-bold text-ink tracking-tight">
                 Study Tools
               </h2>
@@ -206,7 +206,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
             </div>
 
             {/* 5 Editorial Tabs with Terracotta Active Indicator */}
-            <div className="flex items-center gap-1 px-6 border-b border-line overflow-x-auto">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 px-4 sm:px-6 border-b border-line">
               {[
                 { id: 'calc', label: 'Calculator', icon: Calculator },
                 { id: 'units', label: 'Units', icon: Ruler },
@@ -221,7 +221,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                     key={tab.id}
                     type="button"
                     onClick={() => setActiveTool(tab.id as ToolTab)}
-                    className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
                       active
                         ? 'border-brand text-brand font-semibold'
                         : 'border-transparent text-muted hover:text-ink'
@@ -305,7 +305,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                             handleRunCalc(item.expr);
                             setShowHistory(false);
                           }}
-                          className="w-full flex items-center justify-between px-2 py-1 rounded hover:bg-white text-left cursor-pointer"
+                          className="w-full flex items-center justify-between px-2 py-1 rounded hover:bg-soft text-left cursor-pointer"
                         >
                           <span className="font-mono text-muted">{item.expr}</span>
                           <span className="font-semibold text-ink">= {item.res}</span>
@@ -338,7 +338,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                             setCalcExpr((prev) => `${prev}${fn.token}`);
                           }
                         }}
-                        className="py-2 rounded-lg border border-line bg-canvas hover:bg-[#F3F1EC] text-xs font-serif-editorial font-medium text-ink flex items-center justify-center cursor-pointer"
+                        className="py-2 rounded-lg border border-line bg-canvas hover:bg-soft text-xs font-serif-editorial font-medium text-ink flex items-center justify-center cursor-pointer"
                       >
                         {fn.token === 'BACKSPACE' ? <Delete className="w-3.5 h-3.5" /> : fn.label}
                       </button>
@@ -378,9 +378,9 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                         }}
                         className={`py-2.5 rounded-lg text-base font-serif-editorial font-medium transition-colors cursor-pointer border ${
                           btn.variant === 'clear'
-                            ? 'bg-brand-soft border-[#F3D1C6] text-brand font-semibold hover:bg-[#F7DDD3]'
+                            ? 'bg-brand-soft border-brand/30 text-brand font-semibold hover:bg-brand-soft/80'
                             : btn.variant === 'op'
-                            ? 'bg-soft border-line text-ink hover:bg-[#ECE9E2]'
+                            ? 'bg-soft border-line text-ink hover:bg-line/40 dark:hover:bg-[#1A2440]'
                             : 'bg-canvas border-line text-ink hover:bg-soft'
                         }`}
                       >
@@ -406,7 +406,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                     <button
                       type="button"
                       onClick={() => setCalcExpr((prev) => `${prev}+`)}
-                      className="py-2.5 rounded-lg border border-line bg-soft hover:bg-[#ECE9E2] text-base font-serif-editorial font-medium text-ink cursor-pointer"
+                      className="py-2.5 rounded-lg border border-line bg-soft hover:bg-line/40 dark:hover:bg-[#1A2440] text-base font-serif-editorial font-medium text-ink cursor-pointer"
                     >
                       +
                     </button>
@@ -464,7 +464,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                       <select
                         value={fromUnit}
                         onChange={(e) => setFromUnit(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-line bg-white font-semibold text-sm text-ink"
+                        className="w-full px-3 py-2 rounded-lg border border-line bg-canvas font-semibold text-sm text-ink"
                       >
                         {(UNIT_GROUPS[unitCategory] || []).map((u) => (
                           <option key={u} value={u}>
@@ -480,7 +480,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                       <select
                         value={toUnit}
                         onChange={(e) => setToUnit(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-line bg-white font-semibold text-sm text-ink"
+                        className="w-full px-3 py-2 rounded-lg border border-line bg-canvas font-semibold text-sm text-ink"
                       >
                         {(UNIT_GROUPS[unitCategory] || []).map((u) => (
                           <option key={u} value={u}>
@@ -611,11 +611,12 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                     viewBox="0 0 320 160"
                     className="w-full h-40 rounded-xl bg-canvas border border-line"
                   >
-                    <line x1="0" y1="80" x2="320" y2="80" stroke="#D6D3CD" strokeWidth="1" />
-                    <line x1="160" y1="0" x2="160" y2="160" stroke="#D6D3CD" strokeWidth="1" />
+                    <line x1="0" y1="80" x2="320" y2="80" stroke="currentColor" className="text-line" strokeWidth="1" />
+                    <line x1="160" y1="0" x2="160" y2="160" stroke="currentColor" className="text-line" strokeWidth="1" />
                     <polyline
                       fill="none"
-                      stroke="#4F46E5"
+                      stroke="currentColor"
+                      className="text-brand"
                       strokeWidth="2.5"
                       points={Array.from({ length: 81 })
                         .map((_, i) => {

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* Dark styles follow the app's theme class, not the operating-system setting. */
-@custom-variant dark (&:where(.dark, .dark *));
+/* Dark styles follow the app's theme class or data-theme attribute. */
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
 
 /* Design tokens: one palette for the whole app (utilities such as text-brand, bg-canvas). */
 @theme {
@@ -71,17 +71,49 @@
     color-scheme: light;
   }
 
-  html[data-theme="dark"] {
+  html[data-theme="dark"],
+  html.dark,
+  :root[data-theme="dark"],
+  :root.dark {
     --bg-primary: #0B1020;
     --bg-card: #121A2E;
     --bg-subtle: #1A2440;
     --border-subtle: #26324F;
-    --text-primary: #F1F5F9;
+    --text-primary: #F8FAFC;
     --text-secondary: #94A3B8;
     --accent: #818CF8;
     --accent-hover: #6366F1;
     --accent-light: rgba(99, 102, 241, 0.16);
     color-scheme: dark;
+
+    /* Semantic tokens for Night Owl mode */
+    --color-ink: #F8FAFC;
+    --color-body: #CBD5E1;
+    --color-muted: #94A3B8;
+    --color-line: #26324F;
+    --color-line-strong: #334155;
+    --color-canvas: #0B1020;
+    --color-soft: #1A2440;
+    --color-brand-soft: rgba(99, 102, 241, 0.18);
+    --color-brand: #818CF8;
+    --color-brand-strong: #A5B4FC;
+    --color-brand-200: rgba(129, 140, 248, 0.35);
+
+    /* JEE Subject soft colors for dark background */
+    --color-physics: #60A5FA;
+    --color-physics-soft: rgba(37, 99, 235, 0.2);
+    --color-chemistry: #34D399;
+    --color-chemistry-soft: rgba(5, 150, 105, 0.2);
+    --color-maths: #FB923C;
+    --color-maths-soft: rgba(234, 88, 12, 0.2);
+
+    /* Status alert soft colors */
+    --color-success: #34D399;
+    --color-success-soft: rgba(4, 120, 87, 0.2);
+    --color-danger: #F87171;
+    --color-danger-soft: rgba(220, 38, 38, 0.2);
+    --color-warning: #FBBF24;
+    --color-warning-soft: rgba(217, 119, 6, 0.2);
   }
 
   body {
@@ -128,7 +160,7 @@
   font-family: var(--font-sans);
   font-weight: 400;
   line-height: 1.55;
-  color: #475569;
+  color: var(--text-secondary);
 }
 
 .lm-kicker {
@@ -260,7 +292,7 @@
   .lm-prose blockquote {
     border-left: 3px solid var(--accent);
     padding-left: 0.9em;
-    color: #475569;
+    color: var(--text-secondary);
   }
 
   .lm-prose table {
@@ -378,6 +410,88 @@
   background-color: #DCFCE7;
   border-color: #BBF7D0;
   color: #1F2937 !important;
+}
+
+/* Sticky notes in Night Owl Mode */
+html[data-theme="dark"] .lm-sticky-yellow, html.dark .lm-sticky-yellow {
+  background-color: #2D2710;
+  border-color: #594D18;
+  color: #FEF08A !important;
+}
+html[data-theme="dark"] .lm-sticky-pink, html.dark .lm-sticky-pink {
+  background-color: #2D1423;
+  border-color: #591F44;
+  color: #FBCFE8 !important;
+}
+html[data-theme="dark"] .lm-sticky-blue, html.dark .lm-sticky-blue {
+  background-color: #121F38;
+  border-color: #1D3564;
+  color: #BFDBFE !important;
+}
+html[data-theme="dark"] .lm-sticky-green, html.dark .lm-sticky-green {
+  background-color: #10271E;
+  border-color: #1B4B38;
+  color: #BBF7D0 !important;
+}
+
+/* KaTeX mathematical formulas & chemistry in Night Owl Mode */
+html[data-theme="dark"] .katex,
+html.dark .katex {
+  color: var(--text-primary);
+}
+
+/* Surface & Border Harmonization in Night Owl Mode (retains PDF canvas original colors) */
+html[data-theme="dark"] .bg-white:not(canvas):not(.keep-white),
+html.dark .bg-white:not(canvas):not(.keep-white) {
+  background-color: var(--bg-card);
+}
+
+html[data-theme="dark"] .bg-slate-50:not(canvas):not(.keep-white),
+html.dark .bg-slate-50:not(canvas):not(.keep-white),
+html[data-theme="dark"] .bg-slate-100:not(canvas):not(.keep-white),
+html.dark .bg-slate-100:not(canvas):not(.keep-white) {
+  background-color: var(--bg-subtle);
+}
+
+html[data-theme="dark"] .border-line,
+html.dark .border-line,
+html[data-theme="dark"] .border-slate-200,
+html.dark .border-slate-200,
+html[data-theme="dark"] .border-slate-200\/90,
+html.dark .border-slate-200\/90,
+html[data-theme="dark"] .border-slate-200\/80,
+html.dark .border-slate-200\/80,
+html[data-theme="dark"] .border-slate-100,
+html.dark .border-slate-100 {
+  border-color: var(--border-subtle);
+}
+
+html[data-theme="dark"] .text-slate-900,
+html.dark .text-slate-900 {
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] .text-slate-800,
+html.dark .text-slate-800,
+html[data-theme="dark"] .text-slate-700,
+html.dark .text-slate-700 {
+  color: var(--color-body);
+}
+
+html[data-theme="dark"] .text-slate-600,
+html.dark .text-slate-600,
+html[data-theme="dark"] .text-slate-500,
+html.dark .text-slate-500 {
+  color: var(--text-secondary);
+}
+
+html[data-theme="dark"] .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-50:hover,
+html[data-theme="dark"] .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-slate-100:hover,
+html[data-theme="dark"] .hover\:bg-canvas:hover,
+html.dark .hover\:bg-canvas:hover {
+  background-color: var(--color-soft);
 }
 
 /* Print stylesheet for notes, revision sheets and reports */

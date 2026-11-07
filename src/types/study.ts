@@ -82,6 +82,18 @@ export interface TutorMessage {
   modelUsed?: string;
 }
 
+export interface VoiceTurn {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  isStreaming?: boolean;
+  isFinal?: boolean;
+  interrupted?: boolean;
+  citations?: TutorCitation[];
+  timestamp: string;
+  modelUsed?: string;
+}
+
 export interface QuizQuestion {
   id: string;
   topic: string;

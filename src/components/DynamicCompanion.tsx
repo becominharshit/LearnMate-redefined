@@ -3,11 +3,7 @@ import { motion } from 'motion/react';
 import {
   Play,
   Pause,
-  RotateCcw,
-  Sparkles,
   Timer,
-  Send,
-  Bot,
   ChevronDown,
   Headphones,
   Music,
@@ -20,20 +16,77 @@ import type { StudyDocument, StudyTimerState } from '../types/study';
 import { studyStorage } from '../services/storageService';
 import { computeTimerRemainingSeconds, formatTimestamp } from '../utils/quizGrading';
 import { aiStudyClient } from '../services/aiClient';
-import { LOFI_PRESETS, type LofiPresetOption } from './StudyTimerFocusBar';
-import { MathText } from './MathText';
 
-export type CompanionMode = 'idle' | 'pomodoro' | 'ai';
+export interface LofiPresetOption {
+  id: string;
+  name: string;
+  subtitle: string;
+  bpm: number;
+  notes: number[];
+  prompt: string;
+}
+
+export const LOFI_PRESETS: LofiPresetOption[] = [
+  {
+    id: 'rainy-night',
+    name: 'Rainy Library',
+    subtitle: 'Warm Rhodes chords & gentle rain',
+    bpm: 72,
+    notes: [261.63, 329.63, 392.0, 493.88],
+    prompt:
+      'Instrumental lo-fi hip hop for Rainy Library study, warm Rhodes chords, soft brushed snare, subtle vinyl texture, relaxed 72 BPM, mellow bass, no vocals, no spoken words, smooth loopable study ambiance',
+  },
+  {
+    id: 'warm-vinyl',
+    name: 'Midnight Coding',
+    subtitle: 'Mellow synth-piano & deep sub pulse',
+    bpm: 76,
+    notes: [293.66, 349.23, 440.0, 523.25],
+    prompt:
+      'Instrumental lo-fi beats for Midnight Coding, warm electric piano chords, soft brushed snare, subtle vinyl texture, relaxed 76 BPM, mellow bass, no vocals, no spoken words, smooth loopable study ambiance',
+  },
+  {
+    id: 'soft-piano',
+    name: 'Cozy Café',
+    subtitle: 'Minimal acoustic felt piano harmony',
+    bpm: 70,
+    notes: [220.0, 261.63, 329.63, 392.0],
+    prompt:
+      'Instrumental Cozy Cafe lo-fi study music, soft acoustic felt piano chords, gentle brush percussion, relaxed 70 BPM, mellow bass, no vocals, no spoken words, smooth loopable study ambiance',
+  },
+  {
+    id: 'deep-focus',
+    name: 'Deep Focus',
+    subtitle: 'Binaural alpha-wave harmonic pad',
+    bpm: 64,
+    notes: [220.0, 226.0, 329.63, 440.0],
+    prompt:
+      'Instrumental Deep Focus ambient study pad, warm harmonic drones, relaxed 64 BPM, mellow bass, no vocals, no spoken words, smooth loopable study ambiance',
+  },
+  {
+    id: 'cozy-library',
+    name: 'Sunset Revision',
+    subtitle: 'Golden-hour major 7th progressions',
+    bpm: 74,
+    notes: [174.61, 220.0, 261.63, 329.63],
+    prompt:
+      'Instrumental Sunset Revision lo-fi study beats, warm Rhodes chords, soft brushed snare, relaxed 74 BPM, mellow bass, no vocals, no spoken words, smooth loopable study ambiance',
+  },
+  {
+    id: 'ambient-jazz',
+    name: 'Sleepy Vinyl',
+    subtitle: 'Tape-saturated 9th chords & vinyl warmth',
+    bpm: 66,
+    notes: [196.0, 246.94, 293.66, 349.23],
+    prompt:
+      'Instrumental Sleepy Vinyl lo-fi study music, warm Rhodes chords, subtle vinyl crackle texture, relaxed 66 BPM, mellow bass, no vocals, no spoken words, smooth loopable study ambiance',
+  },
+];
+
+export type CompanionMode = 'idle' | 'pomodoro';
 
 interface DynamicCompanionProps {
   activeDoc?: StudyDocument | null;
-}
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-  time: string;
 }
 
 function playTimerChime() {
@@ -66,9 +119,6 @@ function playTimerChime() {
 export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc }) => {
   const [mode, setMode] = useState<CompanionMode>('idle');
 
-  // ==========================================
-  // 1. RICH POMODORO TIMER STATE & PERSISTENCE
-  // ==========================================
   const [timerState, setTimerState] = useState<StudyTimerState>(() => {
     const saved = studyStorage.getStudyTimerState();
     const accurateRemaining = computeTimerRemainingSeconds({
@@ -86,7 +136,9 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
     };
   });
 
+  // Off by default per Phase 3 item 10
   const [lofiPlaying, setLofiPlaying] = useState(false);
+  const [showLofiOptions, setShowLofiOptions] = useState(false);
   const [activePresetId, setActivePresetId] = useState(
     timerState.activeLofiPresetId || 'rainy-night'
   );
@@ -100,7 +152,6 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
   const chordIntervalRef = useRef<number | null>(null);
   const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Fullscreen sync
   useEffect(() => {
     const onFsChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement));
@@ -121,7 +172,7 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
     }
   };
 
-  // Web Audio Instrumental Synthesizer
+  // Web Audio Instrumental Synthesizer (off by default unless enabled)
   useEffect(() => {
     const stopAudio = () => {
       if (chordIntervalRef.current) {
@@ -345,93 +396,6 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
     studyStorage.saveStudyTimerState(nextState);
   };
 
-  // ==========================================
-  // 2. AI COMPANION CHAT STATE
-  // ==========================================
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      text: activeDoc
-        ? `Studying "${activeDoc.title}"? Ask me for quick explanations, formulas, or key concepts!`
-        : 'Hi! I am your real-time AI Study Companion. Ask me any concept, formula, or study question.',
-      time: 'Now',
-    },
-  ]);
-  const [inputValue, setInputValue] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    if (mode === 'ai') {
-      scrollToBottom();
-    }
-  }, [messages, mode]);
-
-  const handleSendMessage = async (textOverride?: string) => {
-    const text = (textOverride || inputValue).trim();
-    if (!text || isAiLoading) return;
-
-    const userMessage: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      text,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputValue('');
-    setIsAiLoading(true);
-
-    try {
-      const resp = await aiStudyClient.askTutor({
-        title: activeDoc?.title || 'General Concept',
-        pages: activeDoc?.pages || [],
-        question: text,
-        history: messages.slice(-4).map((m) => ({
-          role: m.role,
-          content: m.text,
-        })),
-        sourceControlMode: 'extended_knowledge',
-        studentContext: {
-          preferredLanguage: studyStorage.getStudentProfile().preferredLanguage,
-        },
-      });
-
-      const reply = resp?.answer || 'No answer was returned. Please try asking again.';
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          text: reply,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          text: `Sorry, I couldn't answer that right now. ${
-            err instanceof Error ? err.message : 'Please try again in a moment.'
-          }`,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  // ==========================================
-  // 3. OUTSIDE CLICK TO COLLAPSE
-  // ==========================================
   const islandRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -466,9 +430,7 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
           mode === 'idle' ? 'rounded-full' : 'rounded-3xl'
         }`}
       >
-        {/* ========================================================= */}
-        {/* IDLE MODE (Dynamic Island Pill with Live Controls)        */}
-        {/* ========================================================= */}
+        {/* IDLE MODE (Compact Pomodoro Timer Pill) */}
         {mode === 'idle' && (
           <motion.div
             key="island-idle"
@@ -477,7 +439,6 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
             exit={{ opacity: 0, scale: 0.95 }}
             className="flex items-center gap-2 px-3 py-1.5 h-9"
           >
-            {/* Status Indicator */}
             <div className="flex items-center gap-1 pl-0.5">
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -490,18 +451,16 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
               />
             </div>
 
-            {/* Pomodoro Timer Trigger */}
             <button
               type="button"
               onClick={() => setMode('pomodoro')}
               className="flex items-center gap-1.5 px-2 py-0.5 rounded-full hover:bg-white/15 text-xs font-mono font-medium transition-colors cursor-pointer text-slate-100 hover:text-white"
-              title="Open Pomodoro & Focus Radio"
+              title="Open Focus Timer"
             >
               <Timer className="w-3.5 h-3.5 text-amber-400" />
               <span>{formatTimestamp(timerState.remainingSeconds)}</span>
             </button>
 
-            {/* Quick Play/Pause */}
             <button
               type="button"
               onClick={handleStartPause}
@@ -514,51 +473,23 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
                 <Play className="w-3 h-3 fill-current text-emerald-400" />
               )}
             </button>
-
-            {/* Quick Headphones Lo-Fi Trigger */}
-            <button
-              type="button"
-              onClick={() => setLofiPlaying((p) => !p)}
-              title={lofiPlaying ? 'Pause Focus Radio' : 'Play Focus Radio'}
-              className={`p-1 rounded-md transition-colors cursor-pointer ${
-                lofiPlaying
-                  ? 'bg-brand text-white shadow-xs'
-                  : 'hover:bg-white/15 text-slate-300 hover:text-white'
-              }`}
-            >
-              <Headphones className="w-3 h-3" />
-            </button>
-
-            {/* Divider */}
-            <div className="w-[1px] h-3.5 bg-white/20" />
-
-            {/* AI Companion Quick Trigger */}
-            <button
-              type="button"
-              onClick={() => setMode('ai')}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full hover:bg-white/15 text-xs font-medium transition-colors cursor-pointer text-slate-200 hover:text-white"
-              title="Open AI Study Companion"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-spin-slow" />
-              <span className="font-medium tracking-tight">AI Companion</span>
-            </button>
           </motion.div>
         )}
 
-        {/* ========================================================= */}
-        {/* POMODORO MODE (Full View matching StudyTimerFocusBar)     */}
-        {/* ========================================================= */}
+        {/* POMODORO MODE (Focus Timer + Optional Lo-Fi Music off by default) */}
         {mode === 'pomodoro' && (
           <motion.div
             key="island-pomodoro"
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
-            className="w-[360px] sm:w-[380px] max-w-[calc(100vw-24px)] p-4 flex flex-col gap-3 text-xs"
+            className="w-[340px] sm:w-[360px] max-w-[calc(100vw-24px)] p-4 flex flex-col gap-3 text-xs"
           >
-            {/* Header: Document Title + Reset + Focus Mode + Controls */}
             <div className="flex items-center justify-between border-b border-white/15 pb-2.5">
-              <span className="text-slate-200 font-medium truncate max-w-[170px]" title={activeDoc?.title || 'Study Session'}>
+              <span
+                className="text-slate-200 font-medium truncate max-w-[170px]"
+                title={activeDoc?.title || 'Study Session'}
+              >
                 {activeDoc?.title || 'Study Session'}
               </span>
               <div className="flex items-center gap-1.5">
@@ -574,29 +505,24 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
                   onClick={handleToggleFullscreen}
                   className="px-2 py-1 rounded-md bg-brand hover:bg-brand text-[11px] font-semibold text-white cursor-pointer transition-colors flex items-center gap-1"
                 >
-                  {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                  {isFullscreen ? (
+                    <Minimize2 className="w-3 h-3" />
+                  ) : (
+                    <Maximize2 className="w-3 h-3" />
+                  )}
                   <span>{isFullscreen ? 'Exit Focus' : 'Focus Mode'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('ai')}
-                  className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-indigo-300 transition-colors cursor-pointer ml-1"
-                  title="Switch to AI Companion"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setMode('idle')}
                   className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  title="Minimize to Island"
+                  title="Minimize Timer"
                 >
                   <ChevronDown className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {/* Timer Readout & Primary Controls */}
             <div className="flex items-center justify-between px-3 py-2 bg-white/[0.07] backdrop-blur-md rounded-2xl border border-white/10">
               <div className="flex items-center gap-2">
                 <span
@@ -648,190 +574,80 @@ export const DynamicCompanion: React.FC<DynamicCompanionProps> = ({ activeDoc })
               </div>
             </div>
 
-            {/* Lo-Fi Focus Radio (Deterministic Synth) */}
-            <div className="space-y-2 pt-1 border-t border-white/10">
+            {/* Optional Ambient Lo-Fi Music Toggle (Off by default) */}
+            <div className="pt-1 border-t border-white/10 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                  <Music className="w-3.5 h-3.5 text-warning" />
-                  <span>Focus Radio (Deterministic Synth)</span>
-                </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
-                  {activePreset.bpm} BPM
-                </span>
-              </div>
-
-              <p className="text-[10px] text-slate-400 leading-snug">
-                AI media generation requires configuration or paid model access. Playing warm Web Audio instrumental synth.
-              </p>
-
-              {/* 6 Soundscapes Grid */}
-              <div className="grid grid-cols-2 gap-1.5">
-                {LOFI_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => {
-                      setActivePresetId(preset.id);
-                      setLofiPlaying(true);
-                    }}
-                    className={`text-left px-2 py-1.5 rounded-lg text-[11px] transition-colors cursor-pointer ${
-                      activePresetId === preset.id && lofiPlaying
-                        ? 'bg-brand/30 border border-brand text-white font-semibold'
-                        : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-transparent'
-                    }`}
-                  >
-                    <div className="truncate">{preset.name}</div>
-                  </button>
-                ))}
-              </div>
-
-              {/* Volume Slider */}
-              <div className="flex items-center gap-2 pt-1">
-                <Volume2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <input
-                  type="range"
-                  min={0.05}
-                  max={0.95}
-                  step={0.05}
-                  value={lofiVolume}
-                  onChange={(e) => setLofiVolume(Number(e.target.value))}
-                  aria-label="Lo-Fi radio volume"
-                  className="w-full accent-brand cursor-pointer"
-                />
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {/* ========================================================= */}
-        {/* AI COMPANION MODE (Quick Student Tutor Chat)             */}
-        {/* ========================================================= */}
-        {mode === 'ai' && (
-          <motion.div
-            key="island-ai"
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            className="w-[370px] max-w-[94vw] p-4 flex flex-col gap-3"
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-              <div className="flex items-center gap-2">
-                <span className="p-1 rounded-lg bg-indigo-500/20 text-indigo-400">
-                  <Bot className="w-4 h-4" />
-                </span>
-                <div>
-                  <h4 className="text-xs font-bold tracking-tight text-white flex items-center gap-1.5">
-                    <span>AI Study Companion</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-500/30 text-indigo-300 font-normal">
-                      Claude & Gemini
-                    </span>
-                  </h4>
-                  <span className="text-[10px] text-slate-400 truncate max-w-[200px] block">
-                    {activeDoc ? activeDoc.title : 'Ready for any academic inquiry'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setMode('pomodoro')}
-                  className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-amber-300 transition-colors cursor-pointer"
-                  title="Switch to Pomodoro Timer"
+                  onClick={() => setShowLofiOptions((s) => !s)}
+                  className="font-semibold text-slate-200 flex items-center gap-1.5 cursor-pointer hover:text-white"
                 >
-                  <Timer className="w-3.5 h-3.5" />
+                  <Headphones className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Ambient Study Audio (Optional)</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMode('idle')}
-                  className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  title="Minimize to Island"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Messages Thread */}
-            <div className="max-h-52 min-h-24 overflow-y-auto space-y-2.5 pr-1 text-xs">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col ${
-                    msg.role === 'user' ? 'items-end' : 'items-start'
+                  onClick={() => {
+                    const next = !lofiPlaying;
+                    setLofiPlaying(next);
+                    if (next) setShowLofiOptions(true);
+                  }}
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold cursor-pointer transition-colors ${
+                    lofiPlaying
+                      ? 'bg-brand text-white'
+                      : 'bg-white/10 text-slate-300 hover:bg-white/15'
                   }`}
                 >
-                  <div
-                    className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-br-xs'
-                        : 'bg-white/10 text-slate-200 border border-white/5 rounded-bl-xs'
-                    }`}
-                  >
-                    {msg.role === 'assistant' ? (
-                      <MathText text={msg.text} className="lm-prose-compact" />
-                    ) : (
-                      msg.text
-                    )}
+                  {lofiPlaying ? 'Playing · Turn Off' : 'Off'}
+                </button>
+              </div>
+
+              {(showLofiOptions || lofiPlaying) && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <Music className="w-3 h-3 text-warning" />
+                      <span>{activePreset.name}</span>
+                    </span>
+                    <span>{activePreset.bpm} BPM</span>
                   </div>
-                  <span className="text-[9px] text-slate-500 mt-0.5 px-1">
-                    {msg.time}
-                  </span>
-                </div>
-              ))}
-              {isAiLoading && (
-                <div className="flex items-center gap-2 p-2 rounded-xl bg-white/5 text-slate-400 text-xs">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-                  <span>Synthesizing response...</span>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {LOFI_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setActivePresetId(preset.id);
+                          setLofiPlaying(true);
+                        }}
+                        className={`text-left px-2 py-1.5 rounded-lg text-[11px] transition-colors cursor-pointer ${
+                          activePresetId === preset.id && lofiPlaying
+                            ? 'bg-brand/30 border border-brand text-white font-semibold'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-transparent'
+                        }`}
+                      >
+                        <div className="truncate">{preset.name}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <Volume2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={0.95}
+                      step={0.05}
+                      value={lofiVolume}
+                      onChange={(e) => setLofiVolume(Number(e.target.value))}
+                      aria-label="Lo-Fi radio volume"
+                      className="w-full accent-brand cursor-pointer"
+                    />
+                  </div>
                 </div>
               )}
-              <div ref={messagesEndRef} />
             </div>
-
-            {/* Quick Suggestion Chips */}
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-              {[
-                'Key formula?',
-                'Explain simply',
-                'Quiz me',
-                'Study tip',
-              ].map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  onClick={() => handleSendMessage(chip)}
-                  disabled={isAiLoading}
-                  className="px-2 py-0.5 rounded-full bg-white/5 hover:bg-white/15 text-[10px] text-slate-300 hover:text-white transition-colors shrink-0 cursor-pointer border border-white/5"
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
-
-            {/* Input Form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="flex items-center gap-1.5 pt-1"
-            >
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Ask your companion anything..."
-                className="flex-1 bg-white/10 hover:bg-white/15 focus:bg-white/15 border border-white/10 focus:border-indigo-400/50 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-400 focus:outline-none transition-colors"
-              />
-              <button
-                type="submit"
-                disabled={isAiLoading || !inputValue.trim()}
-                className="p-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white transition-colors cursor-pointer shrink-0 shadow-sm"
-              >
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            </form>
           </motion.div>
         )}
       </motion.div>

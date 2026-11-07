@@ -12,6 +12,15 @@ import {
   upsertStreamingTranscriptChunk,
   finalizeActiveTranscriptTurn,
   type VoiceTranscriptEntry,
+  assembleStudentSpeechTranscript,
+  formatSpokenTextForTts,
+  extractSentencesFromStream,
+  isSpeakerEcho,
+  shouldAcceptTurnEvent,
+  shouldProcessSpeechRecognitionResult,
+  extractSpeechUnitsFromStream,
+  computeSilenceTimeoutMs,
+  canAcceptSessionCallback,
 } from './stabilityEngine';
 
 test('classifyGeminiError distinguishes transient 429, daily quota exhaustion, and auth errors', () => {
@@ -321,4 +330,304 @@ test('computeBackoffDelayMs respects Retry-After and caps at maxDelayMs', () => 
     randomFn: () => 0,
   });
   assert.equal(exp, 2000);
+});
+
+test('assembleStudentSpeechTranscript keeps finalized words stable and prevents duplicate text during provisional revisions', () => {
+  // Step 1: Student says provisional words
+  const step1 = assembleStudentSpeechTranscript({
+    existingCommitted: '',
+    interimChunk: 'What is',
+  });
+  assert.equal(step1.committed, '');
+  assert.equal(step1.displayParagraph, 'What is');
+
+  // Step 2: Speech recognition finalizes "What is Coulomb's"
+  const step2 = assembleStudentSpeechTranscript({
+    existingCommitted: step1.committed,
+    newFinalChunk: "What is Coulomb's",
+    interimChunk: 'law',
+  });
+  assert.equal(step2.committed, "What is Coulomb's");
+  assert.equal(step2.displayParagraph, "What is Coulomb's law");
+
+  // Step 3: Speech recognition revises interim to "law in Hindi"
+  const step3 = assembleStudentSpeechTranscript({
+    existingCommitted: step2.committed,
+    interimChunk: 'law in Hindi',
+  });
+  assert.equal(step3.committed, "What is Coulomb's");
+  assert.equal(step3.displayParagraph, "What is Coulomb's law in Hindi");
+
+  // Step 4: Overlapping final chunk with boundary overlap
+  const step4 = assembleStudentSpeechTranscript({
+    existingCommitted: step3.committed,
+    newFinalChunk: "Coulomb's law in Hindi",
+    interimChunk: '',
+  });
+  assert.equal(step4.committed, "What is Coulomb's law in Hindi");
+  assert.equal(step4.displayParagraph, "What is Coulomb's law in Hindi");
+
+  // Step 5: Duplicate final chunk does not replicate
+  const step5 = assembleStudentSpeechTranscript({
+    existingCommitted: step4.committed,
+    newFinalChunk: 'law in Hindi',
+    interimChunk: '',
+  });
+  assert.equal(step5.committed, "What is Coulomb's law in Hindi");
+  assert.equal(step5.displayParagraph, "What is Coulomb's law in Hindi");
+});
+
+test('formatSpokenTextForTts strips citations, markdown, and converts LaTeX for speech', () => {
+  const input = "On Page 2 [Page 2: Gauss's Law], the electric flux is $$\\Phi = \\oint E \\cdot dA$$. For a point charge, $$E = \\frac{kq}{r^2}$$. Check your notes!";
+  const cleaned = formatSpokenTextForTts(input);
+  assert.ok(!cleaned.includes('[Page 2:'));
+  assert.ok(!cleaned.includes('$$'));
+  assert.ok(!cleaned.includes('\\oint'));
+  assert.ok(cleaned.includes('the electric flux is'));
+  assert.ok(cleaned.includes('Check your notes!'));
+});
+
+test('extractSentencesFromStream extracts complete sentences and flushes remainder on finish', () => {
+  const buffer1 = "Newton's second law states that force equals rate of change of momentum. ";
+  const res1 = extractSentencesFromStream(buffer1, false);
+  assert.equal(res1.completeSentences.length, 1);
+  assert.equal(res1.completeSentences[0], "Newton's second law states that force equals rate of change of momentum.");
+  assert.equal(res1.remainder, '');
+
+  const buffer2 = "Mathematically, F equals m times a. Can you verify this with units";
+  const res2 = extractSentencesFromStream(buffer2, false);
+  assert.equal(res2.completeSentences.length, 1);
+  assert.equal(res2.completeSentences[0], "Mathematically, F equals m times a.");
+  assert.equal(res2.remainder, 'Can you verify this with units');
+
+  // When stream finishes, remainder is flushed
+  const res3 = extractSentencesFromStream(res2.remainder, true);
+  assert.equal(res3.completeSentences.length, 1);
+  assert.equal(res3.completeSentences[0], 'Can you verify this with units');
+  assert.equal(res3.remainder, '');
+});
+
+test('isSpeakerEcho detects tutor self-speech and allows distinct student questions', () => {
+  const tutorUtterances = [
+    'The acceleration is directly proportional to the applied force.',
+    'It acts in the direction of the net force.',
+  ];
+
+  // Self-echo should return true
+  const echo = isSpeakerEcho('directly proportional to the applied force', tutorUtterances);
+  assert.equal(echo, true);
+
+  // Unrelated student query should return false
+  const studentDoubt = isSpeakerEcho('What happens if the mass is zero?', tutorUtterances);
+  assert.equal(studentDoubt, false);
+});
+
+test('shouldAcceptTurnEvent guards against stale SSE events after interruption and handles consecutive interruptions', () => {
+  let activeTurnId = 1;
+  let isTurnActive = true;
+
+  // Normal chunk in turn 1
+  assert.equal(shouldAcceptTurnEvent(1, activeTurnId, isTurnActive), true);
+
+  // Turn 1 is interrupted by user barge-in
+  isTurnActive = false;
+  activeTurnId = 2; // increments for the new turn
+
+  // Late chunk arriving from aborted fetch of turn 1
+  assert.equal(shouldAcceptTurnEvent(1, activeTurnId, isTurnActive), false);
+
+  // Turn 2 starts streaming
+  isTurnActive = true;
+  assert.equal(shouldAcceptTurnEvent(2, activeTurnId, isTurnActive), true);
+
+  // Turn 2 is also interrupted (second consecutive interruption)
+  isTurnActive = false;
+  activeTurnId = 3;
+
+  // Late chunk from turn 2
+  assert.equal(shouldAcceptTurnEvent(2, activeTurnId, isTurnActive), false);
+
+  // Turn 3 starts and processes normally
+  isTurnActive = true;
+  assert.equal(shouldAcceptTurnEvent(3, activeTurnId, isTurnActive), true);
+});
+
+test('voice tutor interruption lifecycle preserves partial transcript and flags interrupted turns', () => {
+  let conversation: VoiceTranscriptEntry[] = [];
+
+  // Turn 1: User asks question
+  conversation.push({
+    id: 'user-1',
+    role: 'user',
+    text: 'What is the work-energy theorem?',
+    isFinal: true,
+  });
+
+  // Assistant begins streaming response
+  conversation.push({
+    id: 'tutor-1',
+    role: 'assistant',
+    text: 'The work-energy theorem states that the net work done equals',
+    isFinal: false,
+  });
+
+  // User barge-in while assistant is mid-stream
+  // The turn is finalized immediately with whatever was streamed so far and marked interrupted
+  conversation = finalizeActiveTranscriptTurn(conversation, 'assistant', true);
+
+  assert.equal(conversation.length, 2);
+  assert.equal(conversation[1].id, 'tutor-1');
+  assert.equal(
+    conversation[1].text,
+    'The work-energy theorem states that the net work done equals'
+  );
+  assert.equal(conversation[1].isFinal, true);
+  assert.equal(conversation[1].interrupted, true);
+
+  // Turn 2: Follow-up question during barge-in
+  conversation.push({
+    id: 'user-2',
+    role: 'user',
+    text: 'Wait, does it apply to non-conservative forces too?',
+    isFinal: true,
+  });
+
+  // Assistant answers follow-up
+  conversation.push({
+    id: 'tutor-2',
+    role: 'assistant',
+    text: 'Yes, it accounts for both conservative and non-conservative forces.',
+    isFinal: false,
+  });
+
+  // Second interruption while speaking
+  conversation = finalizeActiveTranscriptTurn(conversation, 'assistant', true);
+
+  assert.equal(conversation.length, 4);
+  assert.equal(conversation[3].interrupted, true);
+  assert.equal(conversation[3].isFinal, true);
+
+  // Reopening/reloading clears any lingering streaming state
+  const restored = conversation.map((t) => ({ ...t, isFinal: true }));
+  assert.equal(restored.every((t) => t.isFinal), true);
+  assert.equal(restored[1].interrupted, true);
+  assert.equal(restored[3].interrupted, true);
+});
+
+test('shouldProcessSpeechRecognitionResult rejects echo during playback and post-playback cooldown, and allows short queries', () => {
+  const baseTime = 10000;
+
+  // 1. Playback is actively speaking
+  const decisionActive = shouldProcessSpeechRecognitionResult({
+    isPlaybackActive: true,
+    playbackFinishedAt: 0,
+    now: baseTime,
+    cooldownMs: 600,
+    turnSequenceId: 1,
+    expectedTurnSequenceId: 1,
+  });
+  assert.equal(decisionActive.allowProcessing, false);
+  assert.equal(decisionActive.reason, 'playback_active');
+
+  // 2. Playback just ended 200ms ago (cooldown period of 600ms still active)
+  const decisionCooldown = shouldProcessSpeechRecognitionResult({
+    isPlaybackActive: false,
+    playbackFinishedAt: baseTime,
+    now: baseTime + 200,
+    cooldownMs: 600,
+    turnSequenceId: 1,
+    expectedTurnSequenceId: 1,
+  });
+  assert.equal(decisionCooldown.allowProcessing, false);
+  assert.equal(decisionCooldown.reason, 'in_cooldown');
+
+  // 3. Stale callback from an old turn sequence (e.g. after user tapped circle to interrupt)
+  const decisionStale = shouldProcessSpeechRecognitionResult({
+    isPlaybackActive: false,
+    playbackFinishedAt: 0,
+    now: baseTime + 800,
+    cooldownMs: 600,
+    turnSequenceId: 1,
+    expectedTurnSequenceId: 2, // expected has incremented
+  });
+  assert.equal(decisionStale.allowProcessing, false);
+  assert.equal(decisionStale.reason, 'stale_turn_sequence');
+
+  // 4. Clean listening state after cooldown: allows genuine speech, including short words like "Why?"
+  const decisionClean = shouldProcessSpeechRecognitionResult({
+    isPlaybackActive: false,
+    playbackFinishedAt: baseTime,
+    now: baseTime + 700, // 700ms > 600ms cooldown
+    cooldownMs: 600,
+    turnSequenceId: 2,
+    expectedTurnSequenceId: 2,
+  });
+  assert.equal(decisionClean.allowProcessing, true);
+  assert.equal(decisionClean.reason, 'allowed');
+
+  // Short follow-up "Why?" in clean state is assembled without error or word-loss
+  const assembledWhy = assembleStudentSpeechTranscript({
+    existingCommitted: '',
+    newFinalChunk: 'Why?',
+  });
+  assert.equal(assembledWhy.committed, 'Why?');
+  assert.equal(assembledWhy.displayParagraph, 'Why?');
+});
+
+test('extractSpeechUnitsFromStream extracts early clause units on isFirstUnit so speech starts in ~400ms', () => {
+  // Case 1: First unit with an early comma boundary
+  const buffer1 = 'In transition metals, electrons absorb visible light as they move between split d-orbitals. ';
+  const res1 = extractSpeechUnitsFromStream(buffer1, true, false);
+  assert.equal(res1.units.length, 1);
+  assert.equal(res1.units[0], 'In transition metals,');
+  assert.ok(res1.remainder.startsWith('electrons absorb'));
+
+  // Case 2: Subsequent unit extracts at full sentence boundary
+  const res2 = extractSpeechUnitsFromStream(res1.remainder, false, false);
+  assert.equal(res2.units.length, 1);
+  assert.equal(res2.units[0], 'electrons absorb visible light as they move between split d-orbitals.');
+  assert.equal(res2.remainder.trim(), '');
+
+  // Case 3: Stream finished with leftover text
+  const res3 = extractSpeechUnitsFromStream('The colour observed is complementary.', false, true);
+  assert.equal(res3.units.length, 1);
+  assert.equal(res3.units[0], 'The colour observed is complementary.');
+  assert.equal(res3.remainder, '');
+});
+
+test('computeSilenceTimeoutMs reduces dead latency on finished speech while preserving mid-phrase pauses', () => {
+  // Finished completed question: 750ms
+  const finalTimeout = computeSilenceTimeoutMs({ isFinal: true, wordCount: 8 });
+  assert.equal(finalTimeout, 750);
+
+  // Short follow-up question ("Why?"): 800ms
+  const shortTimeout = computeSilenceTimeoutMs({ isFinal: true, wordCount: 1 });
+  assert.equal(shortTimeout, 800);
+
+  // Mid-phrase pause where isFinal is false: 1100ms breathing room
+  const pauseTimeout = computeSilenceTimeoutMs({ isFinal: false, wordCount: 4 });
+  assert.equal(pauseTimeout, 1100);
+});
+
+test('canAcceptSessionCallback invalidates pending callbacks immediately upon End session or epoch change', () => {
+  let isSessionActive = true;
+  let currentEpoch = 1;
+
+  // Active session callback
+  assert.equal(canAcceptSessionCallback({ isSessionActive, currentEpoch, expectedEpoch: 1 }), true);
+
+  // User taps End session (isSessionActive becomes false, epoch increments)
+  isSessionActive = false;
+  currentEpoch = 2;
+
+  // Late callback arriving from network stream or delayed TTS utterance
+  assert.equal(canAcceptSessionCallback({ isSessionActive, currentEpoch: 1, expectedEpoch: currentEpoch }), false);
+  assert.equal(canAcceptSessionCallback({ isSessionActive, currentEpoch: 2, expectedEpoch: currentEpoch }), false);
+
+  // Reopening starts fresh session (epoch 3)
+  isSessionActive = true;
+  currentEpoch = 3;
+  assert.equal(canAcceptSessionCallback({ isSessionActive, currentEpoch: 3, expectedEpoch: 3 }), true);
+  // Stale callback from previous session (epoch 2) rejected
+  assert.equal(canAcceptSessionCallback({ isSessionActive, currentEpoch: 2, expectedEpoch: 3 }), false);
 });

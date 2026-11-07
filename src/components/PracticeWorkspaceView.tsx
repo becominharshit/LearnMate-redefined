@@ -27,6 +27,7 @@ import { classifyJeeSubject } from '../utils/jeeSubjects';
 import { QuizProctorOverlay } from './QuizProctorOverlay';
 import { MathText } from './MathText';
 import { ReportButton } from './ReportButton';
+import { JeeCbtExamModal } from './JeeCbtExamModal';
 
 interface PracticeWorkspaceViewProps {
   documents: StudyDocument[];
@@ -43,8 +44,12 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   documents,
   activeDoc,
   onSelectDoc,
+  studentProfile,
 }) => {
   const currentDoc = activeDoc || documents[0] || null;
+
+  // JEE Full Mock Test Simulator Modal state
+  const [isJeeExamModalOpen, setIsJeeExamModalOpen] = useState<boolean>(false);
 
   // Practice Set Builder State (matching Image 10)
   const [sourceMode, setSourceMode] = useState<PracticeSourceMode>('notes');
@@ -587,6 +592,48 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         </p>
       </div>
 
+      {/* Official JEE Main 75-Question CBT Simulator Hero Banner */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-6 sm:p-7 shadow-lg border border-blue-800">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2.5 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-amber-300 text-xs font-bold tracking-wide uppercase">
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Full-Scale NTA CBT Mock Exam</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              JEE (Main) 2027 Full Mock Test Simulator
+            </h2>
+            <p className="text-xs sm:text-sm text-blue-100/90 leading-relaxed">
+              Step into the authentic NTA Computer-Based Test environment: <strong>75 questions</strong> across Physics (25), Chemistry (25), and Mathematics (25) with 20 MCQs + 5 Numerical value questions each, 180-minute countdown timer, official Question Palette (5 states), on-screen virtual keypad, and official +4 / −1 marking.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-blue-200 pt-1">
+              <span className="flex items-center gap-1">⏱️ 180 Minutes</span>
+              <span>•</span>
+              <span className="flex items-center gap-1">📝 75 Questions</span>
+              <span>•</span>
+              <span className="flex items-center gap-1">🎯 300 Marks (+4 / -1)</span>
+              <span>•</span>
+              <span className="flex items-center gap-1">🖥️ Official NTA CBT UI</span>
+            </div>
+          </div>
+
+          <div className="shrink-0 flex flex-col sm:flex-row md:flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsJeeExamModalOpen(true)}
+              data-testid="launch-jee-cbt-mock-btn"
+              className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-extrabold text-sm shadow-md hover:shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>Launch 75-Q JEE Mock Test</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <span className="text-[11px] text-blue-300/80 text-center font-medium">
+              Grounded in {currentDoc?.title || 'uploaded materials'} &amp; JEE syllabus
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Main 12-Column Builder & Analytics Grid matching Image 10 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left 8 Columns: Choose what to practice + Refine your set + Recent Attempts */}
@@ -1031,6 +1078,40 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         isQuizActive={sessionActive && !submittedResult && questions.length > 0}
         onAutoSubmit={handleSubmitSession}
         quizTitle="Timed Practice Set"
+      />
+
+      {/* Official 75-Question JEE Main CBT Exam Simulator */}
+      <JeeCbtExamModal
+        isOpen={isJeeExamModalOpen}
+        onClose={() => setIsJeeExamModalOpen(false)}
+        studentProfile={studentProfile}
+        examTitle={`JEE (Main) 2027 Full Mock Paper — ${currentDoc?.title || 'Comprehensive'}`}
+        sourceNoteTitle={currentDoc?.title}
+        onSaveResult={(res) => {
+          // Save attempt into studyStorage so it syncs with Recent Attempts and Mistake DNA
+          const attempt: QuizAttempt = {
+            id: res.id,
+            documentId: currentDoc?.id || 'jee-mock-75',
+            documentTitle: res.examTitle,
+            mode: 'jee_simulator',
+            examType: 'jee_main',
+            examTitle: res.examTitle,
+            questions: [],
+            answers: [],
+            score: res.correctCount,
+            totalQuestions: res.totalQuestions,
+            percentage: res.accuracyPercentage,
+            weakTopics: [],
+            strongTopics: [],
+            completedAt: res.completedAt,
+            negativeMarkingUsed: true,
+            rawMarks: res.marksObtained,
+            maxMarks: 300,
+            timeTakenSeconds: res.timeTakenSeconds,
+          };
+          studyStorage.saveQuizAttempt(attempt);
+          setAttempts(studyStorage.getQuizAttempts());
+        }}
       />
     </div>
   );

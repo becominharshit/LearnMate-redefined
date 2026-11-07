@@ -14,6 +14,7 @@ export function isPublicApiPath(path: string): boolean {
 /** Daily allowance bucket for each AI route; routes not listed only get the per-minute limit. */
 const ROUTE_CATEGORIES: Record<string, UsageCategory> = {
   '/api/study/ask': 'tutor',
+  '/api/study/ask-stream': 'tutor',
   '/api/study/quiz': 'practice',
   '/api/study/mistakes-and-plan': 'revise',
   '/api/study/quick-revise': 'revise',

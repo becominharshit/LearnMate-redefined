@@ -106,6 +106,53 @@ Each table lists **what exists today → what it becomes**. "New" rows are addit
 
 **Done when:** every screen is reachable in at most 2 taps from the 5 sections, and nothing removed is still referenced.
 
+**Status (7 Nov 2026):** ✅ Built and verified.
+- **Add study material everywhere:** Added `AddMaterialBox` (drag-and-drop + 4 quick choices: `PDF` · `Photo of notes` · `YouTube link` · `Paste text`) at the top of Home and a persistent `+ Add material` button in `Navbar` on every screen, backed by `AddMaterialModal`.
+- **Rebuilt Home (`StudentDashboardView.tsx`):** Compact JEE Main countdown strip, `AddMaterialBox`, "What you can do" guide until the first upload, Continue card, My materials library (with subject badge, topics, last opened, and two-step delete), "Ask a JEE doubt" box, and "Due today" card. Subject accuracy, study streak, and focus timer stats moved to `ProgressView.tsx`.
+- **Simplified navigation (`Navbar.tsx`):** Desktop top bar has `Home · Study · Practice · Revise · Progress`. Phone bottom bar has `Home · Study · Practice · Revise · Me`. Profile menu has `Profile`, `Settings`, `Resources`, `Create`, and `Sign out`.
+- **Unified Study screen (`StudyView.tsx`):** Reader (7 cols) and Streaming AI Tutor (5 cols) sit side by side on desktop, with a `Read / Ask` toggle on mobile (<1024px) and an `Annotate` button in the reader toolbar.
+- **Streaming tutor (`/api/study/ask-stream` + `streamClaude`):** Streams explanation tokens over SSE, defaults to **"Notes + JEE knowledge"** (`extended_knowledge`) with a one-tap switch to **"Only my notes"** (`material_only`), clearly labels answers when they go beyond notes, and keeps `<ReportButton />` ("Report a mistake").
+- **Rebuilt Revise (`QuickReviseView.tsx`):** Moved Mistake DNA and Personalized Revision Plan out of Study sub-modes into Revise. The 5 Revise tabs are `Flashcards` (with Sticky Notes merged in and "+ Add to flashcards"), `Mind map`, `Summary sheet`, `Mistakes`, and `Formula Book` (searchable chapter formulas + "+ Add to flashcards").
+- **YouTube transcript flow (`/api/study/youtube-analyze`):** Official privacy-enhanced YouTube embed (`youtube-nocookie.com`) + 3 illustrated steps for pasting the transcript (`parseTranscriptIntoTimestampedPages`), with clickable timestamp jump pills in the Study reader.
+- **Removed non-JEE surfaces & retired components:** Removed PlayLab Games, Mini App Builder, Concept 3D Lab, Notebook, Voice note, and Study planner from `CreativeStudioView.tsx`; replaced Explore with `ResourcesView.tsx` (verified SATHEE, NTA Abhyas, JEE Main portal, and NCERT links + +4 / −1 exam facts); removed the timer island's second AI chat from `DynamicCompanion.tsx` and made lo-fi music off by default; deleted `StudyTimerFocusBar.tsx`, `HomeView.tsx`, `ExploreWorkspaceView.tsx`, `ExploreFurtherView.tsx`, and `NotebookAndScannerModal.tsx`.
+- **Verification:** `npx tsc --noEmit` (0 errors), `npm test` (83/83 unit tests passing, including new `streamClaude` and `parseTranscriptIntoTimestampedPages` tests), and `npm run build` pass cleanly.
+
+### Phase 3.5: Multimodal Notes OCR, Voice Tutor Sync, Real PDF Annotation & 75-Q JEE CBT Exam
+
+| Existing | Change |
+|---|---|
+| Handwritten notes in uploaded PDFs or camera photos only report page numbers / placeholders | **Multimodal Handwritten Notes OCR**: Automatically renders scanned/handwritten PDF pages to canvas and runs academic OCR; enhanced camera photo OCR extracts complete notes, formulas, and headings so mind maps, summaries, and tutor answers are grounded in the student's actual handwritten notes. |
+| AI Voice tutor message text appears in vague blocks, and speaking doesn't interrupt tutor | **Voice Tutor Synchronization & Barge-in**: Text displays word-by-word at conversational speed; when the student starts speaking, the tutor immediately cancels previous speech/audio ("forgetting about the previous thing") and listens to the new utterance. |
+| Annotate button edits extracted text HTML paragraphs rather than the PDF itself | **Real PDF Canvas Annotation**: Highlights, drawings, shapes, and notes are rendered directly on the real rendered PDF page canvas (preserving exact PDF fonts, math layout, diagrams), not on extracted text divs. |
+| Mind maps derived from handwritten notes show incorrect/hallucinated information | **Grounded Mind Maps from Handwritten Notes**: Mind maps consume the real OCR-extracted concepts, formulas, and hierarchy from handwritten notes. |
+| Practice section only has short 10-question practice sets; no full mock exam | **Full 75-Question JEE Main CBT Exam Simulator**: Exact NTA interface (180 mins, 300 marks, 75 questions: 25 Physics, 25 Chemistry, 25 Maths; 20 MCQ + 5 Numerical each), NTA question palette (Not Visited, Not Answered, Answered, Marked for Review), Save & Next, Clear Response, Question Paper view, official +4 / −1 marking, and post-exam scorecard with Mistake DNA. |
+
+**Done when:** Scanned/camera handwritten notes extract full text into documents and mind maps; voice tutor streams word-by-word and interrupts cleanly on user speech; Annotate draws on the real PDF canvas; and Practice includes the full 75-question JEE CBT simulation.
+
+**Status (7 Nov 2026):** ✅ Built and verified.
+- **Multimodal Handwritten Notes OCR (`server.ts`, `pdfExtractor.ts`, `App.tsx`):**
+  - Enhanced `POST /api/study/scan-notes` with candidate model loop (`gemini-3.1-flash-lite`, `gemini-3.8-flash`) and improved system prompt for transcribing handwritten equations, diagrams, and structural notes.
+  - Added automatic canvas rendering (`renderPageToImageDataUrl`) and OCR execution in `extractPagesFromPdf` whenever pages have sparse or scanned text (<40 chars), ensuring handwritten PDF pages extract full digital content.
+  - Wired `aiStudyClient.scanNotes` in `App.tsx` for both PDF uploads and camera photo uploads.
+- **Voice Tutor Synchronization & Immediate Barge-in (`VoiceTutorModal.tsx`):**
+  - Smooth word-by-word streaming typewriter animation (`streamWordsIntoAssistantTurn` at ~55ms per word) for AI assistant turns.
+  - Immediate barge-in / cancellation: `interruptTutorImmediately` halts browser `speechSynthesis`, kills ongoing word streams, notifies WebSocket with `{ type: 'interrupt' }`, and resets assistant turn as soon as microphone energy exceeds threshold or student speech recognition triggers.
+- **Real PDF Canvas Annotation (`PdfWorkspaceView.tsx`, `StudyView.tsx`):**
+  - Renders true vector PDF pages directly onto an HTML5 `<canvas>` via PDF.js (`renderPdfPageToCanvas`) with zoom and fit controls.
+  - SVG annotation and drawing overlay (pen, highlighter, underline, shapes, notes, eraser) sits directly on top of the real PDF canvas.
+  - Added "Real PDF / Text View" mode switcher in the toolbar.
+- **Grounded Mind Maps (`server.ts`, `quizGrading.ts`, `QuickReviseView.tsx`):**
+  - Mind map generator receives genuine academic text transcribed from handwritten notes rather than placeholder text, generating accurate branches, formulas, and concepts.
+- **Full 75-Question JEE Main CBT Exam Simulator (`JeeCbtExamModal.tsx`, `PracticeWorkspaceView.tsx`, `jeeQuestionBank.ts`, `jeeExam.ts`):**
+  - Implemented authentic NTA Computer-Based Test environment with all 75 questions: Physics (25), Chemistry (25), Mathematics (25) with 20 MCQs (Section A) + 5 Numerical questions (Section B) each.
+  - 180-minute countdown clock with warning indicators and auto-submit.
+  - Official 5-state NTA Question Palette (Not Visited, Not Answered, Answered, Marked for Review, Answered & Marked for Review).
+  - NTA On-Screen Virtual Numeric Keypad for Section B questions.
+  - Action toolbar: `Save & Next`, `Clear Response`, `Save & Mark for Review`, `Mark for Review & Next`, `Question Paper` (view all 75 questions), and `Instructions`.
+  - Official +4 / −1 marking across both MCQ and Numerical sections.
+  - Submission summary table modal and post-exam scorecard with marks (/300), estimated percentile, accuracy %, subject breakdown, and step-by-step solutions for all 75 questions.
+- **Verification:** `npx tsc --noEmit` (0 errors), `npm test` (87/87 tests passing including new `jeeQuestionBank.test.ts`), and `npm run build` pass cleanly in production mode.
+
 ### Phase 4: Tools, timer, settings and dark theme
 
 | Existing | Change |

@@ -23,6 +23,7 @@ import type {
   Generate3DModelResponse,
   Custom3DSceneSpec,
 } from '../types/study';
+import type { StructuredDiagramSpec } from '../types/diagram';
 import { apiFetch } from './apiFetch';
 
 export interface AiStatusMetadata {
@@ -102,10 +103,13 @@ export interface VisualizeConceptResponse {
   concept: string;
   style: string;
   isAiGenerated: boolean;
-  verificationStatus?: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING';
+  spec: StructuredDiagramSpec;
+  verificationStatus?: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' | 'FALLBACK';
   generatedImageUrl?: string;
   modelNotice?: string;
-  diagramSteps: Array<{
+  provider?: string;
+  modelUsed?: string;
+  diagramSteps?: Array<{
     step: number;
     title: string;
     detail: string;
@@ -179,8 +183,16 @@ export const aiStudyClient = {
     return postJson<AnalyzeDocumentResponse>('/api/study/analyze', { title, pages });
   },
 
-  async analyzeYouTubeVideo(youtubeUrl: string): Promise<AnalyzeYouTubeResponse> {
-    return postJson<AnalyzeYouTubeResponse>('/api/study/youtube-analyze', { youtubeUrl });
+  async analyzeYouTubeVideo(
+    youtubeUrl: string,
+    transcript?: string,
+    title?: string
+  ): Promise<AnalyzeYouTubeResponse> {
+    return postJson<AnalyzeYouTubeResponse>('/api/study/youtube-analyze', {
+      youtubeUrl,
+      transcript,
+      title,
+    });
   },
 
   async askTutor(params: {
@@ -191,8 +203,129 @@ export const aiStudyClient = {
     modelPreference?: GeminiModelOption;
     studentContext?: StudentTutorContext;
     sourceControlMode?: SourceControlMode;
+    isVoiceTutor?: boolean;
   }): Promise<AskTutorResponse> {
     return postJson<AskTutorResponse>('/api/study/ask', params);
+  },
+
+  async askTutorStream(
+    params: {
+      title: string;
+      pages: StudyPage[];
+      question: string;
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+      studentContext?: StudentTutorContext;
+      sourceControlMode?: SourceControlMode;
+      isVoiceTutor?: boolean;
+      signal?: AbortSignal;
+    },
+    onDelta: (chunk: string) => void
+  ): Promise<AskTutorResponse> {
+    const { signal, ...bodyParams } = params;
+    const response = await apiFetch('/api/study/ask-stream', {
+      method: 'POST',
+      signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify(bodyParams),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const message =
+        (data && typeof data.aiNotice === 'string' && data.aiNotice) ||
+        (data && typeof data.error === 'string' && data.error) ||
+        `Request failed with status ${response.status}`;
+      throw new Error(message);
+    }
+
+    if (!response.body) {
+      return postJson<AskTutorResponse>('/api/study/ask', bodyParams);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let streamedAnswer = '';
+    let finalResponse: AskTutorResponse | null = null;
+    let streamError: string | null = null;
+
+    const handleLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) return;
+      const raw = trimmed.slice(5).trim();
+      if (!raw) return;
+      let parsed: {
+        type?: 'delta' | 'done' | 'error';
+        text?: string;
+        data?: AskTutorResponse;
+        error?: string;
+      };
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (parsed.type === 'delta' && typeof parsed.text === 'string') {
+        streamedAnswer += parsed.text;
+        onDelta(parsed.text);
+      } else if (parsed.type === 'done' && parsed.data) {
+        finalResponse = parsed.data;
+      } else if (parsed.type === 'error') {
+        streamError = parsed.error || 'The AI tutor could not finish the response.';
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          handleLine(line);
+        }
+      }
+      if (buffer.trim()) {
+        handleLine(buffer);
+      }
+    } catch (readErr: unknown) {
+      if (signal?.aborted || (readErr instanceof Error && readErr.name === 'AbortError')) {
+        return {
+          answer: streamedAnswer,
+          foundInMaterial: false,
+          sourceType: 'general',
+          citations: [],
+          relatedTopics: [],
+          aiNotice: 'Interrupted by student.',
+        };
+      }
+      throw readErr;
+    }
+
+    if (streamError) {
+      throw new Error(streamError);
+    }
+
+    if (finalResponse) {
+      return finalResponse;
+    }
+
+    if (streamedAnswer.trim()) {
+      return {
+        answer: streamedAnswer.trim(),
+        foundInMaterial: params.pages.length > 0,
+        sourceType: params.pages.length > 0 ? 'both' : 'general',
+        sourceControlMode: params.sourceControlMode,
+        citations: [],
+        relatedTopics: [],
+      };
+    }
+
+    throw new Error('The AI tutor returned an empty response. Please try again.');
   },
 
   async generateQuiz(params: {
@@ -284,6 +417,8 @@ export const aiStudyClient = {
     concept: string;
     contextText: string;
     style?: string;
+    documentTitle?: string;
+    citedPages?: number[];
   }): Promise<VisualizeConceptResponse> {
     return postJson<VisualizeConceptResponse>('/api/create/visualize', params);
   },

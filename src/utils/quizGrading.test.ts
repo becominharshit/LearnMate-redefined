@@ -14,6 +14,7 @@ import {
   computeTimerRemainingSeconds,
   buildGroundedStickyNotesAndFlashcards,
   buildGroundedMindMapAndRevisionSheet,
+  parseTranscriptIntoTimestampedPages,
 } from './quizGrading';
 import type { QuizQuestion, RevisionTask } from '../types/study';
 
@@ -287,5 +288,21 @@ test('buildGroundedStickyNotesAndFlashcards & buildGroundedMindMapAndRevisionShe
   assert.ok(mindMap.nodes.length >= 2);
   assert.equal(onePageRevision.chapterTitle, 'Probability Lecture');
   assert.ok(onePageRevision.essentialConcepts.length >= 1);
+});
+
+test('parseTranscriptIntoTimestampedPages parses YouTube timestamps and preserves lecture text', () => {
+  const transcript = [
+    '0:00',
+    'Welcome to Rotational Motion for JEE Main.',
+    '02:15 Moment of inertia of a uniform rod about its centre is ML^2 / 12.',
+    '[05:40] Parallel axis theorem: I = I_cm + M d^2.',
+  ].join('\n');
+
+  const pages = parseTranscriptIntoTimestampedPages(transcript);
+  assert.ok(pages.length >= 1);
+  assert.equal(pages[0].timestampSeconds, 0);
+  assert.equal(pages[0].timestampLabel, '00:00');
+  assert.match(pages[0].content, /Rotational Motion/);
+  assert.match(pages[0].content, /Parallel axis theorem/);
 });
 

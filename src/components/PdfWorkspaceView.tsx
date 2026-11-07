@@ -49,6 +49,7 @@ import {
   generateAnnotatedDocumentPdfBytes,
   triggerPdfDownload
 } from '../utils/pdfGenerator';
+import { renderPdfPageToCanvas } from '../utils/pdfExtractor';
 
 interface PdfWorkspaceViewProps {
   documents: StudyDocument[];
@@ -93,6 +94,7 @@ export const PdfWorkspaceView: React.FC<PdfWorkspaceViewProps> = ({
   const [scrollMode, setScrollMode] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [renderMode, setRenderMode] = useState<'pdf_canvas' | 'text'>('pdf_canvas');
 
   // Annotation state
   const [activeTool, setActiveTool] = useState<PdfAnnotationTool>('select');
@@ -514,53 +516,72 @@ export const PdfWorkspaceView: React.FC<PdfWorkspaceViewProps> = ({
           </div>
         </div>
 
-        {/* Page Body Content */}
-        <div
-          className="px-8 sm:px-12 py-9 min-h-[640px] text-slate-800 leading-relaxed space-y-4 select-text"
-          style={{ fontSize: `${Math.max(13, Math.round(15 * (zoom / 100)))}px` }}
-        >
-          {page.title && (
-            <h2 className="text-xl font-extrabold text-slate-900 border-b border-slate-100 pb-2">
-              {page.title}
-            </h2>
-          )}
-          {paragraphs.map((para, idx) => {
-            const isHeading =
-              idx === 0 ||
-              (para.length < 85 && (/^[A-Z0-9\s:&—-]+$/.test(para) || para.endsWith(':')));
-            const isFormulaOrBullet =
-              para.trim().startsWith('•') ||
-              para.trim().startsWith('-') ||
-              /^[0-9]+\./.test(para.trim()) ||
-              para.includes('=');
+        {/* Page Body Content: Real PDF Canvas or Formatted Text Fallback */}
+        {renderMode === 'pdf_canvas' && currentDoc?.pdfDataUrl ? (
+          <div className="relative w-full bg-slate-50 flex items-center justify-center min-h-[640px] overflow-hidden">
+            <canvas
+              ref={(canvasEl) => {
+                if (canvasEl && currentDoc?.pdfDataUrl) {
+                  void renderPdfPageToCanvas(
+                    currentDoc.pdfDataUrl,
+                    page.pageNumber,
+                    canvasEl,
+                    (zoom / 100) * 1.35
+                  );
+                }
+              }}
+              data-testid={`pdf-real-canvas-${page.pageNumber}`}
+              className="w-full h-auto block select-none pointer-events-none"
+            />
+          </div>
+        ) : (
+          <div
+            className="px-8 sm:px-12 py-9 min-h-[640px] text-slate-800 leading-relaxed space-y-4 select-text"
+            style={{ fontSize: `${Math.max(13, Math.round(15 * (zoom / 100)))}px` }}
+          >
+            {page.title && (
+              <h2 className="text-xl font-extrabold text-slate-900 border-b border-slate-100 pb-2">
+                {page.title}
+              </h2>
+            )}
+            {paragraphs.map((para, idx) => {
+              const isHeading =
+                idx === 0 ||
+                (para.length < 85 && (/^[A-Z0-9\s:&—-]+$/.test(para) || para.endsWith(':')));
+              const isFormulaOrBullet =
+                para.trim().startsWith('•') ||
+                para.trim().startsWith('-') ||
+                /^[0-9]+\./.test(para.trim()) ||
+                para.includes('=');
 
-            if (isHeading) {
+              if (isHeading) {
+                return (
+                  <h3
+                    key={idx}
+                    className="text-lg font-bold text-slate-900 tracking-tight pt-2 border-b border-slate-100 pb-1.5"
+                  >
+                    {renderHighlightedParagraph(para, idx)}
+                  </h3>
+                );
+              }
+              if (isFormulaOrBullet) {
+                return (
+                  <div
+                    key={idx}
+                    className="pl-4 py-2 pr-3 rounded-xl bg-slate-50/90 border-l-4 border-blue-400 text-slate-800 font-medium"
+                  >
+                    {renderHighlightedParagraph(para, idx)}
+                  </div>
+                );
+              }
               return (
-                <h3
-                  key={idx}
-                  className="text-lg font-bold text-slate-900 tracking-tight pt-2 border-b border-slate-100 pb-1.5"
-                >
+                <p key={idx} className="text-slate-700 leading-7">
                   {renderHighlightedParagraph(para, idx)}
-                </h3>
+                </p>
               );
-            }
-            if (isFormulaOrBullet) {
-              return (
-                <div
-                  key={idx}
-                  className="pl-4 py-2 pr-3 rounded-xl bg-slate-50/90 border-l-4 border-blue-400 text-slate-800 font-medium"
-                >
-                  {renderHighlightedParagraph(para, idx)}
-                </div>
-              );
-            }
-            return (
-              <p key={idx} className="text-slate-700 leading-7">
-                {renderHighlightedParagraph(para, idx)}
-              </p>
-            );
-          })}
-        </div>
+            })}
+          </div>
+        )}
 
         {/* SVG Annotation & Drawing Layer */}
         <svg
@@ -971,6 +992,22 @@ export const PdfWorkspaceView: React.FC<PdfWorkspaceViewProps> = ({
           >
             <ScrollText className="w-3.5 h-3.5" />
             {scrollMode ? 'Continuous Scroll' : 'Single Page'}
+          </button>
+
+          <div className="h-5 w-px bg-slate-200 mx-1" />
+
+          <button
+            onClick={() => setRenderMode((m) => (m === 'pdf_canvas' ? 'text' : 'pdf_canvas'))}
+            data-testid="toggle-render-mode-btn"
+            title={renderMode === 'pdf_canvas' ? 'Switch to Extracted Text View' : 'Switch to Real PDF Canvas View'}
+            className={`h-9 px-2.5 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer ${
+              renderMode === 'pdf_canvas'
+                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>{renderMode === 'pdf_canvas' ? 'Real PDF' : 'Text View'}</span>
           </button>
         </div>
 

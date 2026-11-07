@@ -62,7 +62,7 @@ const STEPS = [
   {
     icon: Target,
     title: 'Practise JEE-style questions',
-    body: 'Solve MCQs with +4 / −1 marking and numerical answers with +4 / 0, then see exactly where your reasoning went wrong.',
+    body: 'Solve MCQs and numerical questions with JEE Main marking (+4 correct, −1 wrong), then see exactly where your reasoning went wrong.',
   },
   {
     icon: Layers,
