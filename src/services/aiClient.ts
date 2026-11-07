@@ -24,6 +24,7 @@ import type {
   Custom3DSceneSpec,
 } from '../types/study';
 import type { StructuredDiagramSpec } from '../types/diagram';
+import type { AnimatedExplanationScene } from '../utils/educationalSpecsEngine';
 import { apiFetch } from './apiFetch';
 
 export interface AiStatusMetadata {
@@ -123,21 +124,16 @@ export interface VideoLessonResponse {
   mode?: 'text_to_video' | 'image_to_video';
   aspectRatio?: '16:9' | '9:16';
   omniStatus: string;
+  isAiGenerated?: boolean;
+  modelUsed?: string;
   verificationStatus?: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' | 'WORKING_WITH_NON_AI_FALLBACK';
   fallbackMode?: 'none' | 'animated_explanation';
   userFacingNotice?: string;
   errorReason?: string;
   videoUrl?: string;
-  scenes: Array<{
-    sceneNumber: number;
-    durationSeconds: number;
-    heading: string;
-    narration: string;
-    visualCue: string;
-    keyFormula: string;
-    animationMode?: 'projectile_arc' | 'quadratic_curve' | 'probability_tree' | 'molecule_bonds';
-    highlightValues?: string[];
-  }>;
+  citedPages?: number[];
+  isSupportedByMaterial?: boolean;
+  scenes: AnimatedExplanationScene[];
 }
 
 // Client-side in-flight deduplication to prevent duplicate submissions from rapid button clicks
@@ -428,6 +424,10 @@ export const aiStudyClient = {
     contextText: string;
     aspectRatio?: '16:9' | '9:16';
     sourceImageDataUrl?: string;
+    documentTitle?: string;
+    citedPages?: number[];
+    validPageNumbers?: number[];
+    preferredLanguage?: string;
   }): Promise<VideoLessonResponse> {
     return postJson<VideoLessonResponse>('/api/create/video-lesson', params);
   },

@@ -46,6 +46,8 @@ import {
 } from './src/utils/vertexAiRouter.ts';
 import {
   buildAnimatedExplanationScenes,
+  validateAndSanitizeAnimatedExplanation,
+  resolveSupportedCitedPages,
   type AnimatedExplanationScene,
 } from './src/utils/educationalSpecsEngine.ts';
 import {
@@ -4434,7 +4436,91 @@ COORDINATE BOUNDS:
     }
   });
 
-  // 12. Creative Studio — AI Video Lesson & Image-to-Video Animation (Omni 1.1 Flash + Persistent Job Tracking + Animated Explanation)
+  // 12. Creative Studio — Phase 5.2 Animated Explanations (4–6 Source-Grounded Scenes + Progressive Diagrams)
+  const ANIMATED_EXPLANATION_SYSTEM_PROMPT = `You are a senior JEE Main Physics, Chemistry, and Mathematics faculty creating a 4 to 6 scene Animated Explanation for a Class 11/12 or dropper student.
+
+RULES:
+1. Generate between 4 and 6 sequential scenes that build the concept step by step.
+2. Ground every scene in the provided Study Material Excerpt when the topic is covered there, and include the supporting 1-indexed page numbers in "citedPages". If the request is not covered by the excerpt, set "citedPages" to [].
+3. Each scene MUST have:
+   - "sceneNumber": 1..6
+   - "durationSeconds": 7..12
+   - "heading": concise scene title
+   - "teachingPoint": ONE crystal-clear teaching takeaway for this scene
+   - "narration": 2-3 spoken sentences suitable for text-to-speech narration
+   - "visualCue": brief description of what the diagram shows
+   - "keyFormula": governing equation or relation for this scene (plain Unicode math, e.g. a = g(sin θ − μ cos θ))
+   - "animationMode": one of "projectile_arc", "quadratic_curve", "probability_tree", "molecule_bonds"
+   - "highlightValues": 2-4 key exam values or conditions
+   - "citedPages": array of 1-based page numbers from the notes supporting this scene (or [] if not in notes)
+   - "spec": a complete 2D SVG diagram specification (viewBox 700x500, with 5-8 labeled geometric elements: arrow, line, rect, circle, path, text, arc; every key arrow, circle, or rect MUST include a descriptive "label" and distinct vibrant color such as "#4F46E5", "#10B981", "#D97706", "#0EA5E9", or "#EC4899") that visually illustrates this scene
+   - "progressiveSteps": 3 cumulative progressive diagram steps (stepNumber 1..3, label, description, visibleElementIds where step 3 includes all element IDs) so the student can step through the diagram construction.`;
+
+  const ANIMATED_EXPLANATION_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      scenes: {
+        type: Type.ARRAY,
+        description: '4 to 6 sequential animated explanation scenes',
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            sceneNumber: { type: Type.INTEGER },
+            durationSeconds: { type: Type.INTEGER },
+            heading: { type: Type.STRING },
+            teachingPoint: { type: Type.STRING },
+            narration: { type: Type.STRING },
+            visualCue: { type: Type.STRING },
+            keyFormula: { type: Type.STRING },
+            animationMode: {
+              type: Type.STRING,
+              enum: ['projectile_arc', 'quadratic_curve', 'probability_tree', 'molecule_bonds'],
+            },
+            highlightValues: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+            citedPages: {
+              type: Type.ARRAY,
+              items: { type: Type.INTEGER },
+            },
+            spec: DIAGRAM_RESPONSE_SCHEMA,
+            progressiveSteps: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  stepNumber: { type: Type.INTEGER },
+                  label: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  visibleElementIds: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                  },
+                },
+                required: ['stepNumber', 'label', 'description', 'visibleElementIds'],
+              },
+            },
+          },
+          required: [
+            'sceneNumber',
+            'durationSeconds',
+            'heading',
+            'teachingPoint',
+            'narration',
+            'visualCue',
+            'keyFormula',
+            'animationMode',
+            'highlightValues',
+            'citedPages',
+            'spec',
+          ],
+        },
+      },
+    },
+    required: ['scenes'],
+  };
+
   app.post('/api/create/video-lesson', async (req, res) => {
     try {
       const {
@@ -4442,11 +4528,19 @@ COORDINATE BOUNDS:
         contextText = '',
         aspectRatio = '16:9',
         sourceImageDataUrl,
+        documentTitle = '',
+        citedPages = [],
+        validPageNumbers = [],
+        preferredLanguage,
       } = req.body as {
         topic?: string;
         contextText?: string;
         aspectRatio?: '16:9' | '9:16';
         sourceImageDataUrl?: string;
+        documentTitle?: string;
+        citedPages?: number[];
+        validPageNumbers?: number[];
+        preferredLanguage?: string;
       };
 
       const safeAspectRatio: '16:9' | '9:16' = aspectRatio === '9:16' ? '9:16' : '16:9';
@@ -4455,9 +4549,86 @@ COORDINATE BOUNDS:
           ? 'image_to_video'
           : 'text_to_video';
 
-      const scenes = buildAnimatedExplanationScenes(topic, contextText);
+      const safeCitedPages = Array.isArray(citedPages)
+        ? citedPages.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+        : [];
+      const safeValidPages = Array.isArray(validPageNumbers)
+        ? validPageNumbers.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+        : [];
+
+      const relevantExcerpt = contextText.trim()
+        ? contextText.slice(0, 2400)
+        : '';
+
+      let scenes: AnimatedExplanationScene[] = [];
+      let isAiGenerated = false;
+      let modelUsed = 'learnmate-deterministic-engine';
+      let providerUsed: string = 'deterministic_template';
+      let citationSummary = resolveSupportedCitedPages(
+        topic,
+        relevantExcerpt,
+        safeCitedPages,
+        safeValidPages
+      );
+
+      try {
+        const aiResult = await generateStructuredJson<{ scenes: unknown[] }>({
+          operation: 'create_animated_explanation',
+          prompt: `Topic / Request: "${topic}"\nDocument: "${documentTitle || 'JEE Study Material'}"\n${languageInstruction(preferredLanguage)}\n\nStudy Material Excerpt:\n${relevantExcerpt || '(No uploaded study material excerpt provided; use standard JEE Main curriculum.)'}\n\nGenerate 4 to 6 source-grounded animated explanation scenes with progressive 2D vector diagrams, teaching points, narration, and key formulas.`,
+          systemInstruction: ANIMATED_EXPLANATION_SYSTEM_PROMPT,
+          responseSchema: ANIMATED_EXPLANATION_SCHEMA,
+          tier: 'smart',
+          mathFormat: 'unicode',
+          maxOutputTokens: 12000,
+        });
+
+        if (aiResult && aiResult.data) {
+          const validated = validateAndSanitizeAnimatedExplanation(aiResult.data, {
+            topic,
+            contextText: relevantExcerpt,
+            citedPages: safeCitedPages,
+            validPageNumbers: safeValidPages,
+          });
+          scenes = validated.scenes;
+          citationSummary = {
+            citedPages: validated.citedPages,
+            isSupported: validated.isSupportedByMaterial,
+          };
+          if (validated.valid && !validated.isFallback) {
+            isAiGenerated = true;
+            modelUsed = aiResult.modelUsed || 'gemini-3.1-flash-lite';
+            providerUsed = aiResult.providerUsed || 'gemini';
+          }
+        }
+      } catch (err) {
+        console.warn('[AI] Animated explanation structured generation failed, using verified deterministic scenes:', err);
+      }
+
+      if (scenes.length < 4) {
+        scenes = buildAnimatedExplanationScenes(
+          topic,
+          relevantExcerpt,
+          safeCitedPages,
+          safeValidPages
+        );
+        isAiGenerated = false;
+      }
+
       const jobId = `vidjob-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const nowIso = new Date().toISOString();
+
+      const verificationStatus: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' | 'WORKING_WITH_NON_AI_FALLBACK' =
+        isAiGenerated ? 'WORKING_VERIFIED' : 'WORKING_WITH_NON_AI_FALLBACK';
+      const fallbackMode: 'none' | 'animated_explanation' =
+        isAiGenerated ? 'none' : 'animated_explanation';
+
+      const userFacingNotice = isAiGenerated
+        ? `Generated ${scenes.length} source-grounded scenes via ${
+            providerUsed.includes('claude') || providerUsed.includes('anthropic')
+              ? `Anthropic Claude (${modelUsed})`
+              : `Gemini (${modelUsed})`
+          }.`
+        : 'Live AI provider is unavailable in this environment. Showing the built-in JEE multi-scene animated explanation template grounded in your topic.';
 
       const jobRecord: VideoGenerationJob = {
         jobId,
@@ -4465,9 +4636,10 @@ COORDINATE BOUNDS:
         topic,
         mode,
         aspectRatio: safeAspectRatio,
-        status: 'processing',
-        verificationStatus: 'BLOCKED_BY_BILLING',
-        fallbackMode: 'animated_explanation',
+        status: 'completed',
+        verificationStatus,
+        fallbackMode,
+        userFacingNotice,
         scenes,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -4482,158 +4654,24 @@ COORDINATE BOUNDS:
         }
       }
 
-      const higgsfieldAuth = getHiggsfieldAuth();
-      let higgsfieldError: string | undefined;
-      if (higgsfieldAuth) {
-        try {
-          const videoPrompt = `Short educational animation for a JEE Main student explaining "${topic}". Clean diagram-style visuals, smooth motion, scientifically accurate, no on-screen text.${
-            contextText.trim() ? ` Context: ${contextText.slice(0, 300)}` : ''
-          }`;
-          let submitted: HiggsfieldSubmitResponse;
-          if (mode === 'image_to_video' && sourceImageDataUrl) {
-            const imageUrl = await uploadDataUrlToHiggsfield({
-              authHeader: higgsfieldAuth,
-              baseUrl: HIGGSFIELD_API_BASE,
-              dataUrl: sourceImageDataUrl,
-            });
-            submitted = await submitHiggsfieldJob({
-              authHeader: higgsfieldAuth,
-              baseUrl: HIGGSFIELD_API_BASE,
-              endpoint: HIGGSFIELD_IMAGE_TO_VIDEO_MODEL,
-              input: { prompt: videoPrompt, image_url: imageUrl, duration: 5 },
-            });
-          } else {
-            submitted = await submitHiggsfieldJob({
-              authHeader: higgsfieldAuth,
-              baseUrl: HIGGSFIELD_API_BASE,
-              endpoint: HIGGSFIELD_TEXT_TO_VIDEO_MODEL,
-              input: { prompt: videoPrompt, duration: 5, aspect_ratio: safeAspectRatio, sound: 'off' },
-            });
-          }
-
-          jobRecord.verificationStatus = 'WORKING_WITH_NON_AI_FALLBACK';
-          jobRecord.userFacingNotice =
-            'Higgsfield is generating your video (usually 1-3 minutes). The animated explanation below plays in the meantime.';
-          jobRecord.updatedAt = new Date().toISOString();
-          videoJobs.set(jobId, jobRecord);
-          void trackHiggsfieldVideoJob(jobId, submitted, higgsfieldAuth);
-
-          res.json({
-            jobId,
-            topic,
-            mode,
-            aspectRatio: safeAspectRatio,
-            omniStatus: 'higgsfield_processing',
-            verificationStatus: jobRecord.verificationStatus,
-            fallbackMode: jobRecord.fallbackMode,
-            userFacingNotice: jobRecord.userFacingNotice,
-            scenes,
-          });
-          return;
-        } catch (err) {
-          higgsfieldError = err instanceof Error ? err.message : String(err);
-        }
-      }
-
-      let videoUrl: string | undefined;
-      let omniStatus = 'animated_explanation_ready';
-      let userFacingNotice = HIGGSFIELD_PAUSED
-        ? 'AI video is paused while we add age checks. Playing the animated explanation for your topic instead.'
-        : 'AI video is not set up on this server. Playing the animated explanation for your topic instead.';
-
-      const ai = getGenAIClient();
-      if (ai && typeof (ai as any).interactions?.create === 'function') {
-        try {
-          let interactionInput: unknown = `Create a clear educational explainer animation for "${topic}" illustrating its governing equations and visual mechanism. Context: ${contextText.slice(0, 300)}`;
-          if (mode === 'image_to_video' && sourceImageDataUrl) {
-            const [header, base64Data] = sourceImageDataUrl.split('base64,');
-            const mimeMatch = header.match(/data:([^;]+);/);
-            const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-            interactionInput = [
-              {
-                type: 'image',
-                data: base64Data,
-                mime_type: mimeType,
-              },
-              {
-                type: 'text',
-                text: `Animate this educational diagram/image for "${topic}" with smooth camera motion and clear step progression.`,
-              },
-            ];
-          }
-
-          const interaction = await Promise.race([
-            (ai as any).interactions.create({
-              model: 'gemini-omni-1.1-flash',
-              input: interactionInput,
-              response_modalities: ['video'],
-              response_format: {
-                type: 'video',
-                aspect_ratio: safeAspectRatio,
-                duration: '5s',
-              },
-            }),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('OMNI_TIMEOUT')), 8000)
-            ),
-          ]);
-          const outputs = (interaction as any)?.outputs || [];
-          const videoOut = outputs.find((o: any) => o.type === 'video' && o.data);
-          if (videoOut?.data) {
-            videoUrl = `data:${videoOut.mime_type || 'video/mp4'};base64,${videoOut.data}`;
-            omniStatus = 'omni_video_generated';
-            userFacingNotice = 'AI video generated via gemini-omni-1.1-flash.';
-            jobRecord.status = 'completed';
-            jobRecord.verificationStatus = 'WORKING_VERIFIED';
-            jobRecord.videoUrl = videoUrl;
-            jobRecord.fallbackMode = 'none';
-            jobRecord.userFacingNotice = userFacingNotice;
-            jobRecord.updatedAt = new Date().toISOString();
-          }
-        } catch (err) {
-          const classified = classifyGeminiError(err);
-          if (classified.statusCode === 402 || classified.category === 'quota_exhausted') {
-            developerApiBillingDepleted = true;
-          }
-          omniStatus = 'animated_explanation_mode';
-          jobRecord.status = 'failed';
-          jobRecord.verificationStatus = 'BLOCKED_BY_BILLING';
-          jobRecord.errorReason =
-            classified.statusCode === 402
-              ? 'HTTP 402: Gemini Developer API prepayment credits are depleted for paid model gemini-omni-1.1-flash.'
-              : 'Paid model access required for gemini-omni-1.1-flash video generation.';
-          jobRecord.userFacingNotice = userFacingNotice;
-          jobRecord.updatedAt = new Date().toISOString();
-        }
-      } else {
-        jobRecord.status = 'failed';
-        jobRecord.verificationStatus = 'BLOCKED_BY_BILLING';
-        jobRecord.errorReason = 'Paid Developer API key not configured for gemini-omni-1.1-flash.';
-        jobRecord.userFacingNotice = userFacingNotice;
-        jobRecord.updatedAt = new Date().toISOString();
-      }
-
-      if (higgsfieldError && !videoUrl) {
-        jobRecord.userFacingNotice = `Higgsfield video generation failed: ${higgsfieldError}. Playing the animated explanation instead.`;
-      }
-      videoJobs.set(jobId, jobRecord);
-
       res.json({
         jobId,
         topic,
         mode,
         aspectRatio: safeAspectRatio,
-        omniStatus,
-        verificationStatus: jobRecord.verificationStatus,
-        fallbackMode: jobRecord.fallbackMode,
-        userFacingNotice: jobRecord.userFacingNotice,
-        errorReason: jobRecord.errorReason,
-        videoUrl,
+        omniStatus: isAiGenerated ? 'ai_scenes_generated' : 'animated_explanation_ready',
+        isAiGenerated,
+        modelUsed,
+        verificationStatus,
+        fallbackMode,
+        userFacingNotice,
+        citedPages: citationSummary.citedPages,
+        isSupportedByMaterial: citationSummary.isSupported,
         scenes,
       });
     } catch (err) {
       res.status(500).json({
-        error: err instanceof Error ? err.message : 'Failed to generate video lesson.',
+        error: err instanceof Error ? err.message : 'Failed to generate animated explanation.',
       });
     }
   });

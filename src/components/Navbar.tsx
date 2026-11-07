@@ -232,10 +232,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                 type="button"
                 onClick={() => onOpenAddMaterial('pdf')}
                 data-testid="navbar-add-material-btn"
-                className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 rounded-full lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap"
+                aria-label="Add material"
+                className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-full lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add material</span>
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  Add<span className="hidden sm:inline"> material</span>
+                </span>
               </button>
             )}
 

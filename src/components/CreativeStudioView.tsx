@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Video,
   Play,
@@ -16,6 +16,11 @@ import {
   Filter,
   RefreshCw,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Volume2,
+  VolumeX,
+  RotateCcw,
 } from 'lucide-react';
 import type { StudyDocument, CreativeAsset, ThemeMode } from '../types/study';
 import type { StructuredDiagramSpec } from '../types/diagram';
@@ -26,10 +31,21 @@ import {
   type VideoLessonResponse,
 } from '../services/aiClient';
 import { DiagramRenderer } from './DiagramRenderer';
+import { ReportButton } from './ReportButton';
 import {
   serializeDiagramSpecToSvg,
   getDeterministicDiagramTemplate,
 } from '../utils/diagramEngine';
+import {
+  buildAnimatedExplanationScenes,
+  createInitialScenePlayerState,
+  transitionScenePlayerState,
+  getSceneSpecForProgressiveStep,
+  validateAndSanitizeAnimatedExplanation,
+  resolveSupportedCitedPages,
+  type ScenePlayerState,
+  type ScenePlayerAction,
+} from '../utils/educationalSpecsEngine';
 
 interface CreativeStudioViewProps {
   documents: StudyDocument[];
@@ -272,80 +288,229 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
   const [videoSourceImage, setVideoSourceImage] = useState<string | undefined>(undefined);
   const [videoResult, setVideoResult] = useState<VideoLessonResponse | null>(null);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [activeSceneIdx, setActiveSceneIdx] = useState(0);
-  const [isPlayingStoryboard, setIsPlayingStoryboard] = useState(false);
-  const [animationProgress, setAnimationProgress] = useState(0.65);
+  const [playerState, setPlayerState] = useState<ScenePlayerState>(() =>
+    createInitialScenePlayerState()
+  );
 
-  useEffect(() => {
-    if (!isPlayingStoryboard) return;
-    const interval = setInterval(() => {
-      setAnimationProgress((p) => (p >= 1 ? 0.05 : Number((p + 0.025).toFixed(3))));
-    }, 60);
-    return () => clearInterval(interval);
-  }, [isPlayingStoryboard]);
+  const playbackTimerRef = useRef<number | null>(null);
 
-  const videoPollRef = useRef(0);
-  useEffect(() => {
-    return () => {
-      videoPollRef.current += 1;
-    };
-  }, []);
-
-  const pollVideoJob = async (jobId: string) => {
-    const pollId = ++videoPollRef.current;
-    const deadline = Date.now() + 15 * 60 * 1000;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 5000));
-      if (videoPollRef.current !== pollId) return;
+  const cancelSpeechAndTimers = useCallback(() => {
+    if (playbackTimerRef.current !== null) {
+      window.clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
-        const job = await aiStudyClient.getVideoJob(jobId);
-        if (videoPollRef.current !== pollId) return;
-        if (job.status === 'completed' || job.status === 'failed') {
-          setVideoResult((prev) =>
-            prev && prev.jobId === jobId
-              ? {
-                  ...prev,
-                  videoUrl: job.videoUrl || prev.videoUrl,
-                  userFacingNotice: job.userFacingNotice || prev.userFacingNotice,
-                  verificationStatus: job.verificationStatus || prev.verificationStatus,
-                  omniStatus: job.status === 'completed' ? 'video_ready' : 'video_failed',
-                }
-              : prev
-          );
-          return;
-        }
+        window.speechSynthesis.cancel();
       } catch {
-        // Transient network error
+        // Ignore speech synthesis errors in headless browsers
       }
     }
-  };
+  }, []);
 
-  const handleRunVideoLesson = async () => {
+  const dispatchPlayer = useCallback(
+    (action: ScenePlayerAction) => {
+      setPlayerState((prev) => transitionScenePlayerState(prev, action, cancelSpeechAndTimers));
+    },
+    [cancelSpeechAndTimers]
+  );
+
+  // Cancel narration when leaving the Animated Explanation subTab, switching documents, or unmounting
+  useEffect(() => {
+    if (subTab !== 'videolesson') {
+      dispatchPlayer({ type: 'LEAVE_CREATE' });
+    }
+  }, [subTab, dispatchPlayer]);
+
+  useEffect(() => {
+    return () => {
+      cancelSpeechAndTimers();
+    };
+  }, [activeDocument.id, cancelSpeechAndTimers]);
+
+  const currentScenes = videoResult?.scenes || [];
+  const activeScene =
+    currentScenes[Math.min(playerState.activeSceneIndex, Math.max(0, currentScenes.length - 1))];
+  const activeSceneSteps = activeScene?.progressiveSteps || [];
+
+  // Handle narrated slideshow playback & progressive step advancement
+  useEffect(() => {
+    if (playbackTimerRef.current !== null) {
+      window.clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    }
+
+    if (!playerState.isOpen || !playerState.isPlaying || !activeScene) {
+      return;
+    }
+
+    // Trigger speech synthesis at step 0 of the active scene when not muted
+    if (
+      playerState.activeStepIndex === 0 &&
+      !playerState.isMuted &&
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      typeof SpeechSynthesisUtterance !== 'undefined'
+    ) {
+      try {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(
+          `${activeScene.heading}. ${activeScene.teachingPoint} ${activeScene.narration}`
+        );
+        utter.rate = 1.0;
+        window.speechSynthesis.speak(utter);
+      } catch {
+        // Ignore speech synthesis errors in environments without audio devices
+      }
+    }
+
+    const totalSteps = Math.max(1, activeSceneSteps.length);
+    const stepDurationMs = Math.max(
+      2400,
+      Math.round(((activeScene.durationSeconds || 8) * 1000) / totalSteps)
+    );
+
+    playbackTimerRef.current = window.setTimeout(() => {
+      dispatchPlayer({
+        type: 'NEXT_STEP',
+        totalSteps,
+        totalScenes: currentScenes.length,
+        autoAdvanceScene: true,
+      });
+    }, stepDurationMs);
+
+    return () => {
+      if (playbackTimerRef.current !== null) {
+        window.clearTimeout(playbackTimerRef.current);
+        playbackTimerRef.current = null;
+      }
+    };
+  }, [
+    playerState.isOpen,
+    playerState.isPlaying,
+    playerState.activeSceneIndex,
+    playerState.activeStepIndex,
+    playerState.isMuted,
+    activeScene,
+    activeSceneSteps.length,
+    currentScenes.length,
+    dispatchPlayer,
+  ]);
+
+  const extractDocumentContextForTopic = useCallback(
+    (targetTopic: string) => {
+      const validPageNumbers = activeDocument.pages.map((p) => p.pageNumber);
+      const fullDocumentContext = activeDocument.pages
+        .map((p) => `[Page ${p.pageNumber}]\n${p.content}`)
+        .join('\n\n');
+
+      const supportCheck = resolveSupportedCitedPages(
+        targetTopic,
+        fullDocumentContext,
+        undefined,
+        validPageNumbers
+      );
+
+      if (supportCheck.isSupported && supportCheck.citedPages.length > 0) {
+        const citedSet = new Set(supportCheck.citedPages);
+        const matchedPages = activeDocument.pages.filter((p) => citedSet.has(p.pageNumber));
+        const contextText = matchedPages
+          .map((p) => `[Page ${p.pageNumber}]\n${p.content}`)
+          .join('\n\n');
+        return {
+          contextText,
+          citedPages: supportCheck.citedPages,
+          validPageNumbers,
+          isSupported: true,
+        };
+      }
+
+      // Topic is not in the uploaded pages; still pass full document context so server can verify
+      const fallbackContext = activeDocument.pages
+        .slice(0, 3)
+        .map((p) => `[Page ${p.pageNumber}]\n${p.content}`)
+        .join('\n\n');
+      return {
+        contextText: fallbackContext,
+        citedPages: [],
+        validPageNumbers,
+        isSupported: false,
+      };
+    },
+    [activeDocument.pages]
+  );
+
+  const handleRunVideoLesson = async (topicOverride?: string) => {
+    const targetTopic = (topicOverride ?? videoTopicInput).trim() || selectedTopic || 'Core Concept';
+    if (topicOverride) {
+      setVideoTopicInput(topicOverride);
+    }
+
+    cancelSpeechAndTimers();
     setIsGeneratingVideo(true);
-    setActiveSceneIdx(0);
+
+    const { contextText, citedPages, validPageNumbers } =
+      extractDocumentContextForTopic(targetTopic);
+    const preferredLanguage = studyStorage.getStudentProfile()?.preferredLanguage;
+
     try {
-      const contextText = activeDocument.pages
-        .slice(0, 2)
-        .map((p) => p.content)
-        .join('\n');
       const res = await aiStudyClient.generateVideoLesson({
-        topic: videoTopicInput,
+        topic: targetTopic,
         contextText,
         aspectRatio: videoAspectRatio,
         sourceImageDataUrl: videoSourceImage,
+        documentTitle: activeDocument.title,
+        citedPages,
+        validPageNumbers,
+        preferredLanguage,
       });
-      setVideoResult(res);
-      setAnimationProgress(0.65);
-      if (res.jobId && res.omniStatus === 'higgsfield_processing') {
-        void pollVideoJob(res.jobId);
-      }
-    } catch (err) {
+
+      const validated = validateAndSanitizeAnimatedExplanation(
+        { scenes: res.scenes },
+        {
+          topic: targetTopic,
+          contextText,
+          citedPages: res.citedPages ?? citedPages,
+          validPageNumbers,
+        }
+      );
+
       setVideoResult({
-        topic: videoTopicInput,
-        omniStatus: 'video_failed',
-        userFacingNotice: err instanceof Error ? err.message : 'Could not generate the video.',
-        scenes: [],
+        ...res,
+        topic: targetTopic,
+        citedPages: validated.citedPages,
+        isSupportedByMaterial: validated.isSupportedByMaterial,
+        scenes: validated.scenes,
       });
+      setPlayerState((prev) => ({
+        ...createInitialScenePlayerState(),
+        isMuted: prev.isMuted,
+      }));
+    } catch (err) {
+      const fallbackScenes = buildAnimatedExplanationScenes(
+        targetTopic,
+        contextText,
+        citedPages,
+        validPageNumbers
+      );
+      setVideoResult({
+        topic: targetTopic,
+        omniStatus: 'animated_explanation_ready',
+        isAiGenerated: false,
+        verificationStatus: 'WORKING_WITH_NON_AI_FALLBACK',
+        fallbackMode: 'animated_explanation',
+        citedPages: fallbackScenes[0]?.citedPages || [],
+        isSupportedByMaterial: fallbackScenes[0]?.isSupportedByMaterial || false,
+        userFacingNotice:
+          err instanceof Error
+            ? `Could not reach live AI service (${err.message}). Showing the built-in JEE multi-scene animated explanation template.`
+            : 'Could not reach live AI service. Showing the built-in JEE multi-scene animated explanation template.',
+        scenes: fallbackScenes,
+      });
+      setPlayerState((prev) => ({
+        ...createInitialScenePlayerState(),
+        isMuted: prev.isMuted,
+      }));
     } finally {
       setIsGeneratingVideo(false);
     }
@@ -416,7 +581,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-6 overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:gap-6">
           {(
             [
               { id: 'visualize', label: 'Diagram Maker' },
@@ -431,7 +596,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 type="button"
                 onClick={() => setSubTab(item.id)}
                 data-testid={`studio-tab-${item.id}`}
-                className={`relative pb-3 pt-1 text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                className={`relative pb-2.5 sm:pb-3 pt-1 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
                   active
                     ? 'text-brand dark:text-indigo-400 font-semibold'
                     : 'text-muted dark:text-slate-400 hover:text-ink dark:hover:text-slate-200'
@@ -678,111 +843,308 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
       )}
 
       {/* =====================================================================
-       * 2. ANIMATED EXPLANATION (Phase 5.2 - Higgsfield Paused)
+       * 2. ANIMATED EXPLANATION (Phase 5.2 - Source-Grounded Multi-Scene Player)
        * ===================================================================== */}
       {subTab === 'videolesson' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 space-y-5 shadow-2xs">
-          <div className="p-3.5 rounded-2xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-xs text-sky-950 dark:text-sky-200 flex items-center justify-between gap-2">
-            <span>
-              <strong>Phase 5.2 Scheduled:</strong> Animated video synthesis via external AI
-              generators is safely paused. You can still test the interactive multi-scene storyboard
-              player below.
-            </span>
-            <span className="px-2.5 py-0.5 rounded-full bg-white dark:bg-slate-800 border border-sky-300 dark:border-sky-700 text-[11px] font-bold shrink-0">
-              Interactive Storyboard
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-ink dark:text-slate-100">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-3 sm:p-6 space-y-5 shadow-2xs">
+          {/* Header & Controls */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-md bg-brand-soft dark:bg-indigo-950/70 text-brand dark:text-indigo-300 text-[11px] font-bold uppercase tracking-wider">
+                  Phase 5.2 · Narrated Scene Player
+                </span>
+                <span className="text-[11px] text-muted dark:text-slate-400">
+                  4–6 Progressive Diagram Scenes · App-Owned SVG
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-bold text-ink dark:text-slate-100">
                 Animated Concept Explanations
               </h2>
               <p className="text-xs text-muted dark:text-slate-400">
-                Multi-scene storyboard with governing equations and an interactive timeline player.
+                Choose a concept from <span className="font-semibold text-ink dark:text-slate-200">{activeDocument.title}</span> or enter a JEE Physics, Chemistry, or Maths request below.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto">
               <input
                 type="text"
+                aria-label="Concept or topic for animated explanation"
+                data-testid="animated-topic-input"
                 value={videoTopicInput}
                 onChange={(e) => setVideoTopicInput(e.target.value)}
-                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100 min-w-[200px]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isGeneratingVideo) {
+                    void handleRunVideoLesson();
+                  }
+                }}
+                placeholder="e.g., Conditional Probability & Bayes' Theorem, Inclined Plane FBD..."
+                className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-ink dark:text-slate-100 sm:min-w-[280px] focus:outline-none focus:border-brand"
               />
-              <select
-                aria-label="Video aspect ratio"
-                value={videoAspectRatio}
-                onChange={(e) => setVideoAspectRatio(e.target.value as '16:9' | '9:16')}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100"
-              >
-                <option value="16:9">16:9 Landscape</option>
-                <option value="9:16">9:16 Vertical</option>
-              </select>
-              <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100 cursor-pointer">
-                <Upload className="w-3.5 h-3.5 text-brand dark:text-indigo-400" />
-                <span>{videoSourceImage ? 'Image Attached ✓' : 'Reference Image'}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleUploadVideoSourceImage}
-                  className="hidden"
-                />
-              </label>
               <button
                 type="button"
                 disabled={isGeneratingVideo}
                 onClick={() => void handleRunVideoLesson()}
                 data-testid="generate-video-lesson-btn"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer disabled:opacity-60 shrink-0"
               >
-                <Video className="w-3.5 h-3.5" />
-                <span>{isGeneratingVideo ? 'Building Lesson...' : 'Generate Explanation'}</span>
+                {isGeneratingVideo ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Building 4–6 Scenes...</span>
+                  </>
+                ) : (
+                  <>
+                    <Video className="w-3.5 h-3.5" />
+                    <span>Generate Explanation</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
 
-          {videoResult ? (
-            <div className="space-y-4">
-              <div className="p-6 rounded-3xl bg-slate-900 text-white space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-sky-400">
-                    Animated Explanation • Scene{' '}
-                    {videoResult.scenes[activeSceneIdx]?.sceneNumber || 1} of{' '}
-                    {videoResult.scenes.length}
-                  </span>
-                  <div className="flex items-center gap-2">
+          {/* Active Document Concept Chips & Subject Presets */}
+          <div className="space-y-2.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-muted dark:text-slate-400 mr-1">
+                From Active Material:
+              </span>
+              {activeDocument.topics.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  data-testid={`doc-topic-chip-${t.id}`}
+                  onClick={() => void handleRunVideoLesson(t.name)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                    videoTopicInput === t.name
+                      ? 'bg-brand-soft dark:bg-indigo-950/80 border-brand text-brand dark:text-indigo-300 font-semibold'
+                      : 'bg-slate-50 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-ink dark:text-slate-200 hover:border-brand/40'
+                  }`}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-muted dark:text-slate-400 mr-1">
+                JEE Subject Walkthroughs:
+              </span>
+              {[
+                {
+                  id: 'physics-incline',
+                  subject: 'Physics',
+                  label: 'Physics: Block on Inclined Plane FBD',
+                  topic: 'Block on an Inclined Plane with Gravity mg, Normal Reaction N, and Friction',
+                },
+                {
+                  id: 'chemistry-vsepr',
+                  subject: 'Chemistry',
+                  label: 'Chemistry: VSEPR H₂O & sp³ Bond Angles',
+                  topic: 'VSEPR Theory: Lone Pair Repulsion & Bond Angles in CH4, NH3, and H2O',
+                },
+                {
+                  id: 'math-bayes',
+                  subject: 'Mathematics',
+                  label: "Maths: Conditional Probability & Bayes' Theorem",
+                  topic: "Conditional Probability, Law of Total Probability & Bayes' Theorem",
+                },
+                {
+                  id: 'math-parabola',
+                  subject: 'Mathematics',
+                  label: 'Maths: Parabola y² = 4ax & Latus Rectum',
+                  topic: 'Parabola y² = 4ax Focus, Directrix, Latus Rectum & Parametric Tangent',
+                },
+              ].map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid={`animated-preset-${preset.id}`}
+                  onClick={() => void handleRunVideoLesson(preset.topic)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-body dark:text-slate-300 hover:border-brand hover:text-brand dark:hover:text-indigo-300 transition-colors cursor-pointer"
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Honest AI / Fallback Status Banner + Retry */}
+          {videoResult && (
+            <div
+              data-testid={
+                videoResult.isAiGenerated ? 'animated-ai-banner' : 'animated-fallback-banner'
+              }
+              className={`p-3.5 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                videoResult.isAiGenerated
+                  ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/70 text-emerald-950 dark:text-emerald-200'
+                  : 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/70 text-amber-950 dark:text-amber-200'
+              }`}
+            >
+              <div className="flex items-start gap-2.5">
+                {videoResult.isAiGenerated ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                )}
+                <div className="space-y-0.5">
+                  <div className="font-bold">
+                    {videoResult.isAiGenerated
+                      ? `Live AI Animated Explanation (${videoResult.scenes.length} Scenes)`
+                      : `Built-in JEE Multi-Scene Fallback Template (${videoResult.scenes.length} Scenes)`}
+                  </div>
+                  <p className="text-[11px] opacity-90">
+                    {videoResult.userFacingNotice ||
+                      'Validated structured scenes with progressive 2D vector diagrams.'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={isGeneratingVideo}
+                onClick={() => void handleRunVideoLesson()}
+                data-testid="retry-animated-lesson-btn"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-ink dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer shrink-0 self-start sm:self-center"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Retry Generation</span>
+              </button>
+            </div>
+          )}
+
+          {/* Main Narrated Slideshow Player */}
+          {videoResult && videoResult.scenes.length > 0 ? (
+            playerState.isOpen && activeScene ? (
+              <div
+                data-testid="animated-scene-player"
+                className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/70 p-3 sm:p-6 space-y-5"
+              >
+                {/* Top Player Control Bar */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        data-testid="scene-counter-badge"
+                        className="px-2.5 py-1 rounded-lg bg-brand text-white text-xs font-bold"
+                      >
+                        Scene {activeScene.sceneNumber} of {videoResult.scenes.length}
+                      </span>
+                      <span className="text-xs font-semibold text-muted dark:text-slate-400">
+                        {videoResult.topic}
+                      </span>
+                      {activeScene.citedPages && activeScene.citedPages.length > 0 ? (
+                        <div
+                          data-testid="scene-citations"
+                          className="inline-flex flex-wrap items-center gap-1.5"
+                        >
+                          {activeScene.citedPages.map((pageNum) => (
+                            <button
+                              key={pageNum}
+                              type="button"
+                              onClick={() => onNavigateToPage?.(pageNum)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold text-brand dark:text-indigo-300 hover:bg-indigo-100 cursor-pointer"
+                              title={`Jump to Page ${pageNum} in study notes`}
+                            >
+                              <BookOpen className="w-3 h-3" />
+                              <span>Cited: Page {pageNum}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <span
+                          data-testid="scene-citations-unsupported"
+                          className="px-2 py-0.5 rounded-md bg-slate-200/70 dark:bg-slate-800 text-[11px] font-medium text-muted dark:text-slate-400"
+                        >
+                          Standard JEE Syllabus (Not in uploaded pages)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Playback, Navigation, Mute, Save & Close Buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        const nextState = !isPlayingStoryboard;
-                        setIsPlayingStoryboard(nextState);
-                        if (nextState && 'speechSynthesis' in window) {
-                          window.speechSynthesis.cancel();
-                          const utter = new SpeechSynthesisUtterance(
-                            videoResult.scenes[activeSceneIdx]?.narration || ''
-                          );
-                          utter.onend = () => setIsPlayingStoryboard(false);
-                          window.speechSynthesis.speak(utter);
-                        } else if ('speechSynthesis' in window) {
-                          window.speechSynthesis.cancel();
-                        }
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer"
+                      data-testid="scene-prev-btn"
+                      disabled={playerState.activeSceneIndex <= 0}
+                      onClick={() =>
+                        dispatchPlayer({
+                          type: 'PREV_SCENE',
+                          totalScenes: videoResult.scenes.length,
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
+                      title="Previous Scene"
                     >
-                      {isPlayingStoryboard ? (
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Prev</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="scene-play-pause-btn"
+                      onClick={() => dispatchPlayer({ type: 'TOGGLE_PLAY' })}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer"
+                    >
+                      {playerState.isPlaying ? (
                         <>
                           <Pause className="w-3.5 h-3.5" />
-                          <span>Pause Animation</span>
+                          <span>Pause</span>
                         </>
                       ) : (
                         <>
                           <Play className="w-3.5 h-3.5" />
-                          <span>Play Animated Scene</span>
+                          <span>Play Narration</span>
                         </>
                       )}
                     </button>
+
                     <button
                       type="button"
+                      data-testid="scene-next-btn"
+                      disabled={playerState.activeSceneIndex >= videoResult.scenes.length - 1}
+                      onClick={() =>
+                        dispatchPlayer({
+                          type: 'NEXT_SCENE',
+                          totalScenes: videoResult.scenes.length,
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 cursor-pointer"
+                      title="Next Scene"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="scene-mute-btn"
+                      aria-pressed={playerState.isMuted}
+                      onClick={() => dispatchPlayer({ type: 'TOGGLE_MUTE' })}
+                      className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold cursor-pointer ${
+                        playerState.isMuted
+                          ? 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-ink dark:text-slate-100'
+                      }`}
+                      title={playerState.isMuted ? 'Unmute voice narration' : 'Mute voice narration'}
+                    >
+                      {playerState.isMuted ? (
+                        <>
+                          <VolumeX className="w-3.5 h-3.5" />
+                          <span>Muted</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5" />
+                          <span>Voice On</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="save-animated-lesson-btn"
                       onClick={() =>
                         handleSaveCreativeAsset(
                           'video_lesson',
@@ -790,91 +1152,296 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                           videoResult
                         )
                       }
-                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-ink dark:text-slate-100 cursor-pointer"
                     >
-                      Save Lesson
+                      <Bookmark className="w-3.5 h-3.5 text-brand dark:text-indigo-400" />
+                      <span>Save</span>
                     </button>
-                  </div>
-                </div>
 
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-                  <svg viewBox="0 0 600 170" className="w-full h-40">
-                    <line x1="30" y1="145" x2="570" y2="145" stroke="#334155" strokeWidth="2" />
-                    <polyline
-                      fill="none"
-                      stroke="#38bdf8"
-                      strokeWidth="3.5"
-                      points={Array.from({ length: 32 }, (_, idx) => {
-                        const t = (idx / 31) * animationProgress;
-                        const x = 40 + t * 500;
-                        const y = 145 - Math.sin(t * Math.PI) * 105;
-                        return `${x.toFixed(1)},${y.toFixed(1)}`;
-                      }).join(' ')}
-                    />
-                    <circle
-                      cx={40 + animationProgress * 500}
-                      cy={145 - Math.sin(animationProgress * Math.PI) * 105}
-                      r="7"
-                      fill="#facc15"
-                    />
-                    <text x="40" y="28" fill="#38bdf8" fontSize="13" fontWeight="bold">
-                      {videoResult.scenes[activeSceneIdx]?.heading}
-                    </text>
-                    <text x="40" y="48" fill="#facc15" fontSize="12" fontFamily="monospace">
-                      Governing Formula: {videoResult.scenes[activeSceneIdx]?.keyFormula}
-                    </text>
-                  </svg>
-
-                  <div className="flex items-center gap-3">
-                    <span className="text-[11px] text-slate-400">Scrub Timeline:</span>
-                    <input
-                      type="range"
-                      min={0.05}
-                      max={1}
-                      step={0.02}
-                      value={animationProgress}
-                      onChange={(e) => setAnimationProgress(Number(e.target.value))}
-                      className="flex-1 accent-[#38bdf8]"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-5 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-base font-bold text-white">
-                      {videoResult.scenes[activeSceneIdx]?.heading}
-                    </div>
-                    <span className="px-3 py-1 rounded-lg bg-brand/20 border border-brand/40 font-mono text-xs text-blue-200">
-                      {videoResult.scenes[activeSceneIdx]?.keyFormula}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-200 leading-relaxed">
-                    &ldquo;{videoResult.scenes[activeSceneIdx]?.narration}&rdquo;
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {videoResult.scenes.map((sc, i) => (
                     <button
-                      key={sc.sceneNumber}
                       type="button"
-                      onClick={() => setActiveSceneIdx(i)}
-                      className={`p-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                        activeSceneIdx === i
-                          ? 'bg-brand text-white font-semibold'
-                          : 'bg-white/5 hover:bg-white/10 text-slate-300'
-                      }`}
+                      data-testid="scene-close-btn"
+                      onClick={() => dispatchPlayer({ type: 'CLOSE_PLAYER' })}
+                      className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/40 text-xs font-semibold text-muted hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                      title="Close scene player and stop narration"
                     >
-                      Scene {sc.sceneNumber}: {sc.heading}
+                      <X className="w-4 h-4" />
+                      <span className="sr-only sm:not-sr-only">Close</span>
                     </button>
-                  ))}
+                  </div>
+                </div>
+
+                {/* Scene Selector Strip (Scenes 1..N) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {videoResult.scenes.map((sc, i) => {
+                    const isSelected = playerState.activeSceneIndex === i;
+                    return (
+                      <button
+                        key={sc.sceneNumber}
+                        type="button"
+                        data-testid={`scene-select-btn-${i}`}
+                        onClick={() =>
+                          dispatchPlayer({
+                            type: 'SELECT_SCENE',
+                            sceneIndex: i,
+                            totalScenes: videoResult.scenes.length,
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-brand text-white border-brand shadow-xs'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-ink dark:text-slate-200 hover:border-brand/40'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider opacity-80">
+                          <span>Scene {sc.sceneNumber}</span>
+                          <span>{sc.durationSeconds}s</span>
+                        </div>
+                        <div className="text-xs font-semibold line-clamp-1 mt-0.5">
+                          {sc.heading}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Main 2-Column Content: Progressive Diagram + Teaching Point / Formula / Narration */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                  {/* Left Column: Progressive Step Controls + App-Owned SVG DiagramRenderer */}
+                  <div className="lg:col-span-7 space-y-3">
+                    {activeSceneSteps.length > 0 && (
+                      <div
+                        data-testid="progressive-steps-bar"
+                        className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-brand dark:text-indigo-400">
+                            Progressive Diagram Build ({playerState.activeStepIndex + 1} of{' '}
+                            {activeSceneSteps.length})
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              data-testid="step-prev-btn"
+                              disabled={playerState.activeStepIndex <= 0}
+                              onClick={() =>
+                                dispatchPlayer({
+                                  type: 'PREV_STEP',
+                                  totalSteps: activeSceneSteps.length,
+                                })
+                              }
+                              className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-ink dark:text-slate-200 disabled:opacity-40 cursor-pointer"
+                            >
+                              − Step
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="step-next-btn"
+                              disabled={playerState.activeStepIndex >= activeSceneSteps.length - 1}
+                              onClick={() =>
+                                dispatchPlayer({
+                                  type: 'NEXT_STEP',
+                                  totalSteps: activeSceneSteps.length,
+                                  totalScenes: videoResult.scenes.length,
+                                  autoAdvanceScene: false,
+                                })
+                              }
+                              className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-ink dark:text-slate-200 disabled:opacity-40 cursor-pointer"
+                            >
+                              + Step
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {activeSceneSteps.map((st, sIdx) => {
+                            const active = playerState.activeStepIndex === sIdx;
+                            return (
+                              <button
+                                key={st.stepNumber}
+                                type="button"
+                                data-testid={`step-select-btn-${sIdx}`}
+                                onClick={() =>
+                                  dispatchPlayer({
+                                    type: 'SELECT_STEP',
+                                    stepIndex: sIdx,
+                                    totalSteps: activeSceneSteps.length,
+                                  })
+                                }
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                  active
+                                    ? 'bg-brand text-white'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-muted dark:text-slate-300 hover:text-ink'
+                                }`}
+                              >
+                                {st.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <p
+                          data-testid="active-step-description"
+                          className="text-xs text-body dark:text-slate-300"
+                        >
+                          {activeSceneSteps[playerState.activeStepIndex]?.description}
+                        </p>
+                      </div>
+                    )}
+
+                    <DiagramRenderer
+                      spec={getSceneSpecForProgressiveStep(
+                        activeScene,
+                        playerState.activeStepIndex
+                      )}
+                      isDarkTheme={isDark}
+                      onNavigateToPage={onNavigateToPage}
+                    />
+                  </div>
+
+                  {/* Right Column: Scene Heading, Teaching Point, Key Formula & Visible Narration */}
+                  <div className="lg:col-span-5 space-y-4">
+                    {/* Scene Heading & Governing Formula */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
+                      <div className="space-y-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-brand dark:text-indigo-400">
+                          Scene {activeScene.sceneNumber} Breakdown
+                        </span>
+                        <h3
+                          data-testid="scene-heading"
+                          className="text-base sm:text-lg font-bold text-ink dark:text-slate-100"
+                        >
+                          {activeScene.heading}
+                        </h3>
+                      </div>
+
+                      {/* Teaching Point */}
+                      <div
+                        data-testid="scene-teaching-point"
+                        className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 space-y-1"
+                      >
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-brand dark:text-indigo-300">
+                          Key Teaching Point
+                        </div>
+                        <p className="text-xs sm:text-sm font-medium text-ink dark:text-slate-100 leading-relaxed">
+                          {activeScene.teachingPoint}
+                        </p>
+                      </div>
+
+                      {/* Governing Formula */}
+                      {activeScene.keyFormula && (
+                        <div
+                          data-testid="scene-key-formula"
+                          className="p-3.5 rounded-xl bg-slate-900 dark:bg-slate-950 border border-slate-800 space-y-1"
+                        >
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                            Governing JEE Formula
+                          </div>
+                          <div className="font-mono text-xs sm:text-sm font-bold text-white break-words">
+                            {activeScene.keyFormula}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Visible Narration */}
+                      <div
+                        data-testid="scene-visible-narration"
+                        className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted dark:text-slate-400">
+                            Visible Narration Transcript
+                          </span>
+                          <span className="text-[10px] font-semibold text-brand dark:text-indigo-400">
+                            {playerState.isPlaying
+                              ? playerState.isMuted
+                                ? 'Playing (Muted)'
+                                : 'Speaking Aloud'
+                              : 'Paused'}
+                          </span>
+                        </div>
+                        <p className="text-xs sm:text-sm text-body dark:text-slate-200 leading-relaxed">
+                          &ldquo;{activeScene.narration}&rdquo;
+                        </p>
+                      </div>
+
+                      {/* Highlight Values */}
+                      {activeScene.highlightValues && activeScene.highlightValues.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-muted dark:text-slate-400">
+                            Exam Checkpoints
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {activeScene.highlightValues.map((hv, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-ink dark:text-slate-200"
+                              >
+                                {hv}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Safety Disclosure & Report Action */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-muted dark:text-slate-400">
+                        <span>
+                          Verify formulas against your NCERT / JEE notes.
+                        </span>
+                        <ReportButton
+                          kind="tutor_answer"
+                          excerpt={`${activeScene.heading}: ${activeScene.teachingPoint} — ${activeScene.narration}`}
+                          documentId={activeDocument.id}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div
+                data-testid="animated-player-closed"
+                className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3"
+              >
+                <div className="space-y-0.5 text-center sm:text-left">
+                  <div className="text-sm font-bold text-ink dark:text-slate-100">
+                    Player closed for &ldquo;{videoResult.topic}&rdquo; ({videoResult.scenes.length}{' '}
+                    scenes ready)
+                  </div>
+                  <p className="text-xs text-muted dark:text-slate-400">
+                    Narration has been stopped. Reopen the slideshow player or generate another concept.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="reopen-scene-player-btn"
+                  onClick={() =>
+                    setPlayerState((prev) => ({
+                      ...createInitialScenePlayerState(),
+                      isMuted: prev.isMuted,
+                    }))
+                  }
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer shrink-0"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Reopen Scene Player</span>
+                </button>
+              </div>
+            )
           ) : (
-            <div className="p-8 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-muted dark:text-slate-400">
-              Click &quot;Generate Explanation&quot; to synthesize an interactive storyboard for{' '}
-              <span className="font-semibold text-ink dark:text-slate-200">{videoTopicInput}</span>.
+            <div className="p-8 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-3">
+              <p className="text-xs text-muted dark:text-slate-400">
+                Select a concept chip above or click{' '}
+                <span className="font-semibold text-ink dark:text-slate-200">
+                  &ldquo;Generate Explanation&rdquo;
+                </span>{' '}
+                to build a 4–6 scene narrated explanation with progressive diagrams for{' '}
+                <span className="font-semibold text-ink dark:text-slate-200">
+                  {videoTopicInput}
+                </span>
+                .
+              </p>
             </div>
           )}
         </div>
@@ -892,7 +1459,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                 <span>Saved Studio Assets ({filteredSavedAssets.length})</span>
               </h2>
               <p className="text-xs text-muted dark:text-slate-400">
-                Reopen, inspect, and export your saved diagrams and lesson materials.
+                Reopen, inspect, and export your saved diagrams and animated explanations.
               </p>
             </div>
 
@@ -931,15 +1498,19 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
             <div className="p-10 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-2">
               <p className="text-xs text-muted dark:text-slate-400">
                 {savedFilter === 'current'
-                  ? `No saved assets for "${activeDocument.title}". Switch to "All Documents" or save a diagram from the Diagram Maker tab.`
-                  : 'No saved diagrams or visual explanations yet. Generate and save one above!'}
+                  ? `No saved assets for "${activeDocument.title}". Switch to "All Documents" or save a diagram or animated explanation.`
+                  : 'No saved diagrams or animated explanations yet. Generate and save one above!'}
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredSavedAssets.map((asset) => {
                 const isDiagram = asset.type === 'visual_diagram';
+                const isVideoLesson = asset.type === 'video_lesson';
                 const spec = asset.payload?.spec as StructuredDiagramSpec | undefined;
+                const savedScenes = Array.isArray(asset.payload?.scenes)
+                  ? asset.payload.scenes
+                  : [];
 
                 return (
                   <div
@@ -949,7 +1520,11 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-brand-soft dark:bg-indigo-950/60 text-brand dark:text-indigo-400 border border-brand/20 dark:border-indigo-800/40">
-                          {isDiagram ? 'Vector Diagram' : asset.type.replace('_', ' ')}
+                          {isDiagram
+                            ? 'Vector Diagram'
+                            : isVideoLesson
+                              ? `Animated Lesson (${savedScenes.length} Scenes)`
+                              : asset.type.replace('_', ' ')}
                         </span>
                         <span className="text-[11px] text-slate-400 dark:text-slate-500">
                           {new Date(asset.createdAt).toLocaleDateString()}
@@ -961,7 +1536,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                       </h3>
 
                       <p className="text-xs text-muted dark:text-slate-400 line-clamp-2">
-                        {spec?.description || `Topic: ${asset.topic}`}
+                        {spec?.description ||
+                          savedScenes[0]?.teachingPoint ||
+                          `Topic: ${asset.topic}`}
                       </p>
 
                       {spec?.citedPages && spec.citedPages.length > 0 && (
@@ -995,6 +1572,22 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                               <span>SVG</span>
                             </button>
                           </>
+                        )}
+                        {isVideoLesson && savedScenes.length > 0 && (
+                          <button
+                            type="button"
+                            data-testid="open-saved-lesson-btn"
+                            onClick={() => {
+                              setVideoResult(asset.payload as VideoLessonResponse);
+                              setVideoTopicInput(asset.payload?.topic || asset.topic);
+                              setPlayerState(createInitialScenePlayerState());
+                              setSubTab('videolesson');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-brand/10 dark:bg-indigo-950/60 hover:bg-brand/20 text-brand dark:text-indigo-400 text-xs font-semibold cursor-pointer transition-colors"
+                          >
+                            <Play className="w-3.5 h-3.5" />
+                            <span>Open in Player</span>
+                          </button>
                         )}
                       </div>
 

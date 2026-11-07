@@ -296,16 +296,58 @@ export function App() {
     };
   }, []);
 
+  const isAutostartTestMode =
+    typeof window !== 'undefined' &&
+    !import.meta.env.PROD &&
+    new URLSearchParams(window.location.search).get('autostart') === '1';
+
   useEffect(() => {
-    if (!isAuthReady || user || publicRoute) return;
+    if (!isAuthReady || user || publicRoute || isAutostartTestMode) return;
     setPublicRoute('landing');
     if (typeof window !== 'undefined' && window.location.hash !== '#landing') {
       window.history.replaceState(null, '', '#landing');
       window.scrollTo({ top: 0 });
     }
-  }, [isAuthReady, user, publicRoute]);
+  }, [isAuthReady, user, publicRoute, isAutostartTestMode]);
 
   useEffect(() => {
+    if (isAutostartTestMode) {
+      let docs = studyStorage.getDocuments();
+      if (docs.length === 0) {
+        const sample = buildSampleChapterDocument();
+        studyStorage.saveDocument(sample);
+        studyStorage.setActiveDocumentId(sample.id);
+        docs = studyStorage.getDocuments();
+      }
+      const existingProfile = studyStorage.getStudentProfile();
+      if (!existingProfile.setupCompleted || existingProfile.ageBand !== '16_17') {
+        const updatedProfile = studyStorage.saveStudentProfile({
+          ...existingProfile,
+          fullName: existingProfile.fullName || 'Aarav Sharma',
+          schoolClass: 'Class 12',
+          ageBand: '16_17',
+          setupCompleted: true,
+        });
+        setStudentProfile(updatedProfile);
+      } else {
+        setStudentProfile(existingProfile);
+      }
+      setDocuments(docs);
+      const activeId = studyStorage.getActiveDocumentId();
+      setActiveDoc(docs.find((d) => d.id === activeId) || docs[0] || null);
+      setNotifications(studyStorage.getNotifications());
+      setUser({
+        uid: 'dev-student-local',
+        email: 'student@learnmate.local',
+        emailVerified: true,
+        displayName: 'Aarav Sharma',
+        providerData: [],
+      } as unknown as User);
+      setAccountSynced(true);
+      setIsAuthReady(true);
+      return;
+    }
+
     const docs = studyStorage.getDocuments();
     setDocuments(docs);
     const activeId = studyStorage.getActiveDocumentId();
@@ -330,7 +372,7 @@ export function App() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [isAutostartTestMode]);
 
   const handleSetupComplete = (answers: FirstRunAnswers) => {
     const updated: StudentAcademicProfile = {
@@ -753,7 +795,7 @@ export function App() {
     return landingElement;
   }
 
-  if (!firebaseConfigured) {
+  if (!firebaseConfigured && !isAutostartTestMode) {
     if (publicRoute === 'signin' || publicRoute === 'signup') {
       return <FirebaseSetupScreen />;
     }
