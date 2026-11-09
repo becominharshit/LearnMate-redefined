@@ -4,15 +4,21 @@ import {
   BookOpen,
   ExternalLink,
   FlaskConical,
-  GraduationCap,
   Plus,
   ShieldCheck,
   Sigma,
+  FileText,
+  Scale,
+  Info,
+  Calendar,
+  Check,
 } from 'lucide-react';
 import { JEE_MAIN_2027_KEY_DATES } from '../utils/jeeCalendar';
+import { SYLLABUS_VERSIONS, type ExamTrackId } from '../data/jeeSyllabusAndNotes';
 
 interface ResourcesViewProps {
   onImportReferenceNotes?: (title: string, content: string) => void;
+  onOpenSyllabus?: (exam: ExamTrackId) => void;
 }
 
 interface OfficialPortal {
@@ -22,50 +28,61 @@ interface OfficialPortal {
   badge: string;
   description: string;
   url: string;
+  verifiedAt: string;
 }
 
 const OFFICIAL_PORTALS: OfficialPortal[] = [
   {
     id: 'sathee',
-    name: 'SATHEE (IIT Kanpur & Ministry of Education)',
-    organization: 'IIT Kanpur · MoE Govt. of India',
-    badge: 'FREE LECTURES & PRACTICE',
-    description:
-      'Free JEE Main preparation portal built by IIT Kanpur with concept videos, chapter tests, and NCERT-aligned questions.',
+    name: 'SATHEE (IIT Kanpur)',
+    organization: 'IIT Kanpur · Ministry of Education',
+    badge: 'FREE LECTURES & TESTS',
+    description: 'JEE preparation portal with concept videos, NCERT exemplars, and chapter tests.',
     url: 'https://sathee.iitk.ac.in/',
+    verifiedAt: '2026-11-01',
   },
   {
     id: 'nta-abhyas',
-    name: 'National Test Abhyas (NTA)',
-    organization: 'National Testing Agency',
+    name: 'National Test Abhyas',
+    organization: 'National Testing Agency (NTA)',
     badge: 'OFFICIAL MOCK TESTS',
-    description:
-      'Official NTA practice papers and CBT interface simulations for JEE Main Physics, Chemistry and Mathematics.',
+    description: 'Official NTA practice papers and CBT interface simulations for Physics, Chemistry, and Maths.',
     url: 'https://nta.in/Abhyas',
+    verifiedAt: '2026-11-01',
   },
   {
     id: 'jee-main-portal',
-    name: 'JEE (Main) Official Portal',
-    organization: 'National Testing Agency',
+    name: 'JEE Main Official Portal',
+    organization: 'National Testing Agency (NTA)',
     badge: 'BULLETIN & SYLLABUS',
-    description:
-      'Official information bulletin, syllabus PDF, application notices, city intimation slips and admit cards.',
+    description: 'Official information bulletin, rationalized syllabus PDF, and application notices.',
     url: 'https://jeemain.nta.nic.in/',
+    verifiedAt: '2026-11-01',
+  },
+  {
+    id: 'jee-adv-portal',
+    name: 'JEE Advanced Official Portal',
+    organization: 'IIT Joint Admission Board (JAB)',
+    badge: 'OFFICIAL PAST PAPERS',
+    description: 'Official JEE (Advanced) Paper 1 & Paper 2 archives, syllabus PDF, and information brochure.',
+    url: 'https://jeeadv.ac.in/',
+    verifiedAt: '2026-11-01',
   },
   {
     id: 'ncert-textbooks',
-    name: 'NCERT e-Textbooks (Class 11 & 12)',
+    name: 'NCERT e-Textbooks',
     organization: 'NCERT',
     badge: 'OFFICIAL TEXTBOOKS',
-    description:
-      'Free chapter-wise PDFs for Class 11 and Class 12 Physics, Chemistry and Mathematics — the foundation of JEE Main.',
+    description: 'Free chapter-wise PDFs for Class 11 and Class 12 Physics, Chemistry, and Mathematics.',
     url: 'https://ncert.nic.in/textbook.php',
+    verifiedAt: '2026-11-01',
   },
 ];
 
 interface HighYieldStarterSheet {
   id: string;
   subject: 'Physics' | 'Chemistry' | 'Mathematics';
+  chapterId: string;
   title: string;
   summary: string;
   content: string;
@@ -75,9 +92,10 @@ const HIGH_YIELD_REFERENCE_SHEETS: HighYieldStarterSheet[] = [
   {
     id: 'ref-physics-mechanics',
     subject: 'Physics',
-    title: 'JEE Main Physics — Rotational Motion & Gravitation Reference',
+    chapterId: 'ch-phys-work-energy-rotation',
+    title: 'Rotational Motion & Gravitation',
     summary:
-      'Moment of inertia standard results, parallel & perpendicular axis theorems, torque-angular momentum relation, and orbital velocity.',
+      'Moment of inertia standard results, parallel & perpendicular axis theorems, pure rolling on an incline, and orbital/escape speeds.',
     content: `--- Page 1 ---
 Rotational Kinematics & Moment of Inertia
 • Angular equations for constant angular acceleration α:
@@ -112,7 +130,8 @@ Torque, Angular Momentum, Rolling & Gravitation
   {
     id: 'ref-chemistry-thermo',
     subject: 'Chemistry',
-    title: 'JEE Main Chemistry — Chemical Thermodynamics & Equilibrium Reference',
+    chapterId: 'ch-chem-thermo-equilibrium',
+    title: 'Thermodynamics & Equilibrium',
     summary:
       'First law sign conventions (IUPAC), enthalpy, isothermal reversible work, Gibbs free energy, and Van’t Hoff equation.',
     content: `--- Page 1 ---
@@ -134,7 +153,7 @@ Spontaneity, Gibbs Energy & Chemical Equilibrium
 • Relation with Equilibrium Constant K:
   ΔG = ΔG° + RT ln Q
   At equilibrium (ΔG = 0, Q = K): ΔG° = −RT ln K = −2.303 RT log₁₀ K
-•Relation between K_p and K_c:
+• Relation between K_p and K_c:
   K_p = K_c (RT)^(Δn_g)
 • Van’t Hoff Equation (temperature dependence of K):
   log₁₀(K₂ / K₁) = (ΔH° / 2.303 R) · [(T₂ − T₁) / (T₁ T₂)]`,
@@ -142,7 +161,8 @@ Spontaneity, Gibbs Energy & Chemical Equilibrium
   {
     id: 'ref-maths-calculus',
     subject: 'Mathematics',
-    title: 'JEE Main Mathematics — Definite Integration & Differential Equations Reference',
+    chapterId: 'ch-math-integral-calculus-ode',
+    title: 'Integration & Differential Equations',
     summary:
       'King’s property, symmetric interval rules, Leibniz rule, Newton-Leibniz formula, and linear first-order ODE integrating factor.',
     content: `--- Page 1 ---
@@ -170,174 +190,362 @@ First-Order Differential Equations & Area Under Curves
 
 const SUBJECT_BADGE: Record<
   'Physics' | 'Chemistry' | 'Mathematics',
-  { icon: React.ComponentType<{ className?: string }>; className: string }
+  { icon: React.ComponentType<{ className?: string }>; className: string; label: string }
 > = {
-  Physics: { icon: Atom, className: 'bg-physics-soft text-physics' },
-  Chemistry: { icon: FlaskConical, className: 'bg-chemistry-soft text-chemistry' },
-  Mathematics: { icon: Sigma, className: 'bg-maths-soft text-maths' },
+  Physics: { icon: Atom, className: 'bg-physics-soft text-physics', label: 'Physics' },
+  Chemistry: { icon: FlaskConical, className: 'bg-chemistry-soft text-chemistry', label: 'Chemistry' },
+  Mathematics: { icon: Sigma, className: 'bg-maths-soft text-maths', label: 'Maths' },
 };
 
-export const ResourcesView: React.FC<ResourcesViewProps> = ({ onImportReferenceNotes }) => {
+type ExamGuideSection = 'pattern' | 'marking' | 'rules' | 'schedule';
+
+export const ResourcesView: React.FC<ResourcesViewProps> = ({
+  onImportReferenceNotes,
+  onOpenSyllabus,
+}) => {
+  const [activeTab, setActiveTab] = useState<'all' | 'portals' | 'guide' | 'sheets'>('all');
+  const [guideExam, setGuideExam] = useState<ExamTrackId>('jee_main');
+  const [guideDetailSection, setGuideDetailSection] = useState<ExamGuideSection>('pattern');
   const [importedIds, setImportedIds] = useState<Record<string, boolean>>({});
 
-  return (
-    <div className="space-y-8" data-testid="resources-view">
-      {/* Header */}
-      <header className="space-y-2">
-        <p className="lm-kicker">Official JEE Main Resources</p>
-        <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-ink">
-          Free NTA, SATHEE &amp; NCERT Portals
-        </h1>
-        <p className="max-w-2xl text-sm text-muted leading-relaxed">
-          Verified government and academic resources for JEE Main 2027 Session 1. Always cross-check
-          registration dates and syllabus notices against the official NTA portal.
-        </p>
-      </header>
+  const syllabusMeta = SYLLABUS_VERSIONS[guideExam];
 
-      {/* Official External Links */}
-      <section aria-labelledby="official-portals-heading" className="space-y-3">
-        <h2 id="official-portals-heading" className="text-sm font-bold text-ink">
-          Official Portals
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {OFFICIAL_PORTALS.map((portal) => (
+  return (
+    <div className="space-y-6" data-testid="resources-view">
+      {/* Header & Section Tabs matching Image 4 */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-4">
+        <div>
+          <h1 className="font-display text-2xl font-extrabold tracking-tight text-ink">
+            Resources
+          </h1>
+          <p className="text-xs text-muted mt-0.5">
+            Official portals, verified JEE Main &amp; Advanced exam guides, and chapter quick sheets
+          </p>
+        </div>
+
+        <div className="inline-flex rounded-xl border border-line bg-white dark:bg-[#121A2E] p-1">
+          {(
+            [
+              { id: 'all', label: 'Official Portals' },
+              { id: 'guide', label: 'Exam Guide' },
+              { id: 'sheets', label: 'Quick Sheets' },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              data-testid={`resources-tab-${tab.id}`}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                activeTab === tab.id ? 'bg-brand-soft text-brand' : 'text-muted hover:text-ink'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Top 2-Column Grid: Official Portals (left) + Exam Guide (right) matching Image 4 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left: Official Portals */}
+        {(activeTab === 'all' || activeTab === 'portals') && (
+          <section
+            aria-labelledby="official-portals-heading"
+            className="lg:col-span-7 lm-card-editorial p-5 space-y-4"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 id="official-portals-heading" className="font-display text-lg font-extrabold text-ink">
+                Official Portals
+              </h2>
+              {onOpenSyllabus && (
+                <button
+                  type="button"
+                  onClick={() => onOpenSyllabus(guideExam)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-brand/30 bg-brand-soft text-brand text-xs font-bold cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Syllabus</span>
+                </button>
+              )}
+            </div>
+
+            <div className="divide-y divide-line rounded-xl border border-line bg-canvas overflow-hidden">
+              {OFFICIAL_PORTALS.map((portal) => (
+                <a
+                  key={portal.id}
+                  href={portal.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid={`resource-portal-${portal.id}`}
+                  className="px-4 py-3.5 hover:bg-soft transition-colors flex items-center justify-between gap-4 group"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-ink group-hover:text-brand">
+                        {portal.name}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-brand-soft text-brand text-[10px] font-bold">
+                        {portal.badge}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted mt-0.5">{portal.description}</p>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-muted group-hover:text-brand shrink-0" />
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Right: Exam Guide (Main | Advanced toggle + Pattern / Marking / Exam Rules / Schedule) */}
+        {(activeTab === 'all' || activeTab === 'guide') && (
+          <section
+            aria-labelledby="exam-guide-heading"
+            data-testid="resources-exam-guide-card"
+            className={`${
+              activeTab === 'guide' ? 'lg:col-span-12' : 'lg:col-span-5'
+            } lm-card-editorial p-5 space-y-4`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 id="exam-guide-heading" className="font-display text-lg font-extrabold text-ink">
+                Exam Guide
+              </h2>
+
+              <div className="inline-flex rounded-xl border border-line bg-canvas p-0.5 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setGuideExam('jee_main')}
+                  data-testid="exam-guide-toggle-main"
+                  className={`px-3 py-1 rounded-lg cursor-pointer ${
+                    guideExam === 'jee_main' ? 'bg-brand text-white' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  Main
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGuideExam('jee_advanced')}
+                  data-testid="exam-guide-toggle-advanced"
+                  className={`px-3 py-1 rounded-lg cursor-pointer ${
+                    guideExam === 'jee_advanced' ? 'bg-brand text-white' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  Advanced
+                </button>
+              </div>
+            </div>
+
+            {/* 4 Separately Discoverable Buttons: Pattern | Marking | Exam Rules | Schedule */}
+            <div className="grid grid-cols-2 gap-2.5">
+              {(
+                [
+                  { id: 'pattern', label: 'Pattern', icon: FileText },
+                  { id: 'marking', label: 'Marking', icon: Scale },
+                  { id: 'rules', label: 'Exam Rules', icon: Info },
+                  { id: 'schedule', label: 'Schedule', icon: Calendar },
+                ] as const
+              ).map((item) => {
+                const Icon = item.icon;
+                const active = guideDetailSection === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setGuideDetailSection(item.id)}
+                    data-testid={`exam-guide-btn-${item.id}`}
+                    className={`px-3.5 py-2.5 rounded-xl border text-left flex items-center justify-between text-xs font-bold transition-colors cursor-pointer ${
+                      active
+                        ? 'border-brand bg-brand-soft/60 text-brand'
+                        : 'border-line bg-canvas hover:bg-soft text-ink'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Icon className="w-3.5 h-3.5 text-brand" />
+                      {item.label}
+                    </span>
+                    <span>→</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Detail Box for Selected Exam Guide Section */}
+            <div
+              data-testid="exam-guide-detail-box"
+              className="rounded-xl border border-line bg-canvas p-4 space-y-2 text-xs"
+            >
+              {guideDetailSection === 'pattern' &&
+                (guideExam === 'jee_main' ? (
+                  <>
+                    <div className="font-bold text-ink flex items-center justify-between">
+                      <span>JEE (Main) Paper 1 (B.E./B.Tech) Pattern</span>
+                      <span className="text-brand">300 Marks · 180 Min</span>
+                    </div>
+                    <p className="text-muted leading-relaxed">
+                      • 3 Subjects: Physics, Chemistry, and Mathematics (25 questions per subject = 75 total questions).
+                      <br />• Section A: 20 Single-Choice MCQs per subject.
+                      <br />• Section B: 5 Numerical Value questions per subject.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-bold text-ink flex items-center justify-between">
+                      <span>JEE (Advanced) Paper 1 &amp; Paper 2 Structure</span>
+                      <span className="text-brand">2 Compulsory Papers · 3 Hours Each</span>
+                    </div>
+                    <p className="text-muted leading-relaxed">
+                      • Conducted in two mandatory 3-hour sessions: Paper 1 (09:00–12:00 IST) and Paper 2 (14:30–17:30 IST).
+                      <br />• Question formats include One-or-More-Than-One Correct MCQs, Single-Choice MCQs, Non-Negative Integers, and Paragraph/Matching sets.
+                    </p>
+                  </>
+                ))}
+
+              {guideDetailSection === 'marking' &&
+                (guideExam === 'jee_main' ? (
+                  <>
+                    <div className="font-bold text-ink">JEE (Main) Official Marking Scheme</div>
+                    <p className="text-muted leading-relaxed">
+                      • Correct Answer: <strong>+4 marks</strong>
+                      <br />• Incorrect Answer (MCQ or Numerical): <strong>−1 mark</strong>
+                      <br />• Unattempted / Marked for Review without saving: <strong>0 marks</strong>
+                      <br />• Dropped Question: <strong>+4 marks</strong> awarded to all candidates.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-bold text-ink">JEE (Advanced) Partial-Credit &amp; Section Marking</div>
+                    <p className="text-muted leading-relaxed">
+                      • Multi-Correct Section: <strong>+4</strong> if all correct options chosen; <strong>+3 / +2 / +1</strong> partial marks if no wrong option is chosen; <strong>−2</strong> if any wrong option is chosen.
+                      <br />• Single-Choice MCQ: <strong>+3</strong> for correct, <strong>−1</strong> for wrong.
+                      <br />• Non-Negative Integer: <strong>+4</strong> for correct, <strong>0</strong> for wrong.
+                    </p>
+                  </>
+                ))}
+
+              {guideDetailSection === 'rules' && (
+                <>
+                  <div className="font-bold text-ink">
+                    {guideExam === 'jee_main' ? 'NTA CBT Examination Rules' : 'IIT JAB Examination Rules'}
+                  </div>
+                  <p className="text-muted leading-relaxed">
+                    • In NTA CBT, questions marked &quot;Answered &amp; Marked for Review&quot; ARE evaluated for marks upon submission.
+                    <br />• Electronic calculators, smartwatches, and external communication tools are strictly prohibited inside the exam hall.
+                  </p>
+                </>
+              )}
+
+              {guideDetailSection === 'schedule' && (
+                <div className="space-y-1.5">
+                  <div className="font-bold text-ink">
+                    {guideExam === 'jee_main'
+                      ? 'JEE (Main) 2027 Session Windows'
+                      : 'JEE (Advanced) Annual Window'}
+                  </div>
+                  {guideExam === 'jee_main' ? (
+                    <div className="space-y-1">
+                      {JEE_MAIN_2027_KEY_DATES.slice(0, 4).map((d) => (
+                        <div key={d.label} className="flex items-center justify-between text-[11px]">
+                          <span className="text-muted">{d.label}</span>
+                          <span className="font-mono font-bold text-ink">{d.date}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-muted leading-relaxed">
+                      Held annually in late May following JEE (Main) Session 2 results for the top 2,50,000 eligible candidates across categories.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-line flex items-center justify-between text-[10px] text-muted">
+                <span>
+                  Source: {syllabusMeta.officialBody} ({syllabusMeta.versionLabel})
+                </span>
+                <span>Verified {syllabusMeta.retrievedAt}</span>
+              </div>
+            </div>
+
             <a
-              key={portal.id}
-              href={portal.url}
+              href={syllabusMeta.sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
-              data-testid={`resource-portal-${portal.id}`}
-              className="lm-card-editorial p-5 hover:border-brand-200 transition-colors flex flex-col justify-between gap-4 group"
+              className="w-full py-2.5 rounded-xl border border-brand/40 bg-brand-soft/40 hover:bg-brand-soft text-brand text-xs font-bold flex items-center justify-center gap-2 transition-colors"
             >
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="px-2.5 py-0.5 rounded-full bg-brand-soft text-brand text-[10px] font-bold tracking-wider">
-                    {portal.badge}
-                  </span>
-                  <ExternalLink className="w-4 h-4 text-muted group-hover:text-brand transition-colors shrink-0" />
-                </div>
-                <h3 className="font-display text-base font-bold text-ink group-hover:text-brand transition-colors">
-                  {portal.name}
-                </h3>
-                <p className="text-xs text-muted leading-relaxed">{portal.description}</p>
-              </div>
-              <div className="flex items-center justify-between pt-2 border-t border-line text-[11px] text-muted">
-                <span className="font-medium">{portal.organization}</span>
-                <span className="font-semibold text-brand">{portal.url.replace(/^https?:\/\//, '')}</span>
-              </div>
+              <FileText className="w-3.5 h-3.5" />
+              <span>View Official {syllabusMeta.examDisplayName} Portal &amp; Bulletin</span>
+              <ExternalLink className="w-3.5 h-3.5" />
             </a>
-          ))}
-        </div>
-      </section>
+          </section>
+        )}
+      </div>
 
-      {/* Official JEE Main 2027 Key Dates & Pattern */}
-      <section aria-labelledby="exam-facts-heading" className="lm-card-editorial p-5 sm:p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="lm-kicker">NTA Information Bulletin</p>
-            <h2 id="exam-facts-heading" className="font-display text-lg font-extrabold text-ink">
-              JEE Main 2027 Paper 1 Pattern &amp; Schedule
-            </h2>
-          </div>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-success-soft text-success text-xs font-semibold">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            75 Questions · 300 Marks · 3 Hours
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-1">
-            <span className="font-bold text-ink block">Per-Subject Breakdown</span>
-            <p className="text-muted leading-relaxed">
-              25 questions each in Physics, Chemistry and Mathematics: 20 single-choice MCQs + 5
-              numerical-value questions.
-            </p>
-          </div>
-          <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-1">
-            <span className="font-bold text-ink block">Marking Scheme (+4 / −1)</span>
-            <p className="text-muted leading-relaxed">
-              +4 marks for a correct answer, −1 mark for an incorrect answer in both MCQ and
-              numerical sections, 0 for unattempted.
-            </p>
-          </div>
-          <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-1">
-            <span className="font-bold text-ink block">Exam Hall Rules</span>
-            <p className="text-muted leading-relaxed">
-              No calculators, smart watches, or electronic devices are permitted in the NTA exam hall.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
-          {JEE_MAIN_2027_KEY_DATES.map((item) => (
-            <div
-              key={item.label}
-              className="rounded-xl border border-line bg-white px-3.5 py-2.5 text-xs"
-            >
-              <span className="text-muted block text-[11px]">{item.label}</span>
-              <span className="font-bold text-ink mt-0.5 block">
-                {item.date}
-                {'note' in item && item.note ? ` · ${item.note}` : ''}
-              </span>
+      {/* Bottom: Quick Sheets with "+ Add to Materials" matching Image 4 */}
+      {(activeTab === 'all' || activeTab === 'sheets') && (
+        <section aria-labelledby="quick-sheets-heading" className="lm-card-editorial p-5 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 id="quick-sheets-heading" className="font-display text-lg font-extrabold text-ink">
+                Quick Sheets
+              </h2>
+              <p className="text-xs text-muted">
+                Add verified formula &amp; derivation sheets directly to your personal study materials
+              </p>
             </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Optional Reference Formula Sheets */}
-      {onImportReferenceNotes && (
-        <section aria-labelledby="reference-sheets-heading" className="space-y-3">
-          <div>
-            <h2 id="reference-sheets-heading" className="text-sm font-bold text-ink">
-              NCERT-Aligned Quick Reference Sheets
-            </h2>
-            <p className="text-xs text-muted">
-              Add any reference sheet to your materials library to practise questions or review flashcards.
-            </p>
           </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {HIGH_YIELD_REFERENCE_SHEETS.map((sheet) => {
-              const style = SUBJECT_BADGE[sheet.subject];
-              const Icon = style.icon;
+              const badge = SUBJECT_BADGE[sheet.subject];
+              const Icon = badge.icon;
               const isAdded = Boolean(importedIds[sheet.id]);
+
               return (
-                <article
+                <div
                   key={sheet.id}
-                  className="lm-card-editorial p-4 sm:p-5 flex flex-col justify-between gap-4"
+                  data-testid={`starter-sheet-${sheet.id}`}
+                  className="rounded-2xl border border-line bg-canvas p-4 flex flex-col justify-between gap-4"
                 >
                   <div className="space-y-2.5">
                     <span
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${style.className}`}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${badge.className}`}
                     >
                       <Icon className="w-3.5 h-3.5" />
-                      {sheet.subject}
+                      {badge.label}
                     </span>
-                    <h3 className="font-display text-sm font-bold text-ink leading-snug">
-                      {sheet.title}
-                    </h3>
+                    <h3 className="font-display text-base font-bold text-ink">{sheet.title}</h3>
                     <p className="text-xs text-muted leading-relaxed">{sheet.summary}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImportedIds((prev) => ({ ...prev, [sheet.id]: true }));
-                      onImportReferenceNotes(sheet.title, sheet.content);
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl border border-line bg-canvas hover:bg-brand-soft hover:border-brand-200 hover:text-brand text-xs font-semibold text-ink transition-colors cursor-pointer"
-                  >
-                    {isAdded ? (
-                      <>
-                        <BookOpen className="w-3.5 h-3.5 text-brand" />
-                        Open in Study
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-3.5 h-3.5" />
-                        Add to my materials
-                      </>
-                    )}
-                  </button>
-                </article>
+
+                  {onImportReferenceNotes && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportedIds((prev) => ({ ...prev, [sheet.id]: true }));
+                        onImportReferenceNotes(sheet.title, sheet.content);
+                      }}
+                      data-testid={`import-sheet-btn-${sheet.id}`}
+                      className={`w-full inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
+                        isAdded
+                          ? 'border-emerald-500/40 bg-success-soft text-success'
+                          : 'border-brand/40 bg-white dark:bg-[#121A2E] hover:bg-brand-soft text-brand'
+                      }`}
+                    >
+                      {isAdded ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Added to Materials</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add to Materials</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>

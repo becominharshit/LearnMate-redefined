@@ -1,0 +1,1034 @@
+LEARNMATE JEE — COMPLETE PRODUCT EXPANSION, UI REDESIGN AND INTEGRATION
+
+Work directly in the existing LearnMate JEE project.
+
+Original local project path
+C:\Users\LOQ\LearnMate
+
+If this workspace uses another directory, locate the existing application before editing it.
+
+Implement this entire assignment as one complete development phase. Organize your engineering work internally, but complete all requirements under this single prompt. Deliver one consolidated implementation and verification report.
+
+Start by inspecting the repository, then make the actual changes, run the application, test the complete student journeys, and fix defects.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. PRODUCT GOAL AND REFERENCE PRIORITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LearnMate JEE is a personalized preparation platform for Class 11, Class 12 and dropper students studying Physics, Chemistry and Mathematics for JEE Main and JEE Advanced.
+
+The product must connect learning material, practice, mistakes, revision and measurable progress.
+
+The user has supplied generated UI images showing the desired visual direction.
+
+CRITICAL REFERENCE RULE
+
+Use those images ONLY for visual direction.
+
+Use their layout, spacing, visual hierarchy, blue-purple palette, component organization, restrained styling and general interaction placement.
+
+Do not copy their illustrative academic content or example data into the application.
+
+In particular, do not hardcode:
+
+- d & f Block as the default chapter.
+- Sample uploaded document names.
+- Sample student names or avatars.
+- Sample questions, answers or explanatory content.
+- Sample scores, percentages, streaks, XP or levels.
+- Sample dates, exam schedules or countdowns.
+- Sample PYQ listings or source citations.
+- Sample YouTube URLs.
+- Sample diagrams as generated results.
+- Sample paper durations or marking rules.
+
+Some generated images contain inconsistent numbers, scientific simplifications, repeated labels, decorative effects or inaccurate sample references. Correct these in implementation.
+
+For example, the illustrated Progress screen has inconsistent question counts and timing. Implement mathematically consistent analytics using actual attempt data.
+
+The mock exam reference establishes a CBT layout direction. Verify the actual interface, rules and paper structure against authoritative exam references before implementing exam-specific behavior.
+
+Reference priority
+
+1. This written specification and the user's explicit requirements.
+2. Verified academic content and applicable official exam rules.
+3. Existing working features and student data.
+4. The images' visual direction.
+
+Create working interactive components rather than embedding screenshot images as interfaces.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. INITIAL AUDIT AND FEATURE PRESERVATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Inspect the existing routes, components, state, database, AI providers, tests, document processing, question engines, theme system and deployment setup.
+
+The last reported baseline was 130 passing tests. Treat that as a historical claim and establish the current baseline independently.
+
+Create a feature inventory containing:
+
+- Existing feature.
+- Current location.
+- Working or incomplete status.
+- Destination in the new navigation.
+- Required repair or integration.
+- Verification evidence.
+
+Include every feature found in the repository, even if it is not visible in a reference image.
+
+Inspect and reuse existing implementations for:
+
+- AI Study Tutor and conversation history.
+- Explain Simpler, Explain Deeper and JEE examples.
+- Only My Notes and Notes + JEE modes.
+- Teach It Back and topic selection.
+- Voice Tutor.
+- PDF reading, annotations and page context.
+- PDF, photo, YouTube and pasted-text ingestion.
+- Chapter quizzes and adaptive drills.
+- Creative Studio and saved assets.
+- Structured diagrams and animated lessons.
+- Concept checks, misconception feedback and reteaching.
+- Flashcards and sticky notes.
+- Mind maps and summary sheets.
+- Handwritten notes and Formula Book.
+- Mistake DNA and revision planning.
+- Focus timer and session history.
+- Practice and mock tests.
+- Progress reports and exports.
+- Notifications, account settings and privacy controls.
+- IndexedDB, Firebase sync and offline recovery.
+- Data export and account deletion.
+
+Preserve existing identifiers and relationships wherever possible. Migrate data safely when necessary.
+
+Resolve previously reported concerns where they affect this assignment:
+
+- Long-video processing demonstrated only through synthetic fixtures.
+- Notes generation that samples pages and may omit significant material.
+- Any truncation that silently removes saved content or attempt history.
+- Voice playback continuing after End Session.
+- Unverified account isolation or cross-device synchronization.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. INFORMATION ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use five primary destinations:
+
+HOME
+STUDY
+PRACTICE
+REVISE
+PROGRESS
+
+Maintain a clear mapping between every feature and its destination.
+
+HOME
+
+Prioritize:
+
+- My Tasks.
+- Continue.
+- Due Today.
+- Ask a Doubt.
+- Recent Materials.
+- Last Mock.
+- Compact streak, XP and level.
+- Daily challenge.
+
+Use actual student activity. Provide concise, useful empty states for new accounts.
+
+STUDY
+
+Provide:
+
+- Syllabus.
+- Chapter Notes.
+- My Materials.
+- AI Tutor.
+- Create.
+
+Chapter Notes includes Full Notes and Quick Notes.
+
+A chapter workspace connects its topics, explanations, formulas, examples, related PYQs, concept checks and revision tools.
+
+PRACTICE
+
+Separate JEE Main and JEE Advanced.
+
+Provide:
+
+- PYQs.
+- Mock Tests.
+- Chapter Practice.
+- Year Practice.
+- Custom Sets.
+- Adaptive Practice.
+- Attempt History and Analysis.
+
+REVISE
+
+Provide:
+
+- Flashcards.
+- Sticky Notes.
+- Mind Map.
+- Summary Sheet.
+- Handwritten Notes.
+- Mistake DNA.
+- Formula Book.
+- Bookmarks and due revision.
+
+PROGRESS
+
+Provide:
+
+- Overview.
+- Mock Analysis.
+- Chapter Performance.
+- Syllabus Progress.
+- Learning Evidence.
+- Rewards.
+- Focus History.
+- Export Report.
+
+GLOBAL UTILITIES
+
+Provide accessible entry points for:
+
+- Search.
+- Add Material.
+- Study Tools.
+- Focus timer.
+- Theme toggle.
+- Notifications.
+- App Guide.
+- Profile and settings.
+
+Resources belongs within Study and remains discoverable through Search and App Guide.
+
+Avoid turning every feature into another permanent navigation item.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. UI SYSTEM AND SCROLLING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Follow the supplied visual direction while implementing one consistent design system across all screens.
+
+Use:
+
+- Blue-purple as the primary brand color.
+- White and pale cool-gray surfaces in Light mode.
+- Appropriate dark surfaces in Night Owl mode.
+- Dark navy text in Light mode.
+- Restrained teal, amber and subject colors.
+- Clear typography, fine borders and modest corners.
+- Short headings, normally one or two words.
+- Consistent icons with visible labels where needed.
+
+Remove redundant interface copy throughout the application.
+
+Examples to remove or simplify include:
+
+- Promotional subtitles beneath every heading.
+- Repeated descriptions of obvious buttons.
+- Technical implementation details in student workflows.
+- Phase numbers in student-facing labels.
+- Repeated claims that AI responses stream.
+- Long explanations of what a simple card contains.
+
+Preserve educational explanations, instructions, source citations, meaningful errors, marking rules and necessary confirmations.
+
+Use normal browser zoom at 100%.
+
+Do not solve layout problems by shrinking text, applying CSS zoom, or clipping content.
+
+Test at 1440×900 and 1366×768 on desktop, with responsive layouts for tablets and phones.
+
+Reduce unnecessary page scrolling through:
+
+- Compact page headings.
+- Useful content width.
+- Visible section tabs.
+- Side-by-side panels where space permits.
+- Sticky contextual controls.
+- Pagination or virtualization for long collections.
+- Filters for large libraries.
+- Expandable details for secondary information.
+
+In Study, keep the document toolbar and chat composer accessible. Allow document and conversation panes to scroll independently where appropriate.
+
+In Revise, give Flashcards and Sticky Notes distinct destinations.
+
+Dock the focus timer so it does not overlap content.
+
+Allow natural scrolling for long notes and explanations. Never truncate educational material to force it into one viewport.
+
+At narrow widths or increased text zoom, allow appropriate reflow and page scrolling.
+
+Keep keyboard navigation, focus indicators and screen-reader labels functional.
+
+Integrate any completed dark-mode repairs and test all new screens in both themes.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. APP GUIDE AND SEARCH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement App Guide through a visible Help/App Guide entry.
+
+Include every working feature, grouped by student task.
+
+Each guide entry needs:
+
+- Short feature name.
+- Brief explanation.
+- Correct destination.
+- Open action.
+- Optional concise walkthrough.
+
+A student should be able to discover where to find PYQs, voice tutoring, handwritten notes, graphs and mock analysis.
+
+Maintain the guide from shared feature metadata where practical so it stays aligned with the app.
+
+Implement useful search across:
+
+- Chapters and topics.
+- Notes.
+- Uploaded materials.
+- PYQs and papers.
+- Saved creations.
+- Revision items.
+- Tools and guide entries.
+
+Respect student ownership when returning personal search results.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. SHARED SYLLABUS AND CHAPTER SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Create or extend a consistent academic content model.
+
+Use stable identifiers for:
+
+- Exam.
+- Syllabus version.
+- Subject.
+- Chapter.
+- Topic.
+- Source.
+- Question.
+- Paper.
+- Solution.
+- Learning asset.
+
+Map notes, practice, attempts, mistakes, revision and analytics to this system.
+
+Maintain separate JEE Main and JEE Advanced syllabus mappings.
+
+Obtain the latest officially released syllabus for the relevant exam year from authoritative sources.
+
+Store the source URL, publication or retrieval date, and syllabus version.
+
+If the target year's syllabus has not been released, identify the latest verified version clearly. Do not silently present an older syllabus as the new official syllabus.
+
+Support changes in syllabus without corrupting historical attempts or deleting older content.
+
+Historical questions outside the selected current syllabus may remain accessible with a clear label.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. COMPLETE NOTES AND QUICK NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Students must be able to study directly without uploading material.
+
+For every chapter in the supported syllabus, provide:
+
+FULL NOTES
+
+- Topic explanations.
+- Definitions.
+- Relevant derivations.
+- Formulas and units.
+- Worked examples.
+- Accurate diagrams.
+- Exceptions and common mistakes.
+- Appropriate Main/Advanced distinctions.
+
+QUICK NOTES
+
+- Essential formulas.
+- Reactions and conditions.
+- Key facts.
+- Short concept summaries.
+- Common traps.
+- Revision checkpoints.
+
+Distinguish shared LearnMate Notes from student-owned My Notes.
+
+Reuse the same authoritative content model so corrections can propagate to both formats.
+
+Implement an editorial workflow with draft, review and published states.
+
+Do not publish unreviewed AI-generated material as verified content.
+
+Do not copy commercial coaching notes without permission.
+
+Create original explanations using appropriate sources and retain provenance.
+
+Provide a chapter coverage report. A complete interface with empty chapters does not count as a complete notes library.
+
+If content review or source access prevents full coverage, complete the publishing infrastructure and report exactly which chapters remain unpublished.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. OFFICIAL PYQ LIBRARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement separate JEE Main and JEE Advanced PYQ collections.
+
+Start with the most recent five complete examination years, then extend toward ten years within the available verified material.
+
+Support further archive expansion without redesigning the schema.
+
+Use authoritative official papers and final answer keys wherever available.
+
+Verify source identity, availability, applicable terms and permission for hosting or processing.
+
+Host downloadable files where permitted. Otherwise provide the official source link and clearly state the access method.
+
+Do not invent official URLs, fabricate missing papers or use competitor question banks without authorization.
+
+For each paper, store applicable metadata:
+
+- Exam and year.
+- Session.
+- Examination date.
+- Shift.
+- Paper number.
+- Language.
+- Official source.
+- Paper version.
+- Answer-key version.
+- Question order and official IDs where available.
+- Instructions.
+- Duration and marking scheme.
+- Syllabus mapping.
+- Access and publication status.
+
+For each question, store:
+
+- Original wording.
+- Options or answer format.
+- Mathematical notation.
+- Diagram assets.
+- Correct answer or accepted answer rules.
+- Marks and penalties.
+- Partial-credit rules where applicable.
+- Subject, chapter and topic.
+- Source page and provenance.
+- Reviewed detailed solution.
+- Corrections and version history.
+
+Support deduplication while preserving each occurrence in its original paper.
+
+A paper must be accessible through:
+
+- Paper PDF.
+- Solutions PDF.
+- Start Mock.
+
+Support chapter-wise, topic-wise and year-wise practice with relevant filters.
+
+Store detailed LearnMate solutions separately from official answer keys.
+
+Clearly identify the origin of each solution. Never imply that an independently written solution is an official published solution.
+
+Validate solutions against the final answer key and review calculations, assumptions, units and diagrams.
+
+Include Report Error and a correction workflow.
+
+For dropped questions, revised keys and multiple accepted answers, implement the applicable paper-specific scoring rules.
+
+Do not silently change a student's historical score when content is corrected. Preserve versions and make any recalculation explicit.
+
+Provide an import, validation and publishing workflow that can be run repeatedly without duplicate questions or papers.
+
+Report actual corpus coverage by exam, year, session, date and shift.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. JEE MAIN AND ADVANCED MOCK EXAMS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement authentic exam practice using verified rules for each paper.
+
+Use the supplied CBT image as visual direction, then verify the official exam reference.
+
+The exam screen must include the appropriate:
+
+- Instructions and acceptance screen.
+- Candidate details.
+- Timer.
+- Subject and section navigation.
+- Question number and type.
+- Question text and diagrams.
+- Answer controls.
+- Numerical entry keypad.
+- Question palette.
+- Mark-for-review state.
+- Answered-and-marked state.
+- Clear Response.
+- Save & Next.
+- Mark for Review & Next.
+- Submission confirmation.
+- Automatic submission on expiry.
+
+Explain palette states through text and shape as well as color.
+
+Reproduce question navigation and response-saving behavior accurately.
+
+Use a shared exam engine with distinct, versioned rule configurations for Main, Advanced and historical papers.
+
+Do not hardcode one marking scheme for every exam or year.
+
+For Advanced, support the actual question types, section instructions, marking and Paper 1/Paper 2 structure represented in each source paper.
+
+Distinguish original-paper simulation from current-pattern practice where relevant.
+
+Keep solutions hidden until submission in exam mode.
+
+After submission, show verified answers, full worked solutions and analysis.
+
+Preserve responses after recoverable refreshes or network failures.
+
+Use a reliable exam deadline so refreshes or reopening a session do not reset the timer.
+
+Prevent duplicate submission and duplicate rewards.
+
+Save the paper version and scoring rules used for each attempt.
+
+For server-scored exams, protect answer keys from premature exposure through ordinary student APIs.
+
+Keep AI tutoring and general study utilities outside strict exam sessions. Tool availability must follow the selected verified exam configuration.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. FULLSCREEN AND STRICT MOCK RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement a Strict Mock option with clear rules before the exam starts.
+
+Request fullscreen from the student's Start Mock interaction, respecting browser requirements.
+
+Handle denied or unsupported fullscreen honestly.
+
+Record detectable events such as:
+
+- Leaving fullscreen.
+- Tab becoming hidden.
+- Window focus loss.
+- Returning to the exam.
+- Connectivity interruption.
+
+Use timestamps and prevent a single action from producing several duplicate violations.
+
+Account for browser permission dialogs and other ambiguous events.
+
+The browser cannot guarantee that a student never switches applications. Do not claim complete device lockdown or perfect cheating detection.
+
+Show a concise warning on return and record events in the attempt report.
+
+Keep integrity events separate from academic marks.
+
+Make thresholds and consequences explicit and configurable. Preserve answers regardless of a focus event.
+
+Do not implement undisclosed automatic failure or auto-submission policies.
+
+Support accessibility needs and a clearly labeled standard practice mode where strict fullscreen is unsuitable.
+
+Verify fullscreen exit, tab changes, rapid focus changes, refresh, disconnection and resume.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. DEEP MOCK ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Calculate results deterministically from verified questions, answers and rules.
+
+Provide:
+
+- Total and subject scores.
+- Correct, incorrect, skipped and partially correct counts where applicable.
+- Accuracy with a documented denominator.
+- Attempt rate.
+- Marks gained and penalties.
+- Time spent per question.
+- Subject and chapter time.
+- Time spent on incorrect and skipped questions.
+- Review and answer-change history where recorded.
+- Chapter and topic performance.
+- Comparison with previous attempts.
+- Full question review and solutions.
+- Bookmarks.
+- Targeted next actions.
+
+Do not display invented ranks, percentile predictions or peer comparisons.
+
+Only add such metrics when valid data, methods and uncertainty are available.
+
+Distinguish measured behavior from inferred mistake categories.
+
+A long response time alone does not prove a conceptual weakness. An incorrect answer alone does not prove carelessness.
+
+Connect each relevant result to:
+
+- Chapter Notes.
+- AI explanation.
+- Diagram or animated explanation.
+- Similar practice.
+- Mistake DNA.
+- Revision task.
+
+Avoid rewarding repeated attempts as though they were independent first-time mastery evidence.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. AI PRACTICE COACH AND DAILY PLAN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Extend existing Mistake DNA, adaptive practice and revision systems.
+
+Use observed performance to recommend useful next work.
+
+Support:
+
+- Targeted questions after a misconception.
+- Prerequisite revision.
+- Spaced review of mistakes.
+- Daily tasks based on available study time.
+- Syllabus progress and approaching exam dates.
+- Weekly goals and unfinished tasks.
+- Recovery after successful reteaching.
+
+Keep tasks realistic and editable.
+
+Explain recommendations briefly when a student requests the reason.
+
+Use one consistent learning profile across Study, Practice, Revise and Progress.
+
+Separate chapter completion, observed learning evidence and estimated mastery.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. CONTEXTUAL AI TUTOR AND CREATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve source-grounded tutoring and all current conversation capabilities.
+
+Support photo-based doubts with readable mathematical extraction, a chance to correct ambiguous recognition and follow-up questions.
+
+When a tutor response would benefit from visual explanation, show contextual Create actions.
+
+Offer supported outputs such as:
+
+- Diagram.
+- Visual.
+- Animated Lesson.
+- Video-style explanation.
+
+Transfer the actual question, active document, relevant pages or timestamps, subject and concept automatically.
+
+Keep generated assets linked to their source question and saved library.
+
+Reuse validated StructuredDiagramSpec and existing rendering pipelines.
+
+Validate force directions, circuit connections, molecular geometry, graph relationships and mathematical labels.
+
+An attractive image does not establish scientific correctness.
+
+Use the existing narrated-scene implementation for video-style explanations where appropriate. Only offer downloadable video when export actually exists.
+
+Preserve concept checks, grading, misconception feedback and progressive reteaching.
+
+Keep Higgsfield paused by design.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+14. REVISION MIND MAPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Replace heading-only mind maps with useful visual revision maps.
+
+Each concept node should contain concise meaningful content such as:
+
+- A definition or central idea.
+- A key formula or relationship.
+- A condition or exception.
+- A small example where useful.
+
+Relationships should express meaning such as causes, depends on, contrasts with or leads to.
+
+Selecting a node opens a compact detail panel with:
+
+- Explanation.
+- Formula or worked example.
+- Common trap.
+- Source page or lecture timestamp.
+- Add to Cards.
+- Ask Tutor.
+
+Provide:
+
+- Fit to view.
+- Zoom and pan.
+- Expand/collapse branches.
+- Topic search.
+- A concise guided review.
+- Save and export.
+
+A two-minute review should surface the most important concepts without claiming that every chapter can be fully mastered in two minutes.
+
+Use progressive detail to keep the overview readable while retaining the full topic.
+
+Validate formulas and relationships against the underlying material.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+15. STUDY TOOLS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve Calculator, Units, Statistics, Formulas and Graph.
+
+SCIENTIFIC CALCULATOR
+
+Provide a reliable scientific calculator with:
+
+- Arithmetic and parentheses.
+- Powers and roots.
+- Fractions.
+- Trigonometry and inverse functions.
+- Degrees and radians.
+- Logarithms and exponentials.
+- Constants.
+- Scientific notation.
+- Memory and history.
+- Clear domain and syntax errors.
+
+State supported operations honestly.
+
+Use safe expression parsing rather than arbitrary code execution.
+
+GRAPH
+
+Students must type their own equations and obtain computed graphs.
+
+Provide:
+
+- Editable equation input.
+- Multiple expressions.
+- Explicit Cartesian functions.
+- Implicit relationships and parametric/polar forms where supported.
+- Parameter controls where applicable.
+- Axis ranges.
+- Zoom, pan and reset.
+- Trace or point inspection.
+- Save/export.
+- Clear unsupported-expression errors.
+
+Keep presets optional.
+
+Handle discontinuities, invalid domains and asymptotes correctly. Do not connect a curve across an undefined interval.
+
+Use a numerical or symbolic graphing engine. Never ask an image model to guess the graph.
+
+Test equations beyond those shown in the reference images.
+
+UNITS, STATISTICS AND FORMULAS
+
+Retain existing useful functions, improve reliability and connect formulas to subjects and chapters.
+
+Apply consistent mathematical rendering and input validation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+16. MATERIAL PROCESSING AND HANDWRITTEN NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve and verify all ingestion routes:
+
+- PDF.
+- Photo.
+- YouTube URL.
+- Pasted text.
+
+Support at least 60-page PDFs throughout extraction, retrieval, tutoring, notes, diagrams and revision.
+
+Verify first, middle and final pages, including formulas and scanned material.
+
+Preserve page-aware source citations.
+
+For YouTube, keep the student workflow URL-only.
+
+Support processing architecture for eligible lectures up to 12 hours through authorized content access, durable jobs, chunking, timestamps, checkpointing, cancellation and retry.
+
+Do not ask students to paste a transcript as a required fallback.
+
+If content cannot be accessed, show the actual reason. Never generate invented lecture notes.
+
+Differentiate real long-video processing from simulated duration tests.
+
+Improve notes speed using caching, bounded concurrency and incremental generation.
+
+Do not improve speed by silently skipping significant pages, topics or lecture segments.
+
+HANDWRITTEN NOTES
+
+Keep a dedicated accessible notes experience supporting:
+
+- PDF to handwritten-style notes.
+- Processed lecture to handwritten-style notes.
+- One-page revision sheet conversion.
+- Full or concise notes.
+- Preview.
+- Editing where supported.
+- Save.
+- PDF export.
+- Reopening saved notes.
+
+Preserve source content and citations.
+
+Maintain readable equations even when surrounding text uses handwriting-style fonts.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+17. MATHEMATICS AND VOICE RELIABILITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use correct mathematical and scientific rendering throughout the app and exports.
+
+Support fractions, roots, powers, subscripts, vectors, matrices, integrals, Greek symbols, units and chemical notation.
+
+Avoid exposing raw markup where rendered notation is expected.
+
+Handle wide equations accessibly without clipping them.
+
+Verify PDF exports visually.
+
+VOICE TUTOR
+
+End Session must stop current playback and prevent late responses from restarting it.
+
+Clean up:
+
+- Speech synthesis.
+- Speech recognition.
+- Microphone tracks.
+- Streaming audio.
+- Audio queues.
+- Audio contexts where applicable.
+- Voice connections.
+- Pending requests.
+- Timers and event handlers.
+
+Use a session identifier or equivalent mechanism to reject stale callbacks.
+
+Verify end-during-speech, end-during-connection, pending responses, rapid reopen, navigation away and permission failure.
+
+Report physical audio verification separately from automated lifecycle tests.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+18. POINTS, LEVELS, STREAKS AND CHALLENGES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement the accepted rewards system.
+
+Include:
+
+- XP.
+- Levels.
+- Study streaks.
+- Achievements.
+- Daily challenges.
+- Weekly challenges.
+- Rewards history.
+
+Keep compact indicators on Home and detailed history in Progress.
+
+Reward meaningful learning actions such as:
+
+- Completing legitimate practice.
+- Reviewing due cards.
+- Correcting a recorded mistake.
+- Completing a chapter goal.
+- Finishing a valid challenge.
+
+Do not award unlimited XP for refreshing, repeated clicks, reopening the same asset or repeatedly submitting an identical attempt.
+
+Use an auditable event ledger and idempotent reward assignment.
+
+Handle retries, offline sync and account switching without duplicated XP.
+
+Define streak boundaries using the student's configured timezone.
+
+Missed days should not erase earned XP or completed achievements.
+
+Give concise explanations of how XP and streaks are earned through App Guide or tooltips.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+19. RESOURCES AND EXAM INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Combine the two Resources views into a coherent destination with:
+
+- Official Portals.
+- Exam Guide.
+- Quick Sheets.
+
+Preserve links to relevant official educational resources and textbooks.
+
+Verify links and exam information before publishing.
+
+Show current schedules only when supported by official sources.
+
+Provide source dates and links through compact accessible details.
+
+Keep paper pattern, marking, rules and schedule separately discoverable.
+
+Quick Sheets should connect to the chapter model and support Add to Materials.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+20. DATA, MOBILE AND OPERATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preserve IndexedDB storage and implement safe migrations for new structures.
+
+Preserve Firebase ownership checks, authenticated synchronization, export and deletion.
+
+Do not truncate JSON, notes, solutions or attempt records to force them under storage limits.
+
+Use appropriate bounded records, collections and asset storage.
+
+Support interrupted writes, retries, concurrent updates and legacy data.
+
+Keep student content out of public search and other accounts.
+
+Keep provider secrets server-side.
+
+Make the app usable on ordinary Android phones and constrained connections.
+
+Implement or complete PWA installation and offline revision for supported cached content.
+
+Clearly identify what is available offline.
+
+Invalidate private caches appropriately on account changes while preserving recoverable owner-scoped data.
+
+Use controlled AI requests, caching and quotas to manage costs.
+
+Retain privacy-conscious error monitoring and deployment configuration.
+
+Use designated test accounts for destructive tests.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+21. VERIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Test the complete application through its normal entry points.
+
+Required journeys include:
+
+A. New student
+Sign in → select exam → explore syllabus → open Full Notes → Quick Notes → solve chapter PYQs → review mistakes → receive a daily task.
+
+B. Uploaded material
+Upload a 60-page PDF → ask about a late page → open contextual Create → generate a validated visual → complete a checkpoint → save → restore.
+
+C. Lecture
+Paste an eligible YouTube URL → process accessible content → inspect timestamps → generate notes → convert a revision sheet to handwritten notes.
+
+D. Official paper
+Find a verified paper → open Paper PDF → start its mock → answer and mark questions → submit → inspect scoring and complete solutions → create targeted revision.
+
+E. Advanced
+Open an Advanced paper → apply its actual section rules → verify partial-credit and negative-marking cases → inspect paper analysis.
+
+F. Strict Mock
+Start fullscreen → leave and return → verify event logging → confirm answers persist → submit → review integrity events separately.
+
+G. Revision
+Open a meaningful mind map → inspect an explanation and source → add a flashcard → review it → update learning evidence.
+
+H. Tools
+Calculate scientific expressions → plot new user-entered equations → change ranges → verify discontinuities and invalid input.
+
+I. Rewards
+Complete eligible activity → award XP once → refresh and retry → confirm no duplication → sync across devices.
+
+J. Voice
+Start → speak → receive audio → End Session → verify silence, released capture and rejected late responses.
+
+K. Discovery
+Find each existing feature through its section, Search or App Guide.
+
+L. Data
+Restore a legacy account → verify migrated content → switch accounts → verify isolation → test export and deletion using test accounts.
+
+Run the project's actual test, type-check, lint and build commands.
+
+Use browser testing at normal 100% zoom on desktop and mobile.
+
+Inspect screenshots of implemented screens against the visual references.
+
+Verify Light and Night Owl themes, keyboard navigation, long content, formulas, modal focus, scrolling and empty/error states.
+
+Add meaningful regression tests for scoring, content import, answer-key versions, rewards, data migration, fullscreen events, graph parsing and voice cleanup.
+
+Never treat a successful build as evidence of a correct content library or exam engine.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+22. COMPLETION STANDARD AND REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Complete the implementation and all feasible verification before reporting.
+
+Do not declare completion based only on attractive screens, sample data, empty database tables or synthetic fixtures.
+
+Provide one report containing:
+
+1. Current baseline and final verification results.
+2. Every existing feature and its new destination.
+3. Implemented requirements and evidence.
+4. Files and important data changes.
+5. Actual syllabus and notes coverage.
+6. Actual PYQ coverage by exam, year and paper.
+7. Source provenance and hosting/access decisions.
+8. Exam engine and scoring verification.
+9. Real provider checks versus fixture tests.
+10. Desktop, mobile and theme screenshots.
+11. Remaining defects and exact external blockers.
+12. Any required content review, credentials or deployment steps.
+
+Use explicit status labels:
+
+WORKING_VERIFIED
+WORKING_WITH_FALLBACK
+IMPLEMENTED_NOT_VERIFIED
+CONTENT_REVIEW_PENDING
+BLOCKED_BY_SOURCE_ACCESS
+BLOCKED_BY_CREDENTIALS
+BLOCKED_BY_HARDWARE
+FAILED
+NOT_IMPLEMENTED
+
+If source access, credentials or editorial review blocks one item, continue all independent work and report the exact unresolved requirement.
+
+End with one decision:
+
+COMPLETE_VERIFIED
+All required functionality, content coverage and acceptance checks are complete.
+
+IMPLEMENTED_VERIFICATION_PENDING
+Implementation is complete and only explicitly identified verification remains.
+
+INCOMPLETE
+Required functionality, content coverage, integrations or critical fixes remain unfinished.
+
+FINAL DIRECTIVE
+
+Implement this complete assignment in the existing LearnMate JEE application.
+
+Use the supplied UI images for visual direction only.
+
+Use real student state, verified academic material and correctly computed results throughout the working product.
+
+Deliver a coherent application where every existing feature remains discoverable and students can move naturally between studying, solving questions, understanding mistakes and revising.

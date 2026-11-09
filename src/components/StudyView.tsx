@@ -60,20 +60,30 @@ import { VoiceTutorModal } from './VoiceTutorModal';
 import { QuizProctorOverlay } from './QuizProctorOverlay';
 import { MathText } from './MathText';
 import { ReportButton } from './ReportButton';
+import { SyllabusAndNotesWorkspace } from './SyllabusAndNotesWorkspace';
+import { ResourcesView } from './ResourcesView';
 import type { QuickReviseSubTab } from './QuickReviseView';
 
 export type StudySubMode = 'explain' | 'quiz' | 'adaptive';
+export type StudyHubSection =
+  | 'my_materials'
+  | 'syllabus'
+  | 'chapter_notes'
+  | 'ai_tutor'
+  | 'resources';
 
 interface StudyViewProps {
   documents: StudyDocument[];
   activeDocument: StudyDocument;
   onSelectDocument: (doc: StudyDocument) => void;
   initialSubMode?: StudySubMode;
+  initialHubSection?: StudyHubSection;
   initialQuestion?: string | null;
   onConsumeInitialQuestion?: () => void;
   onAttemptSaved: () => void;
   onNavigateProgress: () => void;
   onOpenRevise?: (subTab?: QuickReviseSubTab) => void;
+  onOpenPractice?: () => void;
   onOpenPdfWorkspace?: () => void;
   onOpenUploadModal?: () => void;
   onOpenContextualCreate?: (payload: ContextualCreateTransferPayload) => void;
@@ -87,11 +97,13 @@ export const StudyView: React.FC<StudyViewProps> = ({
   activeDocument,
   onSelectDocument,
   initialSubMode = 'explain',
+  initialHubSection = 'my_materials',
   initialQuestion,
   onConsumeInitialQuestion,
   onAttemptSaved,
   onNavigateProgress,
   onOpenRevise,
+  onOpenPractice,
   onOpenPdfWorkspace,
   onOpenUploadModal,
   onOpenContextualCreate,
@@ -99,6 +111,10 @@ export const StudyView: React.FC<StudyViewProps> = ({
   externalVoiceOpen = false,
   onCloseExternalVoice,
 }) => {
+  const [hubSection, setHubSection] = useState<StudyHubSection>(initialHubSection);
+  const [selectedSyllabusChapterId, setSelectedSyllabusChapterId] = useState<string | undefined>(
+    undefined
+  );
   const [subMode, setSubMode] = useState<StudySubMode>(initialSubMode);
   const [mobilePane, setMobilePane] = useState<'read' | 'ask'>('read');
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -614,8 +630,149 @@ export const StudyView: React.FC<StudyViewProps> = ({
   return (
     <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-3.5 space-y-5">
       {/* =====================================================================
-          UNIFIED STUDY HEADER (One Study Screen — Reader + AI Tutor)
+          STUDY HUB SUB-NAVIGATION BAR (Matches Image 7 & Section 3)
+          Syllabus · Chapter Notes · My Materials · AI Tutor · Create · Resources
          ===================================================================== */}
+      <div
+        role="tablist"
+        aria-label="Study Hub Navigation"
+        className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-2 border-b border-line no-scrollbar"
+      >
+        {(
+          [
+            { id: 'syllabus', label: 'Syllabus' },
+            { id: 'chapter_notes', label: 'Chapter Notes' },
+            { id: 'my_materials', label: 'My Materials' },
+            { id: 'ai_tutor', label: 'AI Tutor' },
+            { id: 'create_link', label: 'Create' },
+            { id: 'resources', label: 'Resources' },
+          ] as const
+        ).map((item) => {
+          const isActive =
+            item.id === 'create_link'
+              ? false
+              : hubSection === item.id ||
+                (item.id === 'ai_tutor' && hubSection === 'my_materials' && mobilePane === 'ask');
+
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              data-testid={`study-hub-tab-${item.id}`}
+              onClick={() => {
+                if (item.id === 'create_link') {
+                  if (onOpenContextualCreate) {
+                    onOpenContextualCreate({
+                      sourceTutorMessageId: 'study-hub-create',
+                      question: activePageLabel,
+                      tutorAnswerExcerpt: activePageObj?.content?.slice(0, 500) || activeDocument.overview,
+                      conceptTitle: activePageLabel,
+                      topic: activePageTopic?.name || activePageLabel,
+                      subject:
+                        (documentSubject as 'Physics' | 'Chemistry' | 'Mathematics' | 'General') ||
+                        'Physics',
+                      documentId: activeDocument.id,
+                      documentTitle: activeDocument.title,
+                      citedPages: [currentPage],
+                      selectedMode: 'create_diagram',
+                    });
+                  }
+                  return;
+                }
+                if (item.id === 'ai_tutor') {
+                  setHubSection('my_materials');
+                  setSubMode('explain');
+                  setMobilePane('ask');
+                  return;
+                }
+                setHubSection(item.id);
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                isActive
+                  ? 'bg-brand-soft text-brand border border-brand/30'
+                  : 'text-muted hover:text-ink hover:bg-white'
+              }`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* =====================================================================
+          SECTION A: BUILT-IN SYLLABUS & CHAPTER NOTES (Full Notes + Quick Notes)
+         ===================================================================== */}
+      {(hubSection === 'syllabus' || hubSection === 'chapter_notes') && (
+        <SyllabusAndNotesWorkspace
+          initialMode={hubSection === 'chapter_notes' ? 'notes' : 'syllabus'}
+          onOpenChapterInWorkbench={(doc) => {
+            studyStorage.saveDocument(doc);
+            studyStorage.setActiveDocumentId(doc.id);
+            onSelectDocument(doc);
+            setSubMode('explain');
+            setHubSection('my_materials');
+          }}
+          onOpenChapterPractice={(_chapterId) => {
+            if (onOpenPractice) onOpenPractice();
+          }}
+          onOpenChapterRevise={(doc) => {
+            studyStorage.saveDocument(doc);
+            studyStorage.setActiveDocumentId(doc.id);
+            onSelectDocument(doc);
+            if (onOpenRevise) onOpenRevise('flashcards');
+          }}
+          onOpenChapterCreate={(chapter) => {
+            if (onOpenContextualCreate) {
+              onOpenContextualCreate({
+                sourceTutorMessageId: `syllabus-${chapter.id}`,
+                question: chapter.title,
+                tutorAnswerExcerpt: chapter.overview,
+                conceptTitle: chapter.title,
+                topic: chapter.title,
+                subject: chapter.subject,
+                documentId: activeDocument.id,
+                documentTitle: chapter.title,
+                citedPages: [1],
+                selectedMode: 'create_diagram',
+              });
+            }
+          }}
+        />
+      )}
+
+      {/* =====================================================================
+          SECTION B: OFFICIAL RESOURCES & EXAM GUIDE
+         ===================================================================== */}
+      {hubSection === 'resources' && (
+        <ResourcesView
+          onImportReferenceNotes={(title, content) => {
+            const newDoc: StudyDocument = {
+              id: `doc-ref-${Date.now()}`,
+              title: `${title}.pdf`,
+              sourceType: 'text',
+              pageCount: 1,
+              pages: [{ pageNumber: 1, title, content }],
+              createdAt: new Date().toISOString(),
+              lastStudiedAt: new Date().toISOString(),
+              topics: [{ id: 't-1', name: title, summary: content.slice(0, 140), keyConcepts: [title], sourcePages: [1] }],
+              overview: content.slice(0, 200),
+            };
+            studyStorage.saveDocument(newDoc);
+            studyStorage.setActiveDocumentId(newDoc.id);
+            onSelectDocument(newDoc);
+            setHubSection('my_materials');
+          }}
+          onOpenSyllabus={() => setHubSection('syllabus')}
+        />
+      )}
+
+      {/* =====================================================================
+          SECTION C: UNIFIED STUDY WORKBENCH (My Materials + AI Tutor)
+         ===================================================================== */}
+      {(hubSection === 'my_materials' || hubSection === 'ai_tutor') && (
+        <>
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-1 border-b border-line">
         <div className="space-y-1.5">
           <div className="lm-kicker flex items-center gap-2">
@@ -1950,6 +2107,8 @@ export const StudyView: React.FC<StudyViewProps> = ({
           </button>
         </div>
       </div>
+        </>
+      )}
 
       {/* Proctored Fullscreen Enforcement */}
       <QuizProctorOverlay

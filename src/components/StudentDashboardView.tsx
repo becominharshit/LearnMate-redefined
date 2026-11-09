@@ -8,7 +8,6 @@ import {
   Clock,
   Flame,
   FlaskConical,
-  Layers,
   ListChecks,
   MessageCircleQuestion,
   Send,
@@ -16,6 +15,14 @@ import {
   Target,
   Trash2,
   UserRound,
+  Star,
+  Trophy,
+  Plus,
+  FileText,
+  Camera,
+  Youtube,
+  Type,
+  Info,
 } from 'lucide-react';
 import { StudyDocument, StudentAcademicProfile } from '../types/study';
 import { studyStorage } from '../services/storageService';
@@ -30,6 +37,17 @@ import type { StudySubMode } from './StudyView';
 import { AddMaterialBox } from './AddMaterialBox';
 import type { AddMaterialMode } from './AddMaterialModal';
 import { StreakTracker } from './StreakTracker';
+import {
+  syncRewardsFromActualStudentActivity,
+  buildDailyPracticeCoachPlan,
+  awardLearningXp,
+  DAILY_COACH_COMPLETION_KEY,
+} from '../utils/rewardsEngine';
+import {
+  JEE_SYLLABUS_CHAPTERS,
+  buildStudyDocumentFromSyllabusChapter,
+  type ExamTrackId,
+} from '../data/jeeSyllabusAndNotes';
 
 interface StudentDashboardViewProps {
   studentName?: string;
@@ -44,9 +62,9 @@ interface StudentDashboardViewProps {
   sampleIsAdded?: boolean;
   isProcessingMaterial?: boolean;
   studentProfile?: StudentAcademicProfile;
-  /** True while the private cloud profile is still loading after sign-in. */
   isProfileSyncing?: boolean;
   onOpenProfileModal?: () => void;
+  onSaveDocument?: (doc: StudyDocument) => void;
 }
 
 const SUBJECT_STYLE: Record<
@@ -77,8 +95,8 @@ function relativeTime(iso: string, now: Date): string {
       new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime()) /
       86_400_000
   );
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
   if (days < 30) return `${days}d ago`;
   return then.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
@@ -98,12 +116,33 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   studentProfile,
   isProfileSyncing = false,
   onOpenProfileModal,
+  onSaveDocument,
 }) => {
   const [doubtInput, setDoubtInput] = useState('');
+  const [doubtLang, setDoubtLang] = useState<'en' | 'hi'>(
+    studentProfile?.preferredLanguage?.toLowerCase().includes('hindi') ? 'hi' : 'en'
+  );
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selectedExamTrack, setSelectedExamTrack] = useState<ExamTrackId>(
+    studentProfile?.targetExam === 'jee_advanced' ? 'jee_advanced' : 'jee_main'
+  );
+  const [completedTaskIds, setCompletedTaskIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(DAILY_COACH_COMPLETION_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [customTasks, setCustomTasks] = useState<Array<{ id: string; title: string; done: boolean }>>([]);
+  const [newTaskInput, setNewTaskInput] = useState('');
+  const [showTaskReasonId, setShowTaskReasonId] = useState<string | null>(null);
 
   const now = useMemo(() => new Date(), [documents]);
   const countdown = useMemo(() => getNextJeeCountdown(now), [now]);
+
+  const allAttempts = useMemo(() => studyStorage.getQuizAttempts(), [documents]);
+  const focusSessions = useMemo(() => studyStorage.getFocusSessions(), [documents]);
 
   const docActivityDates = useMemo(() => {
     const dates: Date[] = [];
@@ -117,15 +156,19 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   const sortedDocs = useMemo(
     () =>
       [...documents].sort(
-        (a, b) => Date.parse(b.lastStudiedAt || b.createdAt) - Date.parse(a.lastStudiedAt || a.createdAt)
+        (a, b) =>
+          Date.parse(b.lastStudiedAt || b.createdAt) -
+          Date.parse(a.lastStudiedAt || a.createdAt)
       ),
     [documents]
   );
 
   const continueDoc = activeDoc || sortedDocs[0] || null;
 
-  const dueTodayItems = useMemo(() => {
+  const { dueTodayItems, totalDueFlashcards, reviewedFlashcardsCount } = useMemo(() => {
     const todayIso = now.toISOString().slice(0, 10);
+    let dueCardsTotal = 0;
+    let reviewedTotal = 0;
     const items: Array<{
       id: string;
       kind: 'task' | 'flashcard';
@@ -148,6 +191,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
 
       const bundle = studyStorage.getQuickReviseBundle(doc.id);
       if (bundle?.flashcards) {
+        reviewedTotal += bundle.flashcards.filter((c) => c.status === 'know_it').length;
         const dueCards = bundle.flashcards.filter((card) => {
           const nextIso = card.nextReviewDate || card.nextReviewAt;
           return (
@@ -155,6 +199,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             Boolean(nextIso && nextIso.slice(0, 10) <= todayIso)
           );
         });
+        dueCardsTotal += dueCards.length;
         if (dueCards.length > 0) {
           items.push({
             id: `fc-${doc.id}`,
@@ -167,8 +212,77 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
       }
     }
 
-    return items.slice(0, 5);
+    return {
+      dueTodayItems: items.slice(0, 5),
+      totalDueFlashcards: dueCardsTotal,
+      reviewedFlashcardsCount: reviewedTotal,
+    };
   }, [documents, now]);
+
+  const rewardsSummary = useMemo(
+    () =>
+      syncRewardsFromActualStudentActivity({
+        attempts: allAttempts,
+        focusSessionsCount: focusSessions.length,
+        reviewedFlashcardsCount,
+      }),
+    [allAttempts, focusSessions.length, reviewedFlashcardsCount, completedTaskIds]
+  );
+
+  const weakTopics = useMemo(() => {
+    const set = new Set<string>();
+    for (const att of allAttempts) {
+      for (const w of att.weakTopics || []) {
+        if (w) set.add(w);
+      }
+    }
+    return Array.from(set);
+  }, [allAttempts]);
+
+  const dailyCoachTasks = useMemo(
+    () =>
+      buildDailyPracticeCoachPlan({
+        documents,
+        attempts: allAttempts,
+        weakTopics,
+        dueFlashcardsCount: totalDueFlashcards,
+        targetExam: selectedExamTrack,
+        completedTaskIds,
+      }),
+    [documents, allAttempts, weakTopics, totalDueFlashcards, selectedExamTrack, completedTaskIds]
+  );
+
+  const toggleCoachTask = (taskId: string, title: string) => {
+    setCompletedTaskIds((prev) => {
+      const exists = prev.includes(taskId);
+      const next = exists ? prev.filter((id) => id !== taskId) : [...prev, taskId];
+      try {
+        localStorage.setItem(DAILY_COACH_COMPLETION_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore storage error
+      }
+      if (!exists) {
+        awardLearningXp({
+          eventId: `daily-task:${taskId}:${now.toISOString().slice(0, 10)}`,
+          category: 'daily_challenge_completed',
+          title: `Completed Daily Plan Task: ${title}`,
+          xpAwarded: 20,
+        });
+      }
+      return next;
+    });
+  };
+
+  const handleAddCustomTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newTaskInput.trim();
+    if (!trimmed) return;
+    setCustomTasks((prev) => [...prev, { id: `custom-${Date.now()}`, title: trimmed, done: false }]);
+    setNewTaskInput('');
+  };
+
+  const lastAttempt = allAttempts[0] || null;
+  const dailyChallenge = rewardsSummary.challenges.find((c) => c.cadence === 'daily') || rewardsSummary.challenges[0];
 
   const setupDone = isProfileSetupComplete(studentProfile);
   const cleanName = (studentName || '').trim();
@@ -177,23 +291,64 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
     e.preventDefault();
     const trimmed = doubtInput.trim();
     if (!trimmed) return;
+    const prefix = doubtLang === 'hi' ? '[Explain in Hinglish] ' : '';
     setDoubtInput('');
-    onAskDoubt(trimmed);
+    onAskDoubt(`${prefix}${trimmed}`);
+  };
+
+  const handleExamTrackChange = (track: ExamTrackId) => {
+    setSelectedExamTrack(track);
+    if (studentProfile) {
+      studyStorage.saveStudentProfile({
+        ...studentProfile,
+        targetExam: track,
+      });
+    }
   };
 
   return (
     <div className="space-y-6" data-testid="student-home-view">
-      {/* 1. Compact Countdown & Greeting Strip */}
+      {/* 1. Compact Header: Greeting + Exam Track Switcher + Countdown */}
       <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
         <div>
           <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-ink">
             {greetingFor(now)}
             {cleanName ? `, ${cleanName}` : ''}
           </h1>
-          <p className="text-xs sm:text-sm text-muted mt-0.5">
-            {studentProfile?.schoolClass ? `${studentProfile.schoolClass} · ` : ''}
-            JEE Main 2027 Session 1 preparation
-          </p>
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            <div
+              data-testid="home-exam-track-switcher"
+              className="inline-flex rounded-xl border border-line bg-white dark:bg-[#121A2E] p-0.5 text-xs font-semibold"
+            >
+              <button
+                type="button"
+                onClick={() => handleExamTrackChange('jee_main')}
+                className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                  selectedExamTrack === 'jee_main'
+                    ? 'bg-brand text-white'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                JEE Main 2027
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExamTrackChange('jee_advanced')}
+                className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                  selectedExamTrack === 'jee_advanced'
+                    ? 'bg-brand text-white'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                JEE Advanced 2027
+              </button>
+            </div>
+            {studentProfile?.schoolClass && (
+              <span className="text-xs text-muted font-medium">
+                · {studentProfile.schoolClass}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -206,7 +361,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               <span>
                 {countdown.inProgress
                   ? `${countdown.label} is live (${countdown.startDate})`
-                  : `${countdown.daysLeft} days to ${countdown.label} (${countdown.startDate})`}
+                  : `${countdown.daysLeft}d to ${countdown.label}`}
               </span>
             </div>
           )}
@@ -223,7 +378,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
         </div>
       </section>
 
-      {/* Optional profile setup reminder banner (disappears once setupCompleted is true) */}
+      {/* Optional profile setup reminder banner */}
       {!isProfileSyncing && !setupDone && onOpenProfileModal && (
         <div
           data-testid="profile-setup-banner"
@@ -232,7 +387,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           <div className="flex items-center gap-2.5 text-xs sm:text-sm text-ink">
             <UserRound className="w-4 h-4 text-brand shrink-0" />
             <span>
-              <strong>Set up your JEE profile</strong> (4 quick questions: name, class, language, age band).
+              <strong>Personalize your JEE plan</strong> (name, class, preferred language).
             </span>
           </div>
           <button
@@ -245,109 +400,172 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
         </div>
       )}
 
-      {/* Streak Tracker: Consecutive days of study activity retrieved from localStorage */}
-      <StreakTracker supplementalDates={docActivityDates} />
-
-      {/* 2. Add Study Material Box at the top of Home */}
-      <AddMaterialBox
-        isProcessing={isProcessingMaterial}
-        onDropFile={(file) => {
-          if (file.type.startsWith('image/')) {
-            onOpenAddMaterial('photo', file);
-          } else {
-            onOpenAddMaterial('pdf', file);
-          }
-        }}
-        onOpenMode={(mode) => onOpenAddMaterial(mode)}
-      />
-
-      {/* 3. "What you can do" Guide until the first upload */}
-      {documents.length === 0 && (
-        <section
-          aria-labelledby="first-upload-guide-heading"
-          data-testid="what-you-can-do-guide"
-          className="lm-card-editorial p-5 sm:p-6 space-y-4"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <p className="lm-kicker">Getting started</p>
-              <h2
-                id="first-upload-guide-heading"
-                className="font-display text-lg sm:text-xl font-extrabold text-ink"
-              >
-                What you can do once you add a chapter
-              </h2>
-            </div>
-            {onAddSampleChapter && !sampleIsAdded && (
+      {/* Main 2-column grid matching Image 10 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN (7 cols): My Tasks + Continue with + My Materials + Add Material */}
+        <div className="lg:col-span-7 space-y-5">
+          {/* 1. My Tasks (AI Practice Coach Daily Plan) */}
+          <section
+            aria-labelledby="my-tasks-heading"
+            data-testid="home-my-tasks-card"
+            className="lm-card-editorial p-5 space-y-3.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 id="my-tasks-heading" className="font-display text-base font-bold text-ink">
+                  My Tasks
+                </h2>
+                <span className="px-2 py-0.5 rounded-full bg-brand-soft text-brand text-[11px] font-bold">
+                  {dailyCoachTasks.filter((t) => t.completed).length +
+                    customTasks.filter((t) => t.done).length}
+                  /{dailyCoachTasks.length + customTasks.length}
+                </span>
+              </div>
               <button
                 type="button"
-                onClick={onAddSampleChapter}
-                data-testid="home-try-sample-btn"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-brand-200 bg-brand-soft text-brand text-xs font-bold hover:bg-brand hover:text-white transition-colors cursor-pointer shrink-0"
+                onClick={() => onNavigateTab('study')}
+                className="text-xs font-semibold text-brand hover:underline cursor-pointer"
               >
-                <BookOpen className="w-3.5 h-3.5" />
-                Add the free Probability sample chapter
+                Explore Syllabus →
               </button>
-            )}
-          </div>
+            </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-            <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-1.5">
-              <span className="w-7 h-7 rounded-lg bg-brand-soft text-brand flex items-center justify-center">
-                <BookOpen className="w-4 h-4" />
-              </span>
-              <p className="font-bold text-ink">1. Read &amp; Ask side by side</p>
-              <p className="text-muted leading-relaxed">
-                Read your PDF or lecture notes alongside a streaming JEE tutor in English or Hinglish.
-              </p>
-            </div>
-            <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-1.5">
-              <span className="w-7 h-7 rounded-lg bg-success-soft text-success flex items-center justify-center">
-                <Target className="w-4 h-4" />
-              </span>
-              <p className="font-bold text-ink">2. Practise JEE questions</p>
-              <p className="text-muted leading-relaxed">
-                Solve chapter MCQs and numerical questions with +4 / −1 JEE Main marking.
-              </p>
-            </div>
-            <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-1.5">
-              <span className="w-7 h-7 rounded-lg bg-warning-soft text-warning flex items-center justify-center">
-                <ListChecks className="w-4 h-4" />
-              </span>
-              <p className="font-bold text-ink">3. Diagnose Mistake DNA</p>
-              <p className="text-muted leading-relaxed">
-                See whether you lost marks to a concept gap, formula slip, or sign error.
-              </p>
-            </div>
-            <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-1.5">
-              <span className="w-7 h-7 rounded-lg bg-violet-100 text-violet-700 flex items-center justify-center">
-                <Layers className="w-4 h-4" />
-              </span>
-              <p className="font-bold text-ink">4. Revise flashcards &amp; sheets</p>
-              <p className="text-muted leading-relaxed">
-                Review spaced-repetition flashcards, mind maps, and one-page summary sheets.
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
+            <div className="divide-y divide-line">
+              {dailyCoachTasks.map((task) => (
+                <div
+                  key={task.id}
+                  data-testid={`coach-task-${task.id}`}
+                  className="py-2.5 first:pt-0 last:pb-0 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex items-start gap-2.5 cursor-pointer min-w-0 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={task.completed}
+                        onChange={() => toggleCoachTask(task.id, task.title)}
+                        className="mt-0.5 w-4 h-4 rounded border-line accent-indigo-600 cursor-pointer"
+                      />
+                      <span className="min-w-0">
+                        <span
+                          className={`block text-xs sm:text-sm font-semibold ${
+                            task.completed ? 'line-through text-muted' : 'text-ink'
+                          }`}
+                        >
+                          {task.title}
+                        </span>
+                        <span className="block text-[11px] text-muted">
+                          {task.subtitle} · ~{task.estimatedMinutes} min
+                        </span>
+                      </span>
+                    </label>
 
-      {/* Main 2-column grid: Continue + My Materials on left, Ask a Doubt + Due Today on right */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-7 space-y-6">
-          {/* 4. Continue Card */}
-          {continueDoc && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowTaskReasonId((prev) => (prev === task.id ? null : task.id))
+                        }
+                        title="Why is this recommended?"
+                        className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-soft cursor-pointer"
+                      >
+                        <Info className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (task.chapterId && onSaveDocument) {
+                            const ch = JEE_SYLLABUS_CHAPTERS.find((c) => c.id === task.chapterId);
+                            if (ch) {
+                              const doc = buildStudyDocumentFromSyllabusChapter(ch, 'full');
+                              onSaveDocument(doc);
+                              onSelectDoc(doc, 'explain');
+                              return;
+                            }
+                          }
+                          onNavigateTab(task.targetTab);
+                        }}
+                        className="px-3 py-1 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-brand cursor-pointer"
+                      >
+                        {task.targetTab === 'practice'
+                          ? 'Practise'
+                          : task.targetTab === 'revision'
+                          ? 'Revise'
+                          : 'Study'}
+                      </button>
+                    </div>
+                  </div>
+                  {showTaskReasonId === task.id && (
+                    <p className="text-[11px] text-ink/80 bg-soft px-3 py-1.5 rounded-lg ml-6">
+                      <strong>Coach rationale:</strong> {task.reason}
+                    </p>
+                  )}
+                </div>
+              ))}
+
+              {customTasks.map((ct) => (
+                <div key={ct.id} className="py-2.5 flex items-center justify-between gap-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer text-xs sm:text-sm font-medium text-ink">
+                    <input
+                      type="checkbox"
+                      checked={ct.done}
+                      onChange={() =>
+                        setCustomTasks((prev) =>
+                          prev.map((item) =>
+                            item.id === ct.id ? { ...item, done: !item.done } : item
+                          )
+                        )
+                      }
+                      className="w-4 h-4 rounded border-line accent-indigo-600 cursor-pointer"
+                    />
+                    <span className={ct.done ? 'line-through text-muted' : ''}>{ct.title}</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCustomTasks((prev) => prev.filter((item) => item.id !== ct.id))
+                    }
+                    className="text-muted hover:text-danger p-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Add custom task form */}
+            <form onSubmit={handleAddCustomTask} className="flex items-center gap-2 pt-1">
+              <input
+                type="text"
+                value={newTaskInput}
+                onChange={(e) => setNewTaskInput(e.target.value)}
+                placeholder="Add a personal study goal for today…"
+                data-testid="home-add-custom-task-input"
+                className="flex-1 px-3 py-1.5 rounded-xl border border-line bg-canvas text-xs text-ink placeholder:text-muted focus:outline-none focus:border-brand"
+              />
+              <button
+                type="submit"
+                disabled={!newTaskInput.trim()}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink disabled:opacity-50 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-brand" />
+                <span>Add</span>
+              </button>
+            </form>
+          </section>
+
+          {/* 2. Continue with Card */}
+          {continueDoc ? (
             <section
               aria-labelledby="continue-studying-heading"
               data-testid="home-continue-card"
-              className="lm-card-editorial p-5 sm:p-6 space-y-4 border-brand-200/80"
+              className="lm-card-editorial p-5 space-y-3.5 border-brand-200/80"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1 min-w-0">
                   <p className="lm-kicker" id="continue-studying-heading">
-                    Continue studying
+                    Continue with
                   </p>
-                  <h2 className="font-display text-lg sm:text-xl font-extrabold text-ink truncate">
+                  <h2 className="font-display text-lg font-extrabold text-ink truncate">
                     {continueDoc.title.replace(/\.pdf$/i, '')}
                   </h2>
                   <p className="text-xs text-muted line-clamp-2">
@@ -372,25 +590,12 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                 })()}
               </div>
 
-              {continueDoc.topics.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {continueDoc.topics.slice(0, 4).map((topic) => (
-                    <span
-                      key={topic.id}
-                      className="px-2.5 py-1 rounded-full bg-soft text-ink text-[11px] font-medium"
-                    >
-                      {topic.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => onSelectDoc(continueDoc, 'explain')}
                   data-testid="continue-open-study-btn"
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer"
                 >
                   <BookOpen className="w-3.5 h-3.5" />
                   <span>Open in Study</span>
@@ -402,10 +607,10 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                     onSelectDoc(continueDoc, 'explain');
                     onNavigateTab('practice');
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
                 >
                   <Target className="w-3.5 h-3.5 text-brand" />
-                  <span>Practise questions</span>
+                  <span>Practise</span>
                 </button>
                 <button
                   type="button"
@@ -413,42 +618,71 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                     onSelectDoc(continueDoc, 'explain');
                     onNavigateTab('revision');
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
                 >
                   <ListChecks className="w-3.5 h-3.5 text-brand" />
                   <span>Revise</span>
                 </button>
               </div>
             </section>
+          ) : (
+            <section
+              data-testid="what-you-can-do-guide"
+              className="lm-card-editorial p-5 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="lm-kicker">Start Immediately</p>
+                  <h2 className="font-display text-base font-bold text-ink">
+                    Study Built-In JEE Syllabus Notes or Add Your Own Material
+                  </h2>
+                </div>
+                {onAddSampleChapter && !sampleIsAdded && (
+                  <button
+                    type="button"
+                    onClick={onAddSampleChapter}
+                    data-testid="home-try-sample-btn"
+                    className="px-3.5 py-1.5 rounded-xl bg-brand-soft text-brand text-xs font-bold hover:bg-brand hover:text-white transition-colors cursor-pointer"
+                  >
+                    + Add Probability Sample Chapter
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-muted">
+                You don&apos;t need to upload a file to start. Open any Physics, Chemistry, or Mathematics chapter in <strong>Study → Chapter Notes</strong> or solve official past papers in <strong>Practice</strong>.
+              </p>
+            </section>
           )}
 
-          {/* 5. My Materials Library */}
+          {/* 3. My Materials Library + Add Material Strip */}
           <section
             aria-labelledby="my-materials-heading"
             data-testid="home-materials-library"
-            className="lm-card-editorial p-5 sm:p-6 space-y-4"
+            className="lm-card-editorial p-5 space-y-4"
           >
             <div className="flex items-center justify-between gap-2">
-              <div>
-                <h2 id="my-materials-heading" className="font-display text-base font-bold text-ink">
-                  My materials ({documents.length})
-                </h2>
-                <p className="text-xs text-muted">
-                  Your uploaded PDFs, scanned notes, and YouTube lectures
-                </p>
-              </div>
+              <h2 id="my-materials-heading" className="font-display text-base font-bold text-ink">
+                My Materials ({documents.length})
+              </h2>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('study')}
+                className="text-xs font-semibold text-brand hover:underline cursor-pointer"
+              >
+                All Chapters &amp; Notes →
+              </button>
             </div>
 
             {sortedDocs.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-line bg-canvas p-6 text-center space-y-2">
-                <p className="text-sm font-semibold text-ink">Your library is empty</p>
+              <div className="rounded-xl border border-dashed border-line bg-canvas p-5 text-center space-y-2">
+                <p className="text-xs font-semibold text-ink">No personal files uploaded yet</p>
                 <p className="text-xs text-muted">
-                  Use the box above to drop a PDF, scan handwritten notes, or paste a YouTube transcript.
+                  Upload a PDF, photo of notes, YouTube lecture URL, or study directly from the built-in JEE Syllabus Notes.
                 </p>
               </div>
             ) : (
               <div className="divide-y divide-line">
-                {sortedDocs.map((doc) => {
+                {sortedDocs.slice(0, 6).map((doc) => {
                   const subj =
                     classifyJeeSubject(
                       `${doc.title} ${doc.topics.map((t) => t.name).join(' ')}`
@@ -462,9 +696,9 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                     <div
                       key={doc.id}
                       data-testid={`material-item-${doc.id}`}
-                      className="py-3.5 first:pt-1 last:pb-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      className="py-3 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
                     >
-                      <div className="min-w-0 flex-1 space-y-1">
+                      <div className="min-w-0 flex-1 space-y-0.5">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${style.soft} ${style.text}`}
@@ -485,29 +719,19 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                             </span>
                           )}
                         </div>
-
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                          <span>
-                            {doc.topics.length > 0
-                              ? doc.topics
-                                  .slice(0, 3)
-                                  .map((t) => t.name)
-                                  .join(' · ')
-                              : `${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}`}
-                          </span>
-                          <span>
-                            · Opened {relativeTime(doc.lastStudiedAt || doc.createdAt, now)}
-                          </span>
-                        </div>
+                        <p className="text-[11px] text-muted truncate">
+                          {doc.pageCount} {doc.pageCount === 1 ? 'page' : 'pages'} ·{' '}
+                          {relativeTime(doc.lastStudiedAt || doc.createdAt, now)}
+                        </p>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
                           onClick={() => onSelectDoc(doc, 'explain')}
-                          className="px-3 py-1.5 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
+                          className="px-3 py-1 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
                         >
-                          Study
+                          Open
                         </button>
                         {isConfirming ? (
                           <div className="flex items-center gap-1">
@@ -518,14 +742,14 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                                 setConfirmDeleteId(null);
                               }}
                               data-testid={`confirm-delete-${doc.id}`}
-                              className="px-2.5 py-1.5 rounded-lg bg-danger text-white text-xs font-semibold cursor-pointer"
+                              className="px-2.5 py-1 rounded-lg bg-danger text-white text-xs font-semibold cursor-pointer"
                             >
                               Delete
                             </button>
                             <button
                               type="button"
                               onClick={() => setConfirmDeleteId(null)}
-                              className="px-2 py-1.5 rounded-lg border border-line text-xs text-muted hover:text-ink cursor-pointer"
+                              className="px-2 py-1 rounded-lg border border-line text-xs text-muted hover:text-ink cursor-pointer"
                             >
                               Cancel
                             </button>
@@ -536,7 +760,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                             onClick={() => setConfirmDeleteId(doc.id)}
                             aria-label={`Delete ${doc.title}`}
                             data-testid={`delete-material-${doc.id}`}
-                            className="p-1.5 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-danger-soft hover:border-danger/30 text-muted hover:text-danger transition-colors cursor-pointer"
+                            className="p-1.5 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-danger-soft text-muted hover:text-danger transition-colors cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -547,48 +771,170 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                 })}
               </div>
             )}
+
+            {/* Compact Add Material Strip (PDF · Photo · YouTube · Paste Text) */}
+            <div className="pt-2 border-t border-line flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-muted">Add Material:</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(
+                  [
+                    { mode: 'pdf', label: 'PDF', icon: FileText },
+                    { mode: 'photo', label: 'Photo', icon: Camera },
+                    { mode: 'youtube', label: 'YouTube', icon: Youtube },
+                    { mode: 'paste', label: 'Paste Text', icon: Type },
+                  ] as const
+                ).map((btn) => {
+                  const Icon = btn.icon;
+                  return (
+                    <button
+                      key={btn.mode}
+                      type="button"
+                      onClick={() => onOpenAddMaterial(btn.mode)}
+                      data-testid={`home-quick-add-${btn.mode}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-line bg-canvas hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
+                    >
+                      <Icon className="w-3.5 h-3.5 text-brand" />
+                      <span>{btn.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </section>
+
+          {/* Drag-and-drop AddMaterialBox */}
+          <AddMaterialBox
+            isProcessing={isProcessingMaterial}
+            onDropFile={(file) => {
+              if (file.type.startsWith('image/')) {
+                onOpenAddMaterial('photo', file);
+              } else {
+                onOpenAddMaterial('pdf', file);
+              }
+            }}
+            onOpenMode={(mode) => onOpenAddMaterial(mode)}
+          />
         </div>
 
-        {/* Right column: Ask a doubt + Due today */}
-        <div className="lg:col-span-5 space-y-6">
-          {/* 6. Ask a Doubt Box */}
+        {/* RIGHT COLUMN (5 cols): Compact Streak/XP/Level/Daily Challenge + Ask a Doubt + Due Today + Last Mock */}
+        <div className="lg:col-span-5 space-y-5">
+          {/* 1. Compact Streak, XP, Level & Daily Challenge Card (matching Image 10) */}
+          <section
+            data-testid="home-rewards-summary-card"
+            className="lm-card-editorial p-5 space-y-4"
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-xl border border-line bg-canvas flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-brand-soft text-brand flex items-center justify-center shrink-0">
+                  <Star className="w-4 h-4" />
+                </span>
+                <div className="min-w-0">
+                  <span className="text-[11px] text-muted block">XP &amp; Level</span>
+                  <span
+                    data-testid="home-xp-value"
+                    className="text-sm font-extrabold text-ink tabular-nums truncate block"
+                  >
+                    {rewardsSummary.totalXp.toLocaleString()} XP · L{rewardsSummary.levelInfo.level}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onNavigateTab('analytics')}
+                className="p-3 rounded-xl border border-line bg-canvas hover:border-brand text-left flex items-center gap-2.5 cursor-pointer"
+              >
+                <span className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Trophy className="w-4 h-4" />
+                </span>
+                <div className="min-w-0">
+                  <span className="text-[11px] text-muted block">Rank Tier</span>
+                  <span className="text-xs font-bold text-ink truncate block">
+                    {rewardsSummary.levelInfo.title}
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            {dailyChallenge && (
+              <div className="p-3.5 rounded-xl border border-line bg-canvas space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-ink">{dailyChallenge.title}</span>
+                  <span className="font-mono font-bold text-brand">
+                    {dailyChallenge.currentCount}/{dailyChallenge.targetCount} (+{dailyChallenge.xpReward} XP)
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-soft overflow-hidden">
+                  <div
+                    className="h-full bg-brand transition-all"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round((dailyChallenge.currentCount / dailyChallenge.targetCount) * 100)
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 14-day Consecutive Study Activity Streak Tracker */}
+            <StreakTracker supplementalDates={docActivityDates} />
+          </section>
+
+          {/* 2. Ask a Doubt Box with English | Hinglish Toggle */}
           <section
             aria-labelledby="ask-a-doubt-heading"
             data-testid="home-ask-doubt-box"
-            className="lm-card-editorial p-5 sm:p-6 space-y-3"
+            className="lm-card-editorial p-5 space-y-3"
           >
-            <div className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-xl bg-brand-soft text-brand flex items-center justify-center shrink-0">
-                <MessageCircleQuestion className="w-4 h-4" />
-              </span>
-              <div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-brand-soft text-brand flex items-center justify-center shrink-0">
+                  <MessageCircleQuestion className="w-4 h-4" />
+                </span>
                 <h2 id="ask-a-doubt-heading" className="font-display text-base font-bold text-ink">
-                  Ask a JEE doubt
+                  Ask a Doubt
                 </h2>
-                <p className="text-xs text-muted">
-                  Streams step by step from your notes + JEE knowledge
-                </p>
+              </div>
+
+              <div className="inline-flex rounded-lg border border-line bg-canvas p-0.5 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setDoubtLang('en')}
+                  className={`px-2.5 py-1 rounded-md cursor-pointer ${
+                    doubtLang === 'en' ? 'bg-brand text-white' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDoubtLang('hi')}
+                  className={`px-2.5 py-1 rounded-md cursor-pointer ${
+                    doubtLang === 'hi' ? 'bg-brand text-white' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  Hinglish
+                </button>
               </div>
             </div>
 
             <form onSubmit={handleDoubtSubmit} className="space-y-2.5">
               <textarea
-                rows={3}
+                rows={2}
                 value={doubtInput}
                 onChange={(e) => setDoubtInput(e.target.value)}
                 placeholder={
                   continueDoc
-                    ? `Ask anything about ${continueDoc.title.replace(/\.pdf$/i, '')} or a JEE concept…`
-                    : 'e.g. Why is work done in an isothermal reversible expansion maximum?'
+                    ? `Ask a doubt about ${continueDoc.title.replace(/\.pdf$/i, '')} or any JEE concept…`
+                    : 'Type a Physics, Chemistry, or Mathematics doubt…'
                 }
                 data-testid="home-doubt-input"
                 className="w-full rounded-xl border border-line bg-canvas p-3 text-xs sm:text-sm text-ink placeholder:text-muted focus:outline-none focus:bg-white dark:focus:bg-[#121A2E] focus:border-brand leading-relaxed"
               />
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] text-muted">
-                  English or Hinglish · Cites your pages
-                </span>
+                <span className="text-[11px] text-muted">Cites your notes &amp; JEE syllabus</span>
                 <button
                   type="submit"
                   disabled={!doubtInput.trim()}
@@ -596,31 +942,26 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer disabled:opacity-50"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>Ask tutor</span>
+                  <span>Ask Tutor</span>
                 </button>
               </div>
             </form>
           </section>
 
-          {/* 7. Due Today */}
+          {/* 3. Due Today */}
           <section
             aria-labelledby="due-today-heading"
             data-testid="home-due-today"
-            className="lm-card-editorial p-5 sm:p-6 space-y-3.5"
+            className="lm-card-editorial p-5 space-y-3"
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-success-soft text-success flex items-center justify-center shrink-0">
                   <Clock className="w-4 h-4" />
                 </span>
-                <div>
-                  <h2 id="due-today-heading" className="font-display text-base font-bold text-ink">
-                    Due today
-                  </h2>
-                  <p className="text-xs text-muted">
-                    Revision tasks &amp; flashcards ready for review
-                  </p>
-                </div>
+                <h2 id="due-today-heading" className="font-display text-base font-bold text-ink">
+                  Due Today
+                </h2>
               </div>
               {dueTodayItems.length > 0 && (
                 <span className="px-2.5 py-0.5 rounded-full bg-warning-soft text-amber-900 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 text-xs font-bold">
@@ -630,19 +971,18 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             </div>
 
             {dueTodayItems.length === 0 ? (
-              <div className="rounded-xl border border-line bg-canvas p-4 flex items-center gap-3 text-xs text-muted">
-                <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
-                <span>
-                  Nothing overdue right now. Take a quick practice quiz or review flashcards in{' '}
-                  <button
-                    type="button"
-                    onClick={() => onNavigateTab('revision')}
-                    className="font-semibold text-brand hover:underline cursor-pointer"
-                  >
-                    Revise
-                  </button>
-                  .
+              <div className="rounded-xl border border-line bg-canvas p-3.5 flex items-center justify-between gap-3 text-xs text-muted">
+                <span className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
+                  No overdue flashcards or revision tasks.
                 </span>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('revision')}
+                  className="font-semibold text-brand hover:underline shrink-0 cursor-pointer"
+                >
+                  Open Revise →
+                </button>
               </div>
             ) : (
               <div className="divide-y divide-line">
@@ -667,6 +1007,57 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+
+          {/* 4. Last Mock Summary Card (matching Image 10) */}
+          <section
+            aria-labelledby="last-mock-heading"
+            data-testid="home-last-mock-card"
+            className="lm-card-editorial p-5 space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 id="last-mock-heading" className="font-display text-base font-bold text-ink">
+                Last Mock / Practice
+              </h2>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('analytics')}
+                className="text-xs font-semibold text-brand hover:underline cursor-pointer"
+              >
+                Analysis →
+              </button>
+            </div>
+
+            {lastAttempt ? (
+              <div className="rounded-xl border border-line bg-canvas p-3.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-ink truncate">
+                    {lastAttempt.documentTitle}
+                  </span>
+                  <span className="text-xs font-extrabold text-brand tabular-nums shrink-0">
+                    {lastAttempt.score}/{lastAttempt.totalQuestions} ({lastAttempt.percentage}%)
+                  </span>
+                </div>
+                {lastAttempt.weakTopics.length > 0 && (
+                  <p className="text-[11px] text-muted truncate">
+                    Focus area: <strong className="text-ink">{lastAttempt.weakTopics[0]}</strong>
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-line bg-canvas p-3.5 flex items-center justify-between gap-3">
+                <p className="text-xs text-muted">
+                  No mock or PYQ test attempted yet.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('practice')}
+                  className="px-3 py-1.5 rounded-lg lm-btn-accent text-xs font-semibold shrink-0 cursor-pointer"
+                >
+                  Start Mock
+                </button>
               </div>
             )}
           </section>

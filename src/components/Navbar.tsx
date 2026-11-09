@@ -20,12 +20,13 @@ import {
   UserRound,
   Sun,
   Moon,
+  HelpCircle,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { StudyDocument, LearnMateNotification, StudentAcademicProfile, ThemeMode } from '../types/study';
 import { EXAM_BLUEPRINTS } from '../utils/examSimulatorEngine';
 import { getNextJeeCountdown } from '../utils/jeeCalendar';
-import { CompactStudyUtilitiesWidget } from './CompactStudyUtilitiesWidget';
+import { CompactStudyUtilitiesWidget, type UtilityTab } from './CompactStudyUtilitiesWidget';
 import type { AddMaterialMode } from './AddMaterialModal';
 
 export type ActiveTab =
@@ -60,6 +61,10 @@ interface NavbarProps {
   studentProfile?: StudentAcademicProfile;
   themeMode?: ThemeMode;
   onToggleTheme?: () => void;
+  onOpenSearchModal?: () => void;
+  onOpenAppGuideModal?: () => void;
+  externalUtilityTab?: UtilityTab | null;
+  onConsumeExternalUtilityTab?: () => void;
 }
 
 type NavItem = {
@@ -86,9 +91,13 @@ const MOBILE_PRIMARY_NAV: NavItem[] = [
 function isTabActive(item: ActiveTab, activeTab: ActiveTab): boolean {
   return (
     activeTab === item ||
-    (item === 'study' && (activeTab === 'pdf-workspace' || activeTab === 'ai-tutor')) ||
-    (item === 'dashboard' && activeTab === 'home') ||
-    (item === 'resources' && activeTab === 'explore')
+    (item === 'study' &&
+      (activeTab === 'pdf-workspace' ||
+        activeTab === 'ai-tutor' ||
+        activeTab === 'resources' ||
+        activeTab === 'explore' ||
+        activeTab === 'create')) ||
+    (item === 'dashboard' && activeTab === 'home')
   );
 }
 
@@ -110,6 +119,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   studentProfile,
   themeMode = 'light',
   onToggleTheme,
+  onOpenSearchModal,
+  onOpenAppGuideModal,
+  externalUtilityTab,
+  onConsumeExternalUtilityTab,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [notifOpen, setNotifOpen] = useState(false);
@@ -125,19 +138,23 @@ export const Navbar: React.FC<NavbarProps> = ({
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
     };
-    const handleEscape = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setNotifOpen(false);
         setProfileOpen(false);
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        onOpenSearchModal?.();
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [onOpenSearchModal]);
 
   const countdown = useMemo(() => getNextJeeCountdown(), []);
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -170,17 +187,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   const menuItemClass =
     'w-full px-4 py-2.5 text-left text-sm text-ink hover:bg-soft flex items-center gap-3 cursor-pointer transition-colors';
 
-  const meActive =
-    profileOpen ||
-    activeTab === 'resources' ||
-    activeTab === 'explore' ||
-    activeTab === 'create' ||
-    activeTab === 'analytics';
+  const meActive = profileOpen || activeTab === 'analytics';
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full bg-white/90 dark:bg-[#0B1020]/90 backdrop-blur-xl border-b border-line lm-no-print">
-        <div className="max-w-[1320px] mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center gap-2 sm:gap-3">
+      <header className="sticky top-0 z-40 w-full bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-b border-line lm-no-print">
+        <div className="max-w-[1360px] mx-auto px-3 sm:px-6 lg:px-8 h-15 flex items-center gap-2">
           {/* Brand */}
           <button
             type="button"
@@ -189,11 +201,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="flex items-center gap-2 shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-brand rounded-xl"
             aria-label="LearnMate home"
           >
-            <span className="w-9 h-9 rounded-xl bg-linear-to-br from-brand to-violet-500 text-white grid place-items-center shadow-sm">
-              <GraduationCap className="w-5 h-5" />
+            <span className="w-8 h-8 rounded-xl bg-brand text-white grid place-items-center shadow-xs">
+              <GraduationCap className="w-4 h-4" />
             </span>
             <span className="hidden sm:flex items-center gap-1.5">
-              <span className="font-display font-extrabold text-lg tracking-tight text-ink">
+              <span className="font-display font-extrabold text-base tracking-tight text-ink">
                 LearnMate
               </span>
               <span className="px-1.5 py-0.5 rounded-md bg-brand-soft text-brand text-[10px] font-bold tracking-wider">
@@ -202,8 +214,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* Desktop navigation: Home · Study · Practice · Revise · Progress */}
-          <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-1 ml-3">
+          {/* Desktop 5 Primary Destinations: Home · Study · Practice · Revise · Progress */}
+          <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-1 ml-2">
             {DESKTOP_NAV.map((item) => {
               const Icon = item.icon;
               const active = isTabActive(item.id, activeTab);
@@ -214,50 +226,59 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onSelectTab(item.id)}
                   data-testid={`nav-tab-${item.id}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    active ? 'bg-brand-soft text-brand' : 'text-muted hover:text-ink hover:bg-soft'
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-brand-soft text-brand border border-brand/20'
+                      : 'text-muted hover:text-ink hover:bg-soft'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-3.5 h-3.5" />
                   {item.label}
                 </button>
               );
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-            {/* Persistent "+ Add material" button on every page */}
+          {/* Right Global Utilities: + Add Material · Search (Ctrl+K) · Study Tools · Focus 25:00 · Theme · Notifications · Help (?) · Profile */}
+          <div className="ml-auto flex items-center gap-1.5">
             {onOpenAddMaterial && (
               <button
                 type="button"
                 onClick={() => onOpenAddMaterial('pdf')}
                 data-testid="navbar-add-material-btn"
-                aria-label="Add material"
-                className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-full lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap"
+                aria-label="Add Material"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5 shrink-0" />
                 <span>
-                  Add<span className="hidden sm:inline"> material</span>
+                  Add<span className="hidden sm:inline"> Material</span>
                 </span>
               </button>
             )}
 
-            {/* Exam countdown pill (xl screens) */}
-            {countdown && (
-              <div
-                className="hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-warning-soft border border-amber-200 dark:border-amber-800/60 text-xs font-semibold text-amber-800 dark:text-amber-300"
-                title={`${countdown.label} starts ${countdown.startDate}`}
+            {/* Global Search (Ctrl+K) */}
+            {onOpenSearchModal && (
+              <button
+                type="button"
+                onClick={onOpenSearchModal}
+                data-testid="navbar-search-btn"
+                aria-label="Search (Ctrl+K)"
+                title="Search chapters, notes, PYQs, materials & tools (Ctrl+K)"
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium transition-colors cursor-pointer"
               >
-                <Flame className="w-3.5 h-3.5 text-warning shrink-0" />
-                <span className="whitespace-nowrap">
-                  {countdown.inProgress
-                    ? `${countdown.label} is on`
-                    : `${countdown.daysLeft}d to ${countdown.label}`}
-                </span>
-              </div>
+                <Search className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden md:inline">Search (Ctrl+K)</span>
+              </button>
             )}
 
-            {/* Light / Night Owl Mode Toggle */}
+            {/* Study Tools & Docked 25:00 Focus Timer */}
+            <CompactStudyUtilitiesWidget
+              activeDocument={activeDoc}
+              externalOpenTab={externalUtilityTab}
+              onConsumeExternalOpen={onConsumeExternalUtilityTab}
+            />
+
+            {/* Light / Night Owl Theme Toggle */}
             {onToggleTheme && (
               <button
                 type="button"
@@ -265,23 +286,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 data-testid="navbar-theme-toggle-btn"
                 aria-label={isDark ? 'Switch to Light mode' : 'Switch to Night Owl mode'}
                 title={isDark ? 'Switch to Light mode' : 'Switch to Night Owl mode'}
-                className="h-9 px-2.5 sm:px-3 rounded-full border border-line bg-white dark:bg-[#121A2E] hover:bg-soft flex items-center gap-1.5 text-muted hover:text-ink transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
               >
                 {isDark ? (
-                  <>
-                    <Sun className="w-4 h-4 text-amber-400" />
-                    <span className="hidden xl:inline text-xs font-semibold text-ink">Light</span>
-                  </>
+                  <Sun className="w-4 h-4 text-amber-400" />
                 ) : (
-                  <>
-                    <Moon className="w-4 h-4 text-indigo-600" />
-                    <span className="hidden xl:inline text-xs font-semibold text-ink">Night Owl</span>
-                  </>
+                  <Moon className="w-4 h-4 text-indigo-600" />
                 )}
               </button>
             )}
-
-            <CompactStudyUtilitiesWidget activeDocument={activeDoc} />
 
             {/* Notifications */}
             <div ref={notifRef} className="relative">
@@ -293,11 +306,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 aria-label="Notifications"
                 data-testid="navbar-notifications-btn"
-                className="relative w-9 h-9 rounded-full hover:bg-soft border border-line bg-white dark:bg-[#121A2E] flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
+                className="relative w-8 h-8 rounded-xl hover:bg-soft border border-line bg-white dark:bg-[#121A2E] flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
               >
                 <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-danger text-white text-[10px] font-bold flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-danger text-white text-[10px] font-bold flex items-center justify-center">
                     {unreadCount}
                   </span>
                 )}
@@ -339,43 +352,54 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
+            {/* App Guide / Help (?) Button */}
+            {onOpenAppGuideModal && (
+              <button
+                type="button"
+                onClick={onOpenAppGuideModal}
+                data-testid="navbar-app-guide-btn"
+                aria-label="Open App Guide"
+                title="App Guide & Feature Directory"
+                className="w-8 h-8 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
+              >
+                <HelpCircle className="w-4 h-4" />
+              </button>
+            )}
+
             {isAuthReady && !user && onLogin && (
               <button
                 type="button"
                 onClick={onLogin}
                 data-testid="navbar-signin-direct-btn"
-                className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full lm-btn-accent text-xs cursor-pointer"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl lm-btn-accent text-xs cursor-pointer"
               >
                 <LogIn className="w-3.5 h-3.5" />
                 Sign in
               </button>
             )}
 
-            {/* Profile menu: Profile · Settings · Resources · Create · Sign out */}
+            {/* Profile Avatar Menu */}
             <div ref={profileRef} className="relative">
               <button
                 type="button"
                 onClick={() => setProfileOpen((prev) => !prev)}
                 data-testid="navbar-profile-btn"
                 aria-label="Open profile menu"
-                className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-white dark:bg-[#121A2E] hover:bg-soft border border-line transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full bg-white dark:bg-[#121A2E] hover:bg-soft border border-line transition-colors cursor-pointer"
               >
                 {user?.photoURL ? (
                   <img
                     src={user.photoURL}
                     alt=""
-                    className="w-7 h-7 rounded-full object-cover"
+                    className="w-6 h-6 rounded-full object-cover"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <span className="w-7 h-7 rounded-full bg-brand text-white text-xs font-bold flex items-center justify-center">
+                  <span className="w-6 h-6 rounded-full bg-brand text-white text-xs font-bold flex items-center justify-center">
                     {avatarInitial}
                   </span>
                 )}
-                <span className="hidden md:inline text-xs font-semibold text-ink max-w-[140px] truncate">
-                  {profileSubtitle}
-                </span>
-                <ChevronDown className="w-3.5 h-3.5 text-muted" />
+                <ChevronDown className="w-3 h-3 text-muted" />
               </button>
 
               {profileOpen && (
@@ -391,7 +415,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
 
                   {countdown && (
-                    <div className="xl:hidden px-4 py-2 border-b border-line flex items-center gap-2 text-xs font-medium text-amber-800 dark:text-amber-300 bg-warning-soft/60">
+                    <div className="px-4 py-2 border-b border-line flex items-center gap-2 text-xs font-medium text-amber-800 dark:text-amber-300 bg-warning-soft/60">
                       <Flame className="w-3.5 h-3.5 text-warning shrink-0" />
                       <span>
                         {countdown.inProgress
@@ -432,7 +456,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
                   </div>
 
-                  {/* Mobile quick link to Progress (since mobile bottom bar has 5 items: Home, Study, Practice, Revise, Me) */}
                   <button
                     type="button"
                     onClick={() => go('analytics')}
@@ -472,6 +495,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                   )}
 
+                  {onOpenAppGuideModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenAppGuideModal();
+                        setProfileOpen(false);
+                      }}
+                      data-testid="open-app-guide-menu-btn"
+                      className={menuItemClass}
+                    >
+                      <HelpCircle className="w-4 h-4 text-muted" />
+                      App Guide
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => go('resources')}
@@ -479,7 +517,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className={menuItemClass}
                   >
                     <Compass className="w-4 h-4 text-muted" />
-                    Resources
+                    Resources (Study)
                   </button>
 
                   <button
@@ -489,7 +527,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className={menuItemClass}
                   >
                     <Sparkles className="w-4 h-4 text-muted" />
-                    Create
+                    Create (Study)
                   </button>
 
                   {onToggleTheme && (
@@ -591,7 +629,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             );
           })}
 
-          {/* 5th phone tab: Me */}
           <button
             type="button"
             onClick={() => setProfileOpen((prev) => !prev)}

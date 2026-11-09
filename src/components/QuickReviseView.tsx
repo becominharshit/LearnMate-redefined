@@ -65,6 +65,7 @@ import {
   triggerPdfDownload,
 } from '../utils/pdfGenerator';
 import { noteGenerationCache, type HandwrittenWorkflowSource } from '../utils/phase6Engine';
+import { awardLearningXp } from '../utils/rewardsEngine';
 import { MathText } from './MathText';
 import { HandwrittenNotesView } from './HandwrittenNotesView';
 
@@ -92,15 +93,13 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   onAskTutorAboutConcept,
   onOpenPractice,
 }) => {
-  const normalizedInitialTab: QuickReviseSubTab =
-    initialSubTab === 'sticky' ? 'flashcards' : initialSubTab;
-  const [subTab, setSubTab] = useState<QuickReviseSubTab>(normalizedInitialTab);
+  const [subTab, setSubTab] = useState<QuickReviseSubTab>(initialSubTab);
   const [handwrittenInitialWorkflow, setHandwrittenInitialWorkflow] = useState<
     HandwrittenWorkflowSource | undefined
   >(undefined);
 
   useEffect(() => {
-    setSubTab(initialSubTab === 'sticky' ? 'flashcards' : initialSubTab);
+    setSubTab(initialSubTab);
   }, [initialSubTab]);
 
   // Shared QuickReviseBundle State
@@ -113,7 +112,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   const [isLoadingMindMap, setIsLoadingMindMap] = useState(false);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
 
-  // Sticky Notes Interactive State (merged inside Flashcards tab)
+  // Sticky Notes Interactive State (distinct destination in Revise)
   const [selectedPageFilter, setSelectedPageFilter] = useState<number | 'all'>('all');
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -130,6 +129,10 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [selectedNode, setSelectedNode] = useState<MindMapNode | null>(null);
+  const [mindMapSearch, setMindMapSearch] = useState('');
+  const [collapsedBranchIds, setCollapsedBranchIds] = useState<Record<string, boolean>>({});
+  const [guidedReviewActive, setGuidedReviewActive] = useState(false);
+  const [guidedNodeOrderIdx, setGuidedNodeOrderIdx] = useState(0);
 
   // Mistakes & Revision Plan State (moved from Study sub-modes into Revise)
   const [mistakeInsights, setMistakeInsights] = useState<MistakeInsight[]>(() =>
@@ -497,6 +500,15 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
     );
     setFlashcards(updated);
     persistBundle({ flashcards: updated });
+
+    // Award idempotent XP per unique flashcard review
+    awardLearningXp({
+      eventId: `flashcard-review-${activeDocument.id}-${activeFlashcard.id}`,
+      actionType: 'flashcard_deck_reviewed',
+      xp: 5,
+      label: `Reviewed flashcard: ${activeFlashcard.topic}`,
+    });
+
     setIsCardFlipped(false);
     if (currentCardIdx < visibleFlashcards.length - 1) {
       setCurrentCardIdx((i) => i + 1);
@@ -855,7 +867,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           </div>
         )}
 
-        {/* 6 Revise Tabs (Phase 6: Flashcards · Mind map · Summary sheet · Handwritten Notes · Mistakes · Formula Book) */}
+        {/* 7 Distinct Revise Tabs: Flashcards · Sticky Notes · Mind map · Summary sheet · Handwritten Notes · Mistakes · Formula Book */}
         <div
           role="tablist"
           aria-label="Revise Tools"
@@ -864,6 +876,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           {(
             [
               { id: 'flashcards', label: 'Flashcards', icon: Layers },
+              { id: 'sticky', label: 'Sticky Notes', icon: StickyNote },
               { id: 'mindmap', label: 'Mind map', icon: Network },
               { id: 'onepage', label: 'Summary sheet', icon: FileSpreadsheet },
               { id: 'handwritten', label: 'Handwritten Notes', icon: PenTool },
@@ -872,9 +885,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             ] as const
           ).map((tabItem) => {
             const Icon = tabItem.icon;
-            const active =
-              subTab === tabItem.id ||
-              (tabItem.id === 'flashcards' && subTab === 'sticky');
+            const active = subTab === tabItem.id;
             return (
               <button
                 key={tabItem.id}
@@ -926,9 +937,9 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       )}
 
       {/* =================================================================
-          1. FLASHCARDS & STICKY NOTES (Merged per Phase 3 item 7)
+          1A. FLASHCARDS (Distinct Destination)
          ================================================================= */}
-      {(subTab === 'flashcards' || subTab === 'sticky') && (
+      {subTab === 'flashcards' && (
         <div className="space-y-8 flex-1">
           {/* Interactive Flip-Card Deck */}
           <div className="space-y-5 max-w-2xl mx-auto w-full">
@@ -1140,9 +1151,15 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               </>
             )}
           </div>
+        </div>
+      )}
 
-          {/* Sticky Notes Board (Merged below Flashcards) */}
-          <div className="pt-6 border-t border-line">
+      {/* =================================================================
+          1B. STICKY NOTES (Distinct Destination)
+         ================================================================= */}
+      {subTab === 'sticky' && (
+        <div className="space-y-6 flex-1">
+          <div>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* Left Chapter & Page Navigation Sidebar */}
               <aside className="lg:col-span-3 lm-card-editorial p-4 space-y-4 no-print">
@@ -1402,21 +1419,77 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       )}
 
       {/* =================================================================
-          2. INTERACTIVE MIND MAP VIEW
+          2. INTERACTIVE MIND MAP VIEW (Matches Image 9 & Section 14)
+          Rich Concept Cards + Relationship Labels + Guided 2-Min Review
          ================================================================= */}
       {subTab === 'mindmap' && (
         <div className="space-y-4 flex-1 flex flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-2 no-print">
-            <span className="text-xs font-medium text-muted">
-              Click any concept node to view its explanation and source reference.
-            </span>
+          {/* Mind Map Top Control Bar matching Image 9 */}
+          <div className="flex flex-wrap items-center justify-between gap-3 no-print bg-white p-3.5 rounded-2xl border border-line shadow-2xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-52 sm:w-64">
+                <Search className="w-3.5 h-3.5 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="search"
+                  value={mindMapSearch}
+                  onChange={(e) => setMindMapSearch(e.target.value)}
+                  placeholder="Search concept node..."
+                  aria-label="Search mind map concept"
+                  className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-canvas border border-line text-xs text-ink focus:outline-none focus:border-brand"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!mindMap) return;
+                  const nextState = !guidedReviewActive;
+                  setGuidedReviewActive(nextState);
+                  setGuidedNodeOrderIdx(0);
+                  if (nextState && mindMap.nodes.length > 0) {
+                    setSelectedNode(mindMap.nodes[0]);
+                  }
+                }}
+                data-testid="mindmap-review-2min-btn"
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                  guidedReviewActive
+                    ? 'bg-brand text-white border-brand'
+                    : 'bg-brand-soft/60 text-brand border-brand/30 hover:bg-brand-soft'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>{guidedReviewActive ? 'Exit 2-Min Review' : 'Review 2 min'}</span>
+              </button>
+
+              {Object.keys(collapsedBranchIds).some((k) => collapsedBranchIds[k]) && (
+                <button
+                  type="button"
+                  onClick={() => setCollapsedBranchIds({})}
+                  className="px-2.5 py-1.5 rounded-xl border border-line bg-canvas text-xs font-semibold text-ink cursor-pointer"
+                >
+                  Expand All Branches
+                </button>
+              )}
+            </div>
 
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
+                onClick={() => {
+                  setZoom(1);
+                  setPan({ x: 0, y: 0 });
+                }}
+                aria-label="Fit mind map to screen"
+                className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
+              >
+                <Maximize className="w-3.5 h-3.5" />
+                <span>Fit</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setZoom((z) => Math.max(0.65, Number((z - 0.15).toFixed(2))))}
                 aria-label="Zoom out mind map"
-                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer"
+                className="p-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-ink cursor-pointer"
               >
                 <ZoomOut className="w-4 h-4" />
               </button>
@@ -1427,25 +1500,14 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 type="button"
                 onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.15).toFixed(2))))}
                 aria-label="Zoom in mind map"
-                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer"
+                className="p-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-ink cursor-pointer"
               >
                 <ZoomIn className="w-4 h-4" />
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setZoom(1);
-                  setPan({ x: 0, y: 0 });
-                }}
-                aria-label="Reset mind map view"
-                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer"
-              >
-                <Maximize className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
                 onClick={handleDownloadMindMapSvg}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Export SVG</span>
@@ -1462,6 +1524,46 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             </div>
           </div>
 
+          {/* Guided 2-Minute Step-by-Step Banner */}
+          {guidedReviewActive && mindMap && mindMap.nodes.length > 0 && (
+            <div className="p-3.5 rounded-2xl bg-brand-soft/70 border border-brand/30 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-xs">
+                <span className="px-2.5 py-0.5 rounded-full bg-brand text-white font-bold">
+                  Guided Concept Walkthrough ({guidedNodeOrderIdx + 1} / {mindMap.nodes.length})
+                </span>
+                <span className="font-bold text-ink">
+                  {mindMap.nodes[guidedNodeOrderIdx]?.label}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={guidedNodeOrderIdx === 0}
+                  onClick={() => {
+                    const prevIdx = Math.max(0, guidedNodeOrderIdx - 1);
+                    setGuidedNodeOrderIdx(prevIdx);
+                    setSelectedNode(mindMap.nodes[prevIdx]);
+                  }}
+                  className="px-3 py-1 rounded-lg bg-white border border-line text-xs font-semibold text-ink disabled:opacity-40 cursor-pointer"
+                >
+                  ← Previous Node
+                </button>
+                <button
+                  type="button"
+                  disabled={guidedNodeOrderIdx >= mindMap.nodes.length - 1}
+                  onClick={() => {
+                    const nextIdx = Math.min(mindMap.nodes.length - 1, guidedNodeOrderIdx + 1);
+                    setGuidedNodeOrderIdx(nextIdx);
+                    setSelectedNode(mindMap.nodes[nextIdx]);
+                  }}
+                  className="px-3 py-1 rounded-lg bg-brand text-white text-xs font-semibold disabled:opacity-40 cursor-pointer"
+                >
+                  Next Concept →
+                </button>
+              </div>
+            </div>
+          )}
+
           {isLoadingMindMap || !mindMap ? (
             <div className="py-16 text-center space-y-3">
               <Loader2 className="w-7 h-7 animate-spin text-success mx-auto" />
@@ -1471,17 +1573,21 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-              <div className="xl:col-span-8 rounded-2xl bg-canvas border border-slate-200/90 overflow-hidden relative min-h-[420px] flex items-center justify-center">
+              <div className="xl:col-span-8 rounded-2xl bg-canvas border border-line overflow-hidden relative min-h-[480px] flex items-center justify-center">
                 {(() => {
-                  const width = 980;
-                  const height = 560;
+                  const width = 1040;
+                  const height = 620;
                   const cx = width / 2;
                   const cy = height / 2;
 
                   const centralNode =
                     mindMap.nodes.find((n) => n.level === 'central') || mindMap.nodes[0];
                   const branches = mindMap.nodes.filter((n) => n.level === 'branch');
-                  const subtopics = mindMap.nodes.filter((n) => n.level === 'subtopic');
+                  const subtopics = mindMap.nodes.filter(
+                    (n) =>
+                      n.level === 'subtopic' &&
+                      (!n.parentId || !collapsedBranchIds[n.parentId])
+                  );
 
                   const posMap = new Map<string, { x: number; y: number }>();
                   if (centralNode) {
@@ -1491,8 +1597,8 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                   branches.forEach((b, idx) => {
                     const angle =
                       (idx / Math.max(1, branches.length)) * Math.PI * 2 - Math.PI / 2;
-                    const rx = 200;
-                    const ry = 120;
+                    const rx = 230;
+                    const ry = 145;
                     const bx = cx + Math.cos(angle) * rx;
                     const by = cy + Math.sin(angle) * ry;
                     posMap.set(b.id, { x: bx, y: by });
@@ -1504,15 +1610,15 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                       let sx = bx;
                       let sy = by;
                       if (Math.abs(cosA) > 0.5) {
-                        sx = bx + Math.sign(cosA) * 185;
-                        sy = by + (cIdx - (children.length - 1) / 2) * 52;
+                        sx = bx + Math.sign(cosA) * 205;
+                        sy = by + (cIdx - (children.length - 1) / 2) * 68;
                       } else {
-                        sx = bx + (cIdx - (children.length - 1) / 2) * 175;
-                        sy = by + Math.sign(sinA) * 92;
+                        sx = bx + (cIdx - (children.length - 1) / 2) * 195;
+                        sy = by + Math.sign(sinA) * 110;
                       }
                       posMap.set(child.id, {
-                        x: Math.max(85, Math.min(width - 85, sx)),
-                        y: Math.max(42, Math.min(height - 42, sy)),
+                        x: Math.max(105, Math.min(width - 105, sx)),
+                        y: Math.max(52, Math.min(height - 52, sy)),
                       });
                     });
                   });
@@ -1522,23 +1628,38 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     document.documentElement.classList.contains('dark');
                   const colorPalette = isDark
                     ? {
-                        blue: { stroke: '#60A5FA', fill: '#172554', text: '#EFF6FF' },
-                        red: { stroke: '#F87171', fill: '#450A0A', text: '#FEF2F2' },
-                        yellow: { stroke: '#FBBF24', fill: '#451A03', text: '#FFFBEB' },
-                        green: { stroke: '#34D399', fill: '#064E3B', text: '#ECFDF5' },
+                        blue: { stroke: '#60A5FA', fill: '#172554', text: '#EFF6FF', sub: '#93C5FD' },
+                        red: { stroke: '#F87171', fill: '#450A0A', text: '#FEF2F2', sub: '#FCA5A5' },
+                        yellow: { stroke: '#FBBF24', fill: '#451A03', text: '#FFFBEB', sub: '#FDE68A' },
+                        green: { stroke: '#34D399', fill: '#064E3B', text: '#ECFDF5', sub: '#6EE7B7' },
                       }
                     : {
-                        blue: { stroke: '#4285F4', fill: '#E8F0FE', text: '#172033' },
-                        red: { stroke: '#EA4335', fill: '#FCE8E6', text: '#172033' },
-                        yellow: { stroke: '#D97706', fill: '#FEF7E0', text: '#172033' },
-                        green: { stroke: '#34A853', fill: '#E6F4EA', text: '#172033' },
+                        blue: { stroke: '#4F46E5', fill: '#EEF2FF', text: '#172033', sub: '#4338CA' },
+                        red: { stroke: '#DC2626', fill: '#FEF2F2', text: '#172033', sub: '#B91C1C' },
+                        yellow: { stroke: '#D97706', fill: '#FFFBEB', text: '#172033', sub: '#B45309' },
+                        green: { stroke: '#059669', fill: '#ECFDF5', text: '#172033', sub: '#047857' },
                       };
+
+                  const relationshipLabels = [
+                    'depends on',
+                    'causes',
+                    'leads to',
+                    'contrasts with',
+                  ];
+
+                  const searchLower = mindMapSearch.trim().toLowerCase();
+                  const visibleNodes = mindMap.nodes.filter(
+                    (n) =>
+                      n.level !== 'subtopic' ||
+                      !n.parentId ||
+                      !collapsedBranchIds[n.parentId]
+                  );
 
                   return (
                     <svg
                       id="learnmate-mindmap-svg"
                       viewBox={`0 0 ${width} ${height}`}
-                      className="w-full h-[440px] select-none"
+                      className="w-full h-[500px] select-none"
                     >
                       <g
                         transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
@@ -1549,33 +1670,82 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                           const p2 = posMap.get(edge.to);
                           if (!p1 || !p2) return null;
                           const targetNode = mindMap.nodes.find((n) => n.id === edge.to);
+                          if (
+                            targetNode?.level === 'subtopic' &&
+                            targetNode.parentId &&
+                            collapsedBranchIds[targetNode.parentId]
+                          ) {
+                            return null;
+                          }
                           const strokeColor =
                             colorPalette[targetNode?.color || 'blue'].stroke;
                           const midX = (p1.x + p2.x) / 2;
+                          const midY = (p1.y + p2.y) / 2;
+                          const relLabel =
+                            relationshipLabels[eIdx % relationshipLabels.length];
+
                           return (
-                            <path
-                              key={eIdx}
-                              d={`M ${p1.x} ${p1.y} C ${midX} ${p1.y}, ${midX} ${p2.y}, ${p2.x} ${p2.y}`}
-                              fill="none"
-                              stroke={strokeColor}
-                              strokeWidth={targetNode?.level === 'branch' ? 2.5 : 1.75}
-                              strokeOpacity={0.7}
-                            />
+                            <g key={eIdx}>
+                              <path
+                                d={`M ${p1.x} ${p1.y} C ${midX} ${p1.y}, ${midX} ${p2.y}, ${p2.x} ${p2.y}`}
+                                fill="none"
+                                stroke={strokeColor}
+                                strokeWidth={targetNode?.level === 'branch' ? 2.5 : 1.75}
+                                strokeOpacity={0.75}
+                              />
+                              {targetNode?.level === 'branch' && (
+                                <g transform={`translate(${midX}, ${midY})`}>
+                                  <rect
+                                    x={-34}
+                                    y={-9}
+                                    width={68}
+                                    height={18}
+                                    rx={9}
+                                    fill={isDark ? '#0F172A' : '#FFFFFF'}
+                                    stroke={strokeColor}
+                                    strokeWidth={1}
+                                  />
+                                  <text
+                                    x={0}
+                                    y={3}
+                                    textAnchor="middle"
+                                    fontSize={8.5}
+                                    fontWeight={700}
+                                    fill={strokeColor}
+                                  >
+                                    {relLabel}
+                                  </text>
+                                </g>
+                              )}
+                            </g>
                           );
                         })}
 
-                        {mindMap.nodes.map((node) => {
+                        {visibleNodes.map((node) => {
                           const pos = posMap.get(node.id);
                           if (!pos) return null;
                           const theme = colorPalette[node.color || 'blue'];
                           const isSelected = selectedNode?.id === node.id;
+                          const matchesSearch =
+                            searchLower.length > 0 &&
+                            (node.label.toLowerCase().includes(searchLower) ||
+                              node.explanation.toLowerCase().includes(searchLower));
                           const boxWidth =
                             node.level === 'central'
-                              ? 176
+                              ? 200
                               : node.level === 'branch'
-                              ? 152
-                              : 132;
-                          const boxHeight = node.level === 'central' ? 46 : 36;
+                              ? 186
+                              : 168;
+                          const boxHeight = node.level === 'central' ? 58 : 54;
+
+                          // Concise concept summary / formula snippet inside each node so no node is just a bare heading
+                          const snippetRaw = (node.explanation || '')
+                            .replace(/\s+/g, ' ')
+                            .trim();
+                          const snippet =
+                            snippetRaw.length > 28
+                              ? `${snippetRaw.slice(0, 26)}…`
+                              : snippetRaw || `Page ${node.sourcePage}`;
 
                           return (
                             <g
@@ -1592,25 +1762,37 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                 rx={12}
                                 fill={node.level === 'central' ? '#4F46E5' : theme.fill}
                                 stroke={
-                                  isSelected
+                                  matchesSearch
+                                    ? '#F59E0B'
+                                    : isSelected
                                     ? isDark
                                       ? '#F8FAFC'
                                       : '#172033'
                                     : theme.stroke
                                 }
-                                strokeWidth={isSelected ? 2.8 : 1.8}
+                                strokeWidth={matchesSearch || isSelected ? 3 : 1.8}
                               />
                               <text
                                 x={boxWidth / 2}
-                                y={boxHeight / 2 + 4}
+                                y={22}
                                 textAnchor="middle"
                                 fill={node.level === 'central' ? '#FFFFFF' : theme.text}
-                                fontSize={node.level === 'central' ? 12.5 : 11}
-                                fontWeight={node.level === 'subtopic' ? 600 : 700}
+                                fontSize={node.level === 'central' ? 12 : 11}
+                                fontWeight={700}
                               >
-                                {node.label.length > 22
-                                  ? `${node.label.slice(0, 20)}…`
+                                {node.label.length > 23
+                                  ? `${node.label.slice(0, 21)}…`
                                   : node.label}
+                              </text>
+                              <text
+                                x={boxWidth / 2}
+                                y={40}
+                                textAnchor="middle"
+                                fill={node.level === 'central' ? '#E0E7FF' : theme.sub}
+                                fontSize={9.5}
+                                fontWeight={500}
+                              >
+                                {snippet}
                               </text>
                             </g>
                           );
@@ -1621,16 +1803,17 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 })()}
               </div>
 
-              <div className="xl:col-span-4 rounded-2xl bg-white border border-slate-200/90 p-5 space-y-3.5 shadow-2xs">
+              {/* Right-Side Concept Node Inspector Panel matching Image 9 */}
+              <div className="xl:col-span-4 rounded-2xl bg-white border border-line p-5 space-y-4 shadow-2xs">
                 {selectedNode ? (
                   <>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-brand bg-brand-soft px-2.5 py-0.5 rounded-full">
                         {selectedNode.level === 'central'
-                          ? 'Central Topic'
+                          ? 'Central Chapter Node'
                           : selectedNode.level === 'branch'
-                          ? 'Main Concept Branch'
-                          : 'Subtopic Detail'}
+                          ? 'Core Concept Branch'
+                          : 'Formula / Subtopic Node'}
                       </span>
                       <button
                         type="button"
@@ -1640,39 +1823,101 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             selectedNode.label
                           )
                         }
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-canvas border border-slate-200 text-xs font-semibold text-brand hover:bg-brand-soft cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-canvas border border-line text-xs font-semibold text-brand hover:bg-brand-soft cursor-pointer"
                       >
                         <ExternalLink className="w-3 h-3" />
                         <span>{selectedNode.sourceLabel}</span>
                       </button>
                     </div>
 
-                    <h3 className="text-base font-bold text-ink">
-                      {selectedNode.label}
-                    </h3>
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-bold text-ink">
+                        {selectedNode.label}
+                      </h3>
+                      <p className="text-[11px] text-muted">
+                        Grounded in {activeDocument.title} · {selectedNode.sourceLabel}
+                      </p>
+                    </div>
 
-                    <p className="text-sm text-slate-600 leading-relaxed">
-                      {selectedNode.explanation}
-                    </p>
+                    {/* Explanation & Definition */}
+                    <div className="p-3.5 rounded-xl bg-canvas border border-line space-y-1.5">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-brand">
+                        Concept Definition &amp; Key Takeaway
+                      </div>
+                      <div className="text-xs sm:text-sm text-ink leading-relaxed">
+                        <MathText text={selectedNode.explanation} />
+                      </div>
+                    </div>
 
-                    {onAskTutorAboutConcept && (
+                    {/* Common JEE Trap */}
+                    <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 space-y-1 text-xs">
+                      <div className="font-bold text-amber-900">
+                        Exam Checkpoint &amp; Common Trap
+                      </div>
+                      <p className="text-amber-950 leading-relaxed">
+                        Verify units, boundary conditions, and sign conventions before applying{' '}
+                        <strong>{selectedNode.label}</strong> in JEE numericals.
+                      </p>
+                    </div>
+
+                    {selectedNode.level === 'branch' && (
                       <button
                         type="button"
                         onClick={() =>
-                          onAskTutorAboutConcept(
-                            `Explain "${selectedNode.label}" (${selectedNode.sourceLabel}) and how it connects to the rest of ${activeDocument.title}.`
-                          )
+                          setCollapsedBranchIds((prev) => ({
+                            ...prev,
+                            [selectedNode.id]: !prev[selectedNode.id],
+                          }))
                         }
-                        className="w-full py-2 px-3 rounded-xl bg-brand-soft hover:bg-brand-200 text-brand text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="w-full py-2 px-3 rounded-xl border border-line bg-canvas hover:bg-white text-xs font-semibold text-ink cursor-pointer"
                       >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Ask AI Tutor about this node</span>
+                        {collapsedBranchIds[selectedNode.id]
+                          ? 'Expand Child Subtopics'
+                          : 'Collapse Child Subtopics'}
                       </button>
                     )}
+
+                    {/* Action Buttons: + Add to Cards | Ask Tutor */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleAddFormulaToFlashcard({
+                            term: selectedNode.label,
+                            formulaOrDef: selectedNode.explanation,
+                            sourcePage: selectedNode.sourcePage,
+                            sourceLabel: selectedNode.sourceLabel,
+                          });
+                        }}
+                        className="py-2 px-3 rounded-xl border border-line bg-white hover:bg-canvas text-xs font-bold text-ink flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-brand" />
+                        <span>
+                          {addedFormulaTerm === selectedNode.label
+                            ? 'Added!'
+                            : '+ Add to Cards'}
+                        </span>
+                      </button>
+
+                      {onAskTutorAboutConcept && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onAskTutorAboutConcept(
+                              `Explain "${selectedNode.label}" (${selectedNode.sourceLabel}) with a JEE worked example and common traps.`
+                            )
+                          }
+                          className="py-2 px-3 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Ask Tutor</span>
+                        </button>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <p className="text-xs text-muted">
-                    Select any node in the mind map to inspect its grounded explanation and source page/timestamp.
+                    Select any node in the mind map to inspect its grounded definition, formula, exam trap, and source page.
                   </p>
                 )}
               </div>

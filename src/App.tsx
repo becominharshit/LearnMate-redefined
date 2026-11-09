@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Navbar, ActiveTab } from './components/Navbar';
-import { StudyView, StudySubMode } from './components/StudyView';
+import { StudyView, StudySubMode, StudyHubSection } from './components/StudyView';
 import { QuickReviseView, QuickReviseSubTab } from './components/QuickReviseView';
 import { PracticeWorkspaceView } from './components/PracticeWorkspaceView';
 import { PdfWorkspaceView } from './components/PdfWorkspaceView';
@@ -19,7 +19,13 @@ import { LandingPage } from './components/LandingPage';
 import { SampleChapterPage } from './components/SampleChapterPage';
 import { FirstRunSetupModal, type FirstRunAnswers } from './components/FirstRunSetupModal';
 import { LegalPage } from './components/LegalPage';
+import { AppGuideAndSearchModal } from './components/AppGuideAndSearchModal';
+import type { UtilityTab } from './components/CompactStudyUtilitiesWidget';
 import { buildSampleChapterDocument, SAMPLE_CHAPTER_ID } from './data/sampleChapter';
+import {
+  JEE_SYLLABUS_CHAPTERS,
+  buildStudyDocumentFromSyllabusChapter,
+} from './data/jeeSyllabusAndNotes';
 import {
   StudyDocument,
   LearnMateNotification,
@@ -129,6 +135,8 @@ function parseTabFromHash(): ActiveTab {
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => parseTabFromHash());
   const [studyInitialMode, setStudyInitialMode] = useState<StudySubMode>('explain');
+  const [studyInitialHubSection, setStudyInitialHubSection] =
+    useState<StudyHubSection>('my_materials');
   const [reviseInitialSubTab, setReviseInitialSubTab] =
     useState<QuickReviseSubTab>('flashcards');
   const [pendingDoubtQuestion, setPendingDoubtQuestion] = useState<string | null>(null);
@@ -136,6 +144,11 @@ export function App() {
   const [activeDoc, setActiveDoc] = useState<StudyDocument | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Global Search & App Guide modal state
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [guideModalView, setGuideModalView] = useState<'search' | 'guide'>('search');
+  const [externalUtilityTab, setExternalUtilityTab] = useState<UtilityTab | null>(null);
 
   // Universal Add Material Modal state (Phase 3 Item 1)
   const [addMaterialOpen, setAddMaterialOpen] = useState(false);
@@ -193,7 +206,13 @@ export function App() {
   const [setupDismissed, setSetupDismissed] = useState(false);
   const publicBackTargetRef = useRef<PublicRoute | null>(null);
 
-  const effectiveDoc = activeDoc || documents[0] || studyStorage.getDocuments()[0];
+  // Built-in syllabus chapter fallback so Journey A (0 uploaded files) works across Study, Revise, and Create
+  const fallbackSyllabusDoc = useMemo(
+    () => buildStudyDocumentFromSyllabusChapter(JEE_SYLLABUS_CHAPTERS[0], 'full'),
+    []
+  );
+  const effectiveDoc =
+    activeDoc || documents[0] || studyStorage.getDocuments()[0] || fallbackSyllabusDoc;
   const sampleIsAdded = documents.some((document) => document.id === SAMPLE_CHAPTER_ID);
 
   const openAddMaterialModal = (
@@ -543,6 +562,7 @@ export function App() {
       setActiveDoc(newDoc);
       setAddMaterialOpen(false);
       setAddMaterialPreselectedFile(null);
+      setStudyInitialHubSection('my_materials');
       setStudyInitialMode('explain');
       goToApp('study');
     } catch (err: any) {
@@ -607,6 +627,7 @@ export function App() {
       setActiveDoc(newDoc);
       setAddMaterialOpen(false);
       setAddMaterialPreselectedFile(null);
+      setStudyInitialHubSection('my_materials');
       setStudyInitialMode('explain');
       goToApp('study');
     } catch (err: any) {
@@ -660,6 +681,7 @@ export function App() {
       setDocuments(updatedDocs);
       setActiveDoc(newDoc);
       setAddMaterialOpen(false);
+      setStudyInitialHubSection('my_materials');
       setStudyInitialMode('explain');
       goToApp('study');
     } catch (err: any) {
@@ -706,6 +728,7 @@ export function App() {
       setDocuments(studyStorage.getDocuments());
       setActiveDoc(newDoc);
       setAddMaterialOpen(false);
+      setStudyInitialHubSection('my_materials');
       setStudyInitialMode('explain');
       goToApp('study');
     } catch (err: any) {
@@ -727,19 +750,20 @@ export function App() {
     studyStorage.setActiveDocumentId(updated.id);
     setDocuments(studyStorage.getDocuments());
     setActiveDoc(updated);
+    setStudyInitialHubSection('my_materials');
     setStudyInitialMode(targetMode);
     goToApp('study');
   };
 
   const handleAskDoubtFromHome = (question: string) => {
-    if (!effectiveDoc) {
-      const sample = buildSampleChapterDocument();
-      studyStorage.saveDocument(sample);
-      studyStorage.setActiveDocumentId(sample.id);
+    if (!activeDoc && documents.length === 0) {
+      studyStorage.saveDocument(fallbackSyllabusDoc);
+      studyStorage.setActiveDocumentId(fallbackSyllabusDoc.id);
       setDocuments(studyStorage.getDocuments());
-      setActiveDoc(sample);
+      setActiveDoc(fallbackSyllabusDoc);
     }
     setPendingDoubtQuestion(question);
+    setStudyInitialHubSection('ai_tutor');
     setStudyInitialMode('explain');
     goToApp('study');
   };
@@ -859,8 +883,8 @@ export function App() {
       <Navbar
         activeTab={activeTab}
         onSelectTab={handleSelectTab}
-        hasActiveDoc={!!activeDoc}
-        activeDoc={activeDoc}
+        hasActiveDoc={!!effectiveDoc}
+        activeDoc={effectiveDoc}
         onOpenAddMaterial={(mode = 'pdf') => openAddMaterialModal(mode)}
         user={user}
         isAuthReady={isAuthReady}
@@ -883,6 +907,16 @@ export function App() {
         studentProfile={studentProfile}
         themeMode={themeMode}
         onToggleTheme={handleToggleTheme}
+        onOpenSearchModal={() => {
+          setGuideModalView('search');
+          setGuideModalOpen(true);
+        }}
+        onOpenAppGuideModal={() => {
+          setGuideModalView('guide');
+          setGuideModalOpen(true);
+        }}
+        externalUtilityTab={externalUtilityTab}
+        onConsumeExternalUtilityTab={() => setExternalUtilityTab(null)}
       />
 
       {/* Main Content Container */}
@@ -917,10 +951,13 @@ export function App() {
             documents={documents}
             activeDocument={effectiveDoc}
             onSelectDocument={(doc) => {
+              studyStorage.saveDocument(doc);
               studyStorage.setActiveDocumentId(doc.id);
+              setDocuments(studyStorage.getDocuments());
               setActiveDoc(doc);
             }}
             initialSubMode={studyInitialMode}
+            initialHubSection={studyInitialHubSection}
             initialQuestion={pendingDoubtQuestion}
             onConsumeInitialQuestion={() => setPendingDoubtQuestion(null)}
             onAttemptSaved={refreshDocumentsState}
@@ -931,6 +968,7 @@ export function App() {
             }}
             onOpenPdfWorkspace={() => goToApp('pdf-workspace')}
             onOpenUploadModal={() => openAddMaterialModal('pdf')}
+            onOpenPractice={() => goToApp('practice')}
             onOpenContextualCreate={(payload) => {
               setContextualCreateTransfer(payload);
               goToApp('create');
@@ -939,58 +977,24 @@ export function App() {
           />
         )}
 
-        {(activeTab === 'study' || activeTab === 'ai-tutor') && !effectiveDoc && (
-          <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
-            <h2 className="font-serif-editorial text-3xl font-bold text-ink">
-              No Study Material Added Yet
-            </h2>
-            <p className="text-sm text-muted">
-              Add a PDF, photo of notes, YouTube lecture transcript, or pasted text to start studying with the AI Tutor.
-            </p>
-            <button
-              type="button"
-              onClick={() => openAddMaterialModal('pdf')}
-              className="px-5 py-2.5 rounded-lg lm-btn-accent text-xs font-semibold cursor-pointer"
-            >
-              + Add Study Material
-            </button>
-          </div>
-        )}
-
         {activeTab === 'revision' && effectiveDoc && (
           <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <QuickReviseView
               activeDocument={effectiveDoc}
               initialSubTab={reviseInitialSubTab}
               onNavigateToCitation={() => {
+                setStudyInitialHubSection('my_materials');
                 setStudyInitialMode('explain');
                 goToApp('study');
               }}
               onAskTutorAboutConcept={(prompt) => {
                 setPendingDoubtQuestion(prompt);
+                setStudyInitialHubSection('ai_tutor');
                 setStudyInitialMode('explain');
                 goToApp('study');
               }}
               onOpenPractice={() => goToApp('practice')}
             />
-          </div>
-        )}
-
-        {activeTab === 'revision' && !effectiveDoc && (
-          <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
-            <h2 className="font-serif-editorial text-3xl font-bold text-ink">
-              Add a Material to Revise
-            </h2>
-            <p className="text-sm text-muted">
-              Upload your notes or textbook chapter to generate flashcards, mind maps, summary sheets, and formula cards.
-            </p>
-            <button
-              type="button"
-              onClick={() => openAddMaterialModal('pdf')}
-              className="px-5 py-2.5 rounded-lg lm-btn-accent text-xs font-semibold cursor-pointer"
-            >
-              + Add Study Material
-            </button>
           </div>
         )}
 
@@ -1001,8 +1005,9 @@ export function App() {
               activeDoc={activeDoc}
               onSelectDoc={(doc) => setActiveDoc(doc)}
               onOpenStudyQuiz={() => {
-                if (activeDoc || documents[0]) {
-                  if (!activeDoc && documents[0]) setActiveDoc(documents[0]);
+                if (effectiveDoc) {
+                  setActiveDoc(effectiveDoc);
+                  setStudyInitialHubSection('my_materials');
                   setStudyInitialMode('quiz');
                   goToApp('study');
                 }
@@ -1019,13 +1024,17 @@ export function App() {
               onImportReferenceNotes={(title, content) => {
                 void handleSubmitTextNotes(title, content, 'text');
               }}
+              onOpenSyllabus={() => {
+                setStudyInitialHubSection('syllabus');
+                goToApp('study');
+              }}
             />
           </div>
         )}
 
         {activeTab === 'create' && effectiveDoc && (
           <CreativeStudioView
-            documents={documents}
+            documents={documents.length > 0 ? documents : [effectiveDoc]}
             activeDocument={effectiveDoc}
             onSelectDocument={(docId) => {
               const found = documents.find((d) => d.id === docId);
@@ -1033,6 +1042,7 @@ export function App() {
             }}
             themeMode={themeMode}
             onNavigateToPage={(_pageNum) => {
+              setStudyInitialHubSection('my_materials');
               setStudyInitialMode('explain');
               goToApp('study');
             }}
@@ -1043,6 +1053,7 @@ export function App() {
                 setReviseInitialSubTab('flashcards');
                 goToApp('revision');
               } else if (tab === 'study') {
+                setStudyInitialHubSection('my_materials');
                 setStudyInitialMode('explain');
                 goToApp('study');
               }
@@ -1050,28 +1061,11 @@ export function App() {
             contextualTransfer={contextualCreateTransfer}
             onReturnToTutor={() => {
               setContextualCreateTransfer(null);
+              setStudyInitialHubSection('ai_tutor');
               setStudyInitialMode('explain');
               goToApp('study');
             }}
           />
-        )}
-
-        {activeTab === 'create' && !effectiveDoc && (
-          <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
-            <h2 className="font-serif-editorial text-3xl font-bold text-ink">
-              Add Study Material First
-            </h2>
-            <p className="text-sm text-muted">
-              The visual diagram studio works on your study materials. Add a PDF, photo of notes, or text to begin.
-            </p>
-            <button
-              type="button"
-              onClick={() => openAddMaterialModal('pdf')}
-              className="px-5 py-2.5 rounded-lg lm-btn-accent text-xs font-semibold cursor-pointer"
-            >
-              + Add Study Material
-            </button>
-          </div>
         )}
 
         {activeTab === 'pdf-workspace' && (
@@ -1084,6 +1078,7 @@ export function App() {
               onDeleteDoc={handleDeleteDocument}
               onDocumentsChanged={refreshDocumentsState}
               onOpenStudySpace={() => {
+                setStudyInitialHubSection('my_materials');
                 setStudyInitialMode('explain');
                 goToApp('study');
               }}
@@ -1099,6 +1094,7 @@ export function App() {
               onStartQuizForDocument={(doc, mode) => {
                 handleSelectDocument(doc, mode);
               }}
+              onNavigateTab={(tab) => handleSelectTab(tab as ActiveTab)}
               onResetProgress={() => {
                 studyStorage.clearAllProgress();
                 refreshDocumentsState();
@@ -1107,6 +1103,42 @@ export function App() {
           </div>
         )}
       </main>
+
+      {/* Global Search (Ctrl+K) & Interactive App Guide (?) Modal */}
+      <AppGuideAndSearchModal
+        isOpen={guideModalOpen}
+        initialView={guideModalView}
+        onClose={() => setGuideModalOpen(false)}
+        documents={documents}
+        onNavigateTab={(tab) => {
+          setGuideModalOpen(false);
+          handleSelectTab(tab);
+        }}
+        onSelectDocument={(doc) => {
+          setGuideModalOpen(false);
+          handleSelectDocument(doc, 'explain');
+        }}
+        onOpenSyllabusChapter={(chapter, mode) => {
+          setGuideModalOpen(false);
+          const doc = buildStudyDocumentFromSyllabusChapter(chapter, mode);
+          studyStorage.saveDocument(doc);
+          studyStorage.setActiveDocumentId(doc.id);
+          setDocuments(studyStorage.getDocuments());
+          setActiveDoc(doc);
+          setStudyInitialHubSection(mode === 'quick' ? 'chapter_notes' : 'syllabus');
+          setStudyInitialMode('explain');
+          goToApp('study');
+        }}
+        onOpenReviseSubTab={(subTab) => {
+          setGuideModalOpen(false);
+          setReviseInitialSubTab(subTab);
+          goToApp('revision');
+        }}
+        onOpenUtilityTab={(tab) => {
+          setGuideModalOpen(false);
+          setExternalUtilityTab(tab);
+        }}
+      />
 
       {/* Universal Add Study Material Modal (+ Add material on every page) */}
       <AddMaterialModal

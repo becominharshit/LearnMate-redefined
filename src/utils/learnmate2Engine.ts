@@ -957,3 +957,276 @@ export function buildInstrumentalLofiPrompt(presetIdOrName: string): string {
 
 export const sanitizeInstrumentalLofiPrompt = buildInstrumentalLofiPrompt;
 
+/* ============================================================================
+ * 7. NUMERICAL & SYMBOLIC EQUATION GRAPHING ENGINE (SECTION 15)
+ * ============================================================================ */
+
+export interface GraphPoint2D {
+  x: number;
+  y: number;
+}
+
+export interface PlottedEquationResult {
+  expression: string;
+  normalizedRhs: string;
+  valid: boolean;
+  error?: string;
+  /** Discontinuous branches are split into separate continuous polyline segments */
+  segments: GraphPoint2D[][];
+  discontinuityCount: number;
+  samplePointsCount: number;
+}
+
+/**
+ * Normalizes a user-typed equation such as:
+ * - "y = x^2 - 4"
+ * - "f(x) = sin(x) / x"
+ * - "2x^2 - 3x + 1" (implicit multiplication 2x -> 2*x)
+ * - "tan(x)" or "1 / (x - 2)"
+ * Returns a safe executable evaluator or a clear unsupported-expression error.
+ */
+export function compileCartesianEquation(rawInput: string): {
+  valid: boolean;
+  normalizedRhs: string;
+  error?: string;
+  evaluateAt?: (x: number, parameterA?: number) => number;
+} {
+  const trimmed = (rawInput || '').trim();
+  if (!trimmed) {
+    return { valid: false, normalizedRhs: '', error: 'Enter an equation in x (e.g., y = x^2 - 4)' };
+  }
+
+  // Strip optional leading "y =" or "f(x) ="
+  let rhs = trimmed.replace(/^(?:y|f\s*\(\s*x\s*\))\s*=\s*/i, '').trim();
+
+  // Check if user entered an unsupported implicit y^2 equation without solving for y
+  if (/\by\b/i.test(rhs)) {
+    return {
+      valid: false,
+      normalizedRhs: rhs,
+      error: 'Enter an explicit function of x (e.g., y = sqrt(25 - x^2) or y = x^2 - 4)',
+    };
+  }
+
+  if (!rhs) {
+    return { valid: false, normalizedRhs: '', error: 'Equation right-hand side cannot be empty' };
+  }
+
+  // Insert implicit multiplication first: e.g. 2x -> 2*x, 3(x+1) -> 3*(x+1), (x+1)(x-1) -> (x+1)*(x-1), x sin(x) -> x*sin(x)
+  const withImplicitMult = rhs
+    .replace(
+      /(\d|\bpi\b|\bx\b|\ba\b|\bk\b)\s*(?=(?:x|a|k|pi|sin|cos|tan|sec|csc|cot|asin|acos|atan|sqrt|cbrt|abs|log|ln|exp)\b)/gi,
+      '$1*'
+    )
+    .replace(/(\d|\bpi\b|\bx\b|\ba\b|\bk\b|\))\s*(?=\()/gi, (m, g1) => {
+      if (
+        /\b(sin|cos|tan|sec|csc|cot|asin|acos|atan|sinh|cosh|tanh|sqrt|cbrt|abs|log|ln|exp|floor|ceil|round|sign)$/i.test(
+          g1
+        )
+      ) {
+        return m;
+      }
+      return `${g1}*`;
+    })
+    .replace(/\)\s*(?=[0-9xak])/gi, ')*');
+
+  // Reject any unsafe tokens outside allowed math identifiers, x, parameter k/a, digits, and operators
+  const tokenCheck = withImplicitMult
+    .replace(
+      /\b(sin|cos|tan|sec|csc|cot|asin|acos|atan|sinh|cosh|tanh|sqrt|cbrt|abs|log|ln|exp|floor|ceil|round|sign|pi|PI|e|E|x|a|k)\b/g,
+      ''
+    )
+    .replace(/[0-9+\-*/^().%\s,]/g, '');
+
+  if (tokenCheck.length > 0) {
+    return {
+      valid: false,
+      normalizedRhs: rhs,
+      error: `Unsupported symbol "${tokenCheck.slice(0, 6)}" in equation`,
+    };
+  }
+
+  const jsExpr = withImplicitMult
+    .replace(/\bpi\b/gi, '(Math.PI)')
+    .replace(/\be\b/g, '(Math.E)')
+    .replace(/\bsin\s*\(/gi, 'Math.sin(')
+    .replace(/\bcos\s*\(/gi, 'Math.cos(')
+    .replace(/\btan\s*\(/gi, 'Math.tan(')
+    .replace(/\bsec\s*\(/gi, '(1/Math.cos)(')
+    .replace(/\bcsc\s*\(/gi, '(1/Math.sin)(')
+    .replace(/\bcot\s*\(/gi, '(1/Math.tan)(')
+    .replace(/\basin\s*\(/gi, 'Math.asin(')
+    .replace(/\bacos\s*\(/gi, 'Math.acos(')
+    .replace(/\batan\s*\(/gi, 'Math.atan(')
+    .replace(/\bsinh\s*\(/gi, 'Math.sinh(')
+    .replace(/\bcosh\s*\(/gi, 'Math.cosh(')
+    .replace(/\btanh\s*\(/gi, 'Math.tanh(')
+    .replace(/\bsqrt\s*\(/gi, 'Math.sqrt(')
+    .replace(/\bcbrt\s*\(/gi, 'Math.cbrt(')
+    .replace(/\babs\s*\(/gi, 'Math.abs(')
+    .replace(/\blog\s*\(/gi, 'Math.log10(')
+    .replace(/\bln\s*\(/gi, 'Math.log(')
+    .replace(/\bexp\s*\(/gi, 'Math.exp(')
+    .replace(/\bfloor\s*\(/gi, 'Math.floor(')
+    .replace(/\bceil\s*\(/gi, 'Math.ceil(')
+    .replace(/\bround\s*\(/gi, 'Math.round(')
+    .replace(/\bsign\s*\(/gi, 'Math.sign(')
+    .replace(/\^/g, '**');
+
+  try {
+    const fn = new Function(
+      'x',
+      'a',
+      'k',
+      `"use strict"; return Number(${jsExpr});`
+    ) as (x: number, a: number, k: number) => number;
+    // Smoke-test compilation at x = 1.123
+    fn(1.123, 1, 1);
+
+    return {
+      valid: true,
+      normalizedRhs: rhs,
+      evaluateAt: (x: number, paramA = 1) => {
+        try {
+          return fn(x, paramA, paramA);
+        } catch {
+          return NaN;
+        }
+      },
+    };
+  } catch {
+    return {
+      valid: false,
+      normalizedRhs: rhs,
+      error: 'Invalid mathematical syntax in equation',
+    };
+  }
+}
+
+/**
+ * Samples y = f(x) over [xMin, xMax] and automatically detects undefined domains,
+ * jump discontinuities, and vertical asymptotes (e.g. tan(x), 1/x, floor(x)),
+ * splitting the curve into separate continuous segments so asymptotes are never bridged.
+ */
+export function sampleCartesianEquationSegments(params: {
+  expression: string;
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+  samples?: number;
+  parameterA?: number;
+}): PlottedEquationResult {
+  const {
+    expression,
+    xMin,
+    xMax,
+    yMin,
+    yMax,
+    samples = 480,
+    parameterA = 1,
+  } = params;
+
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMin >= xMax) {
+    return {
+      expression,
+      normalizedRhs: expression,
+      valid: false,
+      error: 'x min must be strictly less than x max',
+      segments: [],
+      discontinuityCount: 0,
+      samplePointsCount: 0,
+    };
+  }
+
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax) || yMin >= yMax) {
+    return {
+      expression,
+      normalizedRhs: expression,
+      valid: false,
+      error: 'y min must be strictly less than y max',
+      segments: [],
+      discontinuityCount: 0,
+      samplePointsCount: 0,
+    };
+  }
+
+  const compiled = compileCartesianEquation(expression);
+  if (!compiled.valid || !compiled.evaluateAt) {
+    return {
+      expression,
+      normalizedRhs: compiled.normalizedRhs,
+      valid: false,
+      error: compiled.error || 'Invalid equation',
+      segments: [],
+      discontinuityCount: 0,
+      samplePointsCount: 0,
+    };
+  }
+
+  const ySpan = Math.max(1e-6, yMax - yMin);
+  const yCutoff = ySpan * 6;
+  const step = (xMax - xMin) / samples;
+
+  const segments: GraphPoint2D[][] = [];
+  let currentSegment: GraphPoint2D[] = [];
+  let discontinuityCount = 0;
+  let samplePointsCount = 0;
+  let prevY: number | null = null;
+  let prevSlope: number | null = null;
+
+  for (let i = 0; i <= samples; i += 1) {
+    const x = xMin + i * step;
+    const y = compiled.evaluateAt(x, parameterA);
+
+    if (!Number.isFinite(y) || Math.abs(y - (yMin + yMax) / 2) > yCutoff) {
+      if (currentSegment.length > 0) {
+        segments.push(currentSegment);
+        currentSegment = [];
+        discontinuityCount += 1;
+      }
+      prevY = null;
+      prevSlope = null;
+      continue;
+    }
+
+    if (prevY !== null) {
+      const dy = y - prevY;
+      const slope = dy / step;
+      // Detect vertical asymptote or sudden jump discontinuity (e.g. tan(x) flipping from +large to -large, or 1/x, or floor(x))
+      const jumpedAcrossViewport = Math.abs(dy) > ySpan * 0.75;
+      const oppositeSteepSlopes =
+        prevSlope !== null &&
+        slope * prevSlope < 0 &&
+        Math.abs(dy) > ySpan * 0.25;
+
+      if (jumpedAcrossViewport || oppositeSteepSlopes) {
+        if (currentSegment.length > 0) {
+          segments.push(currentSegment);
+          currentSegment = [];
+        }
+        discontinuityCount += 1;
+      }
+      prevSlope = slope;
+    }
+
+    currentSegment.push({ x: Number(x.toFixed(6)), y: Number(y.toFixed(6)) });
+    samplePointsCount += 1;
+    prevY = y;
+  }
+
+  if (currentSegment.length > 0) {
+    segments.push(currentSegment);
+  }
+
+  return {
+    expression,
+    normalizedRhs: compiled.normalizedRhs,
+    valid: true,
+    segments,
+    discontinuityCount,
+    samplePointsCount,
+  };
+}
+
+

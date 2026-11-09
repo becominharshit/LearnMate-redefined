@@ -13,6 +13,10 @@ import {
   XCircle,
   RotateCcw,
   Clock,
+  Download,
+  Flag,
+  Filter,
+  Award,
 } from 'lucide-react';
 import {
   StudyDocument,
@@ -28,6 +32,19 @@ import { QuizProctorOverlay } from './QuizProctorOverlay';
 import { MathText } from './MathText';
 import { ReportButton } from './ReportButton';
 import { JeeCbtExamModal } from './JeeCbtExamModal';
+import {
+  OFFICIAL_PYQ_PAPERS,
+  OFFICIAL_PYQ_QUESTIONS,
+  OfficialPyqPaperMetadata,
+  PyqCorpusQuestion,
+  filterPyqQuestions,
+  getQuestionsForOfficialPaper,
+  scorePyqQuestionResponse,
+  downloadOfficialPaperPdf,
+  submitPyqErrorReport,
+} from '../utils/pyqCorpusEngine';
+import { JEE_SYLLABUS_CHAPTERS } from '../data/jeeSyllabusAndNotes';
+import { awardLearningXp } from '../utils/rewardsEngine';
 
 interface PracticeWorkspaceViewProps {
   documents: StudyDocument[];
@@ -39,6 +56,7 @@ interface PracticeWorkspaceViewProps {
 }
 
 type PracticeSourceMode = 'notes' | 'chapters' | 'past_papers';
+type PracticeHubTab = 'pyqs' | 'mock_tests' | 'custom_set' | 'analysis';
 
 export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   documents,
@@ -48,10 +66,39 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 }) => {
   const currentDoc = activeDoc || documents[0] || null;
 
+  // Top-level Practice Hub state matching Image 11
+  const [examFilter, setExamFilter] = useState<'jee_main' | 'jee_advanced'>('jee_main');
+  const [hubTab, setHubTab] = useState<PracticeHubTab>('mock_tests');
+
+  // Official Paper Filters
+  const [paperYearFilter, setPaperYearFilter] = useState<number | 'All'>('All');
+  const [paperSessionFilter, setPaperSessionFilter] = useState<string>('All');
+  const [paperShiftFilter, setPaperShiftFilter] = useState<string>('All');
+  const [paperChapterFilter, setPaperChapterFilter] = useState<string>('All');
+  const [pdfFeedbackMessage, setPdfFeedbackMessage] = useState<string | null>(null);
+
+  // PYQ Chapter/Year Interactive Solver state
+  const [pyqSubjectFilter, setPyqSubjectFilter] = useState<
+    'All' | 'Physics' | 'Chemistry' | 'Mathematics'
+  >('All');
+  const [pyqSelectedOptions, setPyqSelectedOptions] = useState<Record<string, number[]>>({});
+  const [pyqNumericalInputs, setPyqNumericalInputs] = useState<Record<string, string>>({});
+  const [pyqCheckedMap, setPyqCheckedMap] = useState<
+    Record<string, ReturnType<typeof scorePyqQuestionResponse>>
+  >({});
+  const [reportedQuestionIds, setReportedQuestionIds] = useState<Record<string, boolean>>({});
+
   // JEE Full Mock Test Simulator Modal state
   const [isJeeExamModalOpen, setIsJeeExamModalOpen] = useState<boolean>(false);
+  const [activeCbtPaper, setActiveCbtPaper] = useState<{
+    title: string;
+    variant: 'jee_main' | 'jee_advanced';
+    paperId?: string;
+    questions?: PyqCorpusQuestion[];
+    durationMinutes?: number;
+  } | null>(null);
 
-  // Practice Set Builder State (matching Image 10)
+  // Practice Set Builder State
   const [sourceMode, setSourceMode] = useState<PracticeSourceMode>('notes');
   const [selectedTopicPill, setSelectedTopicPill] = useState<string>('All');
   const [questionCount, setQuestionCount] = useState<number>(10);
@@ -63,13 +110,12 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     'Practice Mode'
   );
 
-  // Active Practice Session State (matching Image 9)
+  // Active Practice Session State
   const [sessionActive, setSessionActive] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  // Incremented on every start/exit so late AI responses for an abandoned set are ignored.
   const practiceRequestIdRef = useRef(0);
   const lastFocusTopicRef = useRef<string | undefined>(undefined);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
@@ -99,19 +145,114 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     return ['All', ...Array.from(new Set(names))].slice(0, 8);
   }, [currentDoc]);
 
-  const docLabel = currentDoc ? currentDoc.title.replace(/\.pdf$/i, '') : 'Your notes';
+  const docLabel = currentDoc ? currentDoc.title.replace(/\.pdf$/i, '') : 'Built-in JEE Syllabus';
   const subjectLabel = currentDoc
     ? classifyJeeSubject(
         `${currentDoc.title} ${currentDoc.topics.map((t) => t.name).join(' ')}`
       ) || 'Practice'
     : 'Practice';
 
-  const handleStartPracticeSet = async (focusWeakTopic?: string) => {
+  // Filtered Official Papers
+  const filteredOfficialPapers = useMemo(() => {
+    return OFFICIAL_PYQ_PAPERS.filter((p) => {
+      if (p.exam !== examFilter) return false;
+      if (paperYearFilter !== 'All' && p.year !== paperYearFilter) return false;
+      if (paperSessionFilter !== 'All' && p.session !== paperSessionFilter) return false;
+      if (paperShiftFilter !== 'All' && !p.shift.toLowerCase().includes(paperShiftFilter.toLowerCase()))
+        return false;
+      return true;
+    });
+  }, [examFilter, paperYearFilter, paperSessionFilter, paperShiftFilter]);
+
+  // Filtered PYQ Corpus Questions for Chapter-wise / Year-wise solver
+  const filteredPyqQuestions = useMemo(() => {
+    return filterPyqQuestions({
+      exam: examFilter,
+      year: paperYearFilter,
+      subject: pyqSubjectFilter,
+      chapterId: paperChapterFilter === 'All' ? 'All' : paperChapterFilter,
+      difficulty: difficulty === 'Mixed' ? 'All' : difficulty,
+    });
+  }, [examFilter, paperYearFilter, pyqSubjectFilter, paperChapterFilter, difficulty]);
+
+  const launchFullJeeMainMock = () => {
+    setActiveCbtPaper({
+      title: `JEE (Main) 2027 Full Mock Paper — ${currentDoc?.title || 'Comprehensive'}`,
+      variant: 'jee_main',
+      durationMinutes: 180,
+    });
+    setIsJeeExamModalOpen(true);
+  };
+
+  const launchJeeAdvancedPaper = () => {
+    const advQuestions = OFFICIAL_PYQ_QUESTIONS.filter(
+      (q) => q.exam === 'jee_advanced'
+    );
+    setActiveCbtPaper({
+      title: 'JEE (Advanced) Paper 1 — Multi-Correct & Integer Mock',
+      variant: 'jee_advanced',
+      paperId: 'jee-adv-2024-p1',
+      questions: advQuestions,
+      durationMinutes: 180,
+    });
+    setIsJeeExamModalOpen(true);
+  };
+
+  const launchOfficialPaperMock = (paper: OfficialPyqPaperMetadata) => {
+    const paperQs = getQuestionsForOfficialPaper(paper.id);
+    setActiveCbtPaper({
+      title: paper.title,
+      variant: paper.exam,
+      paperId: paper.id,
+      questions: paperQs.length > 0 ? paperQs : undefined,
+      durationMinutes: paper.durationMinutes,
+    });
+    setIsJeeExamModalOpen(true);
+  };
+
+  const handleDownloadPaperPdf = async (
+    paper: OfficialPyqPaperMetadata,
+    includeSolutions: boolean
+  ) => {
     try {
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
-    } catch {}
+      await downloadOfficialPaperPdf(paper, includeSolutions);
+      setPdfFeedbackMessage(
+        `Downloaded ${paper.title} (${includeSolutions ? 'Solutions PDF' : 'Question Paper PDF'})`
+      );
+      setTimeout(() => setPdfFeedbackMessage(null), 4000);
+    } catch {
+      setPdfFeedbackMessage('Could not generate PDF. Please try again.');
+    }
+  };
+
+  const handleCheckPyqQuestion = (q: PyqCorpusQuestion) => {
+    const selectedIndices = pyqSelectedOptions[q.id] || [];
+    const numInput = pyqNumericalInputs[q.id] || '';
+    const numVal = numInput.trim() !== '' ? Number(numInput.trim()) : null;
+
+    const res = scorePyqQuestionResponse(q, {
+      selectedOptionIndices: selectedIndices,
+      numericalValue: numVal,
+    });
+
+    setPyqCheckedMap((prev) => ({
+      ...prev,
+      [q.id]: res,
+    }));
+
+    if (res.status === 'correct' || res.status === 'partially_correct') {
+      awardLearningXp({
+        eventId: `pyq-solve-${q.id}`,
+        actionType: 'pyq_set_completed',
+        xp: 15,
+        label: `Solved PYQ: ${q.chapterTitle} (${q.year})`,
+        subject: q.subject,
+        chapterId: q.chapterId,
+      });
+    }
+  };
+
+  const handleStartPracticeSet = async (focusWeakTopic?: string) => {
     const requestId = ++practiceRequestIdRef.current;
     lastFocusTopicRef.current = focusWeakTopic;
     setSubmittedResult(null);
@@ -123,13 +264,6 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     setRemainingSeconds(null);
     setSessionActive(true);
 
-    if (!currentDoc || currentDoc.pages.length === 0) {
-      setIsGenerating(false);
-      setGenerationError('Select or upload study material first, then generate a practice set.');
-      return;
-    }
-
-    const topicFilter = focusWeakTopic || (selectedTopicPill === 'All' ? undefined : selectedTopicPill);
     const mins =
       timeLimit === '10 min'
         ? 10
@@ -138,6 +272,38 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         : timeLimit === '30 min'
         ? 30
         : null;
+
+    // If user selected Past Papers or Chapters source mode, or has no uploaded document, build directly from verified PYQ corpus!
+    if (sourceMode === 'past_papers' || sourceMode === 'chapters' || !currentDoc || currentDoc.pages.length === 0) {
+      const pool =
+        filteredPyqQuestions.length > 0 ? filteredPyqQuestions : OFFICIAL_PYQ_QUESTIONS;
+      const mapped: QuizQuestion[] = pool.slice(0, questionCount).map((pq, idx) => ({
+        id: pq.id,
+        question: pq.stem,
+        options: (
+          pq.options && pq.options.length >= 4
+            ? pq.options.slice(0, 4)
+            : [
+                `${pq.correctNumericalValue ?? 1}`,
+                `${(pq.correctNumericalValue ?? 1) + 2}`,
+                `${Math.max(0, (pq.correctNumericalValue ?? 1) - 1)}`,
+                `${(pq.correctNumericalValue ?? 1) * 2}`,
+              ]
+        ) as [string, string, string, string],
+        correctIndex: pq.correctOptionIndices?.[0] ?? 0,
+        explanation: `${pq.solutionExplanation} (Key Formula: ${pq.keyFormula})`,
+        topic: pq.chapterTitle,
+        sourcePage: idx + 1,
+        sourceQuote: pq.shiftLabel,
+        difficulty: pq.difficulty.toLowerCase() as 'easy' | 'medium' | 'hard',
+      }));
+      setQuestions(mapped);
+      setRemainingSeconds(mins ? mins * 60 : null);
+      return;
+    }
+
+    const topicFilter =
+      focusWeakTopic || (selectedTopicPill === 'All' ? undefined : selectedTopicPill);
 
     setIsGenerating(true);
     try {
@@ -159,7 +325,6 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         return;
       }
       setQuestions(generated);
-      // The clock starts only once real questions are on screen.
       setRemainingSeconds(mins ? mins * 60 : null);
     } catch (err) {
       if (practiceRequestIdRef.current !== requestId) return;
@@ -204,10 +369,11 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
       else strongSet.add(a.topic);
     });
 
+    const attemptId = `attempt-${Date.now()}`;
     const newAttempt: QuizAttempt = {
-      id: `attempt-${Date.now()}`,
-      documentId: currentDoc?.id || 'practice',
-      documentTitle: currentDoc?.title || 'Practice set',
+      id: attemptId,
+      documentId: currentDoc?.id || 'jee-pyq-practice',
+      documentTitle: currentDoc?.title || 'JEE PYQ Practice Set',
       mode: practiceMode === 'Exam Mode' ? 'adaptive' : 'diagnostic',
       questions,
       answers,
@@ -222,9 +388,16 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     studyStorage.saveQuizAttempt(newAttempt);
     setAttempts(studyStorage.getQuizAttempts());
     setSubmittedResult(newAttempt);
+
+    awardLearningXp({
+      eventId: `practice-set-${attemptId}`,
+      actionType: 'pyq_set_completed',
+      xp: 35,
+      label: `Completed ${newAttempt.documentTitle} (${correctCount}/${questions.length})`,
+    });
   };
 
-  // Waiting for generated questions, or generation failed: never show placeholder questions.
+  // Waiting for generated questions, or generation failed
   if (sessionActive && questions.length === 0) {
     return (
       <div className="max-w-2xl mx-auto py-16 text-center space-y-4">
@@ -261,7 +434,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 onClick={exitPracticeSession}
                 className="px-4 py-2 rounded-lg border border-line bg-white hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
               >
-                ← Back to Builder
+                ← Back to Practice
               </button>
               <button
                 type="button"
@@ -278,7 +451,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     );
   }
 
-  // Render Active Question View matching Image 9 ("Check your understanding.")
+  // Render Active Question View
   if (sessionActive) {
     const activeQuestion = questions[currentIndex] || questions[0];
     const progressPct = Math.round(((currentIndex + 1) / Math.max(1, questions.length)) * 100);
@@ -287,13 +460,12 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
     return (
       <div className="max-w-4xl mx-auto space-y-6 pb-14">
-        {/* Top Row: Breadcrumb + Exit / Timer */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div className="space-y-1.5">
             <div className="lm-kicker">
               {subjectLabel} &nbsp;/&nbsp; {docLabel}
             </div>
-            <h1 className="lm-editorial-title text-4xl sm:text-5xl">
+            <h1 className="lm-editorial-title text-3xl sm:text-4xl">
               Check your understanding.
             </h1>
           </div>
@@ -315,7 +487,6 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           </div>
         </div>
 
-        {/* Thin Full-Width Terracotta Progress Bar matching Image 9 */}
         <div className="w-full h-1.5 rounded-full bg-soft overflow-hidden">
           <div
             className="h-full rounded-full bg-brand transition-all duration-300"
@@ -323,12 +494,11 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           />
         </div>
 
-        {/* Submitted Score Summary Banner (if user submitted set) */}
         {submittedResult && (
           <div className="lm-card-editorial p-5 bg-canvas border-brand/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="text-xs font-semibold uppercase tracking-wider text-brand">
-                Practice Set Complete
+                Practice Set Complete (+35 XP)
               </div>
               <div className="font-serif-editorial text-2xl font-bold text-ink">
                 You scored {submittedResult.score} / {submittedResult.totalQuestions} (
@@ -338,7 +508,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 %)
               </div>
               <p className="text-xs text-muted">
-                Review the step-by-step explanations below or return to the Practice Set Builder.
+                Review the step-by-step explanations below or return to the Practice Hub.
               </p>
             </div>
             <div className="flex items-center gap-2.5">
@@ -347,11 +517,11 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 onClick={exitPracticeSession}
                 className="px-4 py-2 rounded-lg border border-line bg-white hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
               >
-                ← Back to Builder
+                ← Back to Practice
               </button>
               <button
                 type="button"
-                onClick={() => handleStartPracticeSet()}
+                onClick={() => void handleStartPracticeSet()}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg lm-btn-accent text-xs cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -361,12 +531,10 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           </div>
         )}
 
-        {/* Main Spacious Examination Card matching Image 9 */}
         <div className="lm-card-editorial p-6 sm:p-10 space-y-7">
-          {/* Card Top Bar: Question Badge + Save for later */}
           <div className="flex items-center justify-between">
             <span className="px-3 py-1 rounded-md bg-brand-soft text-brand text-xs font-semibold">
-              Question {currentIndex + 1}
+              Question {currentIndex + 1} · {activeQuestion.topic}
             </span>
 
             <button
@@ -386,23 +554,19 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             </button>
           </div>
 
-          {/* Large Editorial Question Text */}
           <MathText
             text={activeQuestion.question}
             className="text-lg sm:text-xl font-medium text-ink leading-relaxed"
           />
 
-          {/* 4 Full-Width Answer Cards matching Image 9 */}
           <div className="space-y-3.5">
             {activeQuestion.options.map((optText, idx) => {
               const letter = ['A', 'B', 'C', 'D'][idx] || String(idx + 1);
               const isSelected = chosenOption === idx;
               const isCorrect = activeQuestion.correctIndex === idx;
 
-              let cardClasses =
-                'bg-white border-line hover:border-brand/50 text-ink';
-              let badgeClasses =
-                'bg-canvas border border-line-strong text-muted';
+              let cardClasses = 'bg-white border-line hover:border-brand/50 text-ink';
+              let badgeClasses = 'bg-canvas border border-line-strong text-muted';
 
               if (submittedResult) {
                 if (isCorrect) {
@@ -454,12 +618,11 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             })}
           </div>
 
-          {/* Grounded Explanation Box when submitted */}
           {submittedResult && (
             <div className="p-4 rounded-xl bg-canvas border border-line space-y-1.5 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-brand">
-                  AI-written solution (Source: Page {activeQuestion.sourcePage})
+                  Verified Solution (Source: Page {activeQuestion.sourcePage})
                 </span>
                 <ReportButton
                   kind="practice_question"
@@ -473,7 +636,6 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             </div>
           )}
 
-          {/* Bottom Navigation Bar matching Image 9 */}
           <div className="pt-4 border-t border-soft flex items-center justify-between gap-3">
             <button
               type="button"
@@ -487,7 +649,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-muted hover:text-ink cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
-              <span>{currentIndex > 0 ? 'Previous' : 'Exit to Builder'}</span>
+              <span>{currentIndex > 0 ? 'Previous' : 'Exit to Practice'}</span>
             </button>
 
             <div className="flex items-center gap-3">
@@ -529,7 +691,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     );
   }
 
-  // Default View: Practice Set Builder matching Image 10 ("Practice, with purpose.")
+  // Analytics derived from real attempts
   const attemptPct = (a: QuizAttempt) =>
     Math.round((a.score / Math.max(1, a.totalQuestions)) * 100);
 
@@ -540,7 +702,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
   const recentAttemptRows = attempts.slice(0, 4).map((att) => ({
     id: att.id,
-    title: `${att.documentTitle.replace(/\.pdf$/i, '')}: Custom Set`,
+    title: att.examTitle || `${att.documentTitle.replace(/\.pdf$/i, '')}: Practice Set`,
     meta: `${att.totalQuestions} questions · ${new Date(att.completedAt).toLocaleDateString(
       'en-IN',
       { month: 'short', day: 'numeric' }
@@ -548,17 +710,6 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     pct: attemptPct(att),
   }));
 
-  // Oldest → newest, last five sets, plotted on a 0–100% scale.
-  const trendPoints = attempts
-    .slice(0, 5)
-    .reverse()
-    .map((att, i, arr) => ({
-      x: arr.length === 1 ? 144 : 32 + (i * (256 - 32)) / (arr.length - 1),
-      y: 20 + (100 - attemptPct(att)) * 0.76,
-      label: `Set ${i + 1}`,
-    }));
-
-  // Weakest topics by real answer accuracy across all saved attempts.
   const weakTopicRows = (() => {
     const stats = new Map<string, { correct: number; total: number }>();
     for (const att of attempts) {
@@ -574,527 +725,920 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
       .map(([name, s]) => ({ name, pct: Math.round((s.correct / s.total) * 100) }))
       .filter((t) => t.pct < 100)
       .sort((a, b) => a.pct - b.pct)
-      .slice(0, 3);
+      .slice(0, 4);
   })();
 
+  const solvedPyqCount = Object.keys(pyqCheckedMap).length;
+
   return (
-    <div className="space-y-7 pb-12">
-      {/* Editorial Header matching Image 10 */}
-      <div className="space-y-2 max-w-2xl">
-        <div className="lm-kicker">
-          {subjectLabel} &nbsp;/&nbsp; {docLabel}
+    <div data-testid="practice-workspace-view" className="space-y-6 pb-12">
+      {/* Top Row: Practice Title + Main / Advanced Switcher (Matches Image 11) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-line pb-4">
+        <div className="space-y-1">
+          <h1 className="font-display text-3xl sm:text-4xl font-bold text-ink tracking-tight">
+            Practice
+          </h1>
+          <p className="text-xs sm:text-sm text-muted">
+            Official JEE Main &amp; JEE Advanced past papers, CBT full mocks, and targeted note drills.
+          </p>
         </div>
-        <h1 className="lm-editorial-title text-4xl sm:text-5xl">
-          Practice, with purpose.
-        </h1>
-        <p className="lm-editorial-subtitle text-base sm:text-lg text-body">
-          Build a JEE-style practice set from your own notes, and focus on what matters most.
-        </p>
+
+        {/* Main | Advanced Switcher */}
+        <div
+          role="group"
+          aria-label="Exam Mode Switcher"
+          className="inline-flex items-center p-1 rounded-xl bg-white border border-line shadow-2xs self-start sm:self-auto"
+        >
+          <button
+            type="button"
+            data-testid="practice-exam-toggle-main"
+            onClick={() => setExamFilter('jee_main')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              examFilter === 'jee_main'
+                ? 'bg-brand-soft text-brand border border-brand/30'
+                : 'text-muted hover:text-ink'
+            }`}
+          >
+            Main
+          </button>
+          <button
+            type="button"
+            data-testid="practice-exam-toggle-advanced"
+            onClick={() => setExamFilter('jee_advanced')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              examFilter === 'jee_advanced'
+                ? 'bg-brand-soft text-brand border border-brand/30'
+                : 'text-muted hover:text-ink'
+            }`}
+          >
+            Advanced
+          </button>
+        </div>
       </div>
 
-      {/* Official JEE Main 75-Question CBT Simulator Hero Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-6 sm:p-7 shadow-lg border border-blue-800">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2.5 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-amber-300 text-xs font-bold tracking-wide uppercase">
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Full-Scale NTA CBT Mock Exam</span>
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              JEE (Main) 2027 Full Mock Test Simulator
-            </h2>
-            <p className="text-xs sm:text-sm text-blue-100/90 leading-relaxed">
-              Step into the authentic NTA Computer-Based Test environment: <strong>75 questions</strong> across Physics (25), Chemistry (25), and Mathematics (25) with 20 MCQs + 5 Numerical value questions each, 180-minute countdown timer, official Question Palette (5 states), on-screen virtual keypad, and official +4 / −1 marking.
-            </p>
-            <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-blue-200 pt-1">
-              <span className="flex items-center gap-1">⏱️ 180 Minutes</span>
-              <span>•</span>
-              <span className="flex items-center gap-1">📝 75 Questions</span>
-              <span>•</span>
-              <span className="flex items-center gap-1">🎯 300 Marks (+4 / -1)</span>
-              <span>•</span>
-              <span className="flex items-center gap-1">🖥️ Official NTA CBT UI</span>
-            </div>
-          </div>
-
-          <div className="shrink-0 flex flex-col sm:flex-row md:flex-col gap-2.5">
+      {/* Sub-navigation Tabs: PYQs · Mock Tests · Custom Set · Analysis */}
+      <div
+        role="tablist"
+        aria-label="Practice Sections"
+        className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-line"
+      >
+        {(
+          [
+            { id: 'pyqs', label: 'PYQs' },
+            { id: 'mock_tests', label: 'Mock Tests' },
+            { id: 'custom_set', label: 'Custom Set' },
+            { id: 'analysis', label: 'Analysis' },
+          ] as const
+        ).map((tab) => {
+          const isActive = hubTab === tab.id;
+          return (
             <button
+              key={tab.id}
               type="button"
-              onClick={() => setIsJeeExamModalOpen(true)}
-              data-testid="launch-jee-cbt-mock-btn"
-              className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-extrabold text-sm shadow-md hover:shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+              role="tab"
+              aria-selected={isActive}
+              data-testid={`practice-hub-tab-${tab.id}`}
+              onClick={() => setHubTab(tab.id)}
+              className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                isActive
+                  ? 'bg-brand-soft text-brand border border-brand/25'
+                  : 'text-muted hover:text-ink hover:bg-white'
+              }`}
             >
-              <span>Launch 75-Q JEE Mock Test</span>
-              <ChevronRight className="w-4 h-4" />
+              {tab.label}
             </button>
-            <span className="text-[11px] text-blue-300/80 text-center font-medium">
-              Grounded in {currentDoc?.title || 'uploaded materials'} &amp; JEE syllabus
-            </span>
-          </div>
-        </div>
+          );
+        })}
       </div>
 
-      {/* Main 12-Column Builder & Analytics Grid matching Image 10 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left 8 Columns: Choose what to practice + Refine your set + Recent Attempts */}
-        <div className="lg:col-span-8 space-y-6">
-          {/* Builder Card */}
-          <div className="lm-card-editorial p-6 space-y-6">
-            {/* Section 1: Choose what to practice */}
-            <div className="space-y-3">
-              <h2 className="font-serif-editorial text-lg font-bold text-ink">
-                Choose what to practice
-              </h2>
+      {pdfFeedbackMessage && (
+        <div
+          role="status"
+          className="px-4 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center justify-between"
+        >
+          <span>{pdfFeedbackMessage}</span>
+          <button
+            type="button"
+            onClick={() => setPdfFeedbackMessage(null)}
+            className="underline cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                {[
-                  {
-                    id: 'notes' as PracticeSourceMode,
-                    title: 'My Notes',
-                    subtitle: currentDoc
-                      ? `${currentDoc.title} (${currentDoc.pages.length} pages)`
-                      : 'Upload a chapter or notes first',
-                    icon: FileText,
-                    available: true,
-                  },
-                  {
-                    id: 'chapters' as PracticeSourceMode,
-                    title: 'Chapters',
-                    subtitle: 'JEE Main syllabus chapters',
-                    icon: BookOpen,
-                    available: false,
-                  },
-                  {
-                    id: 'past_papers' as PracticeSourceMode,
-                    title: 'Past Papers',
-                    subtitle: 'JEE Main previous-year questions',
-                    icon: ClipboardCheck,
-                    available: false,
-                  },
-                ].map((src) => {
-                  const Icon = src.icon;
-                  const selected = sourceMode === src.id;
-                  return (
-                    <button
-                      key={src.id}
-                      type="button"
-                      disabled={!src.available}
-                      onClick={() => setSourceMode(src.id)}
-                      title={src.available ? undefined : 'Coming soon'}
-                      className={`relative p-4 rounded-xl border text-left transition-all flex flex-col justify-between gap-2 ${
-                        !src.available
-                          ? 'bg-soft border-line opacity-70 cursor-not-allowed'
-                          : selected
-                          ? 'bg-brand-soft/60 border-brand ring-1 ring-brand/25 cursor-pointer'
-                          : 'bg-white border-line hover:border-brand/40 cursor-pointer'
-                      }`}
-                    >
-                      {!src.available && (
-                        <span className="absolute -top-2 right-3 px-2 py-0.5 rounded-full bg-white border border-line text-[10px] font-bold text-muted">
-                          Coming soon
-                        </span>
-                      )}
-                      <div className="flex items-center justify-between w-full">
-                        <div className="flex items-center gap-2">
-                          <Icon
-                            className={`w-4 h-4 ${
-                              selected ? 'text-brand' : 'text-muted'
-                            }`}
-                          />
-                          <span className="font-serif-editorial font-bold text-sm text-ink">
-                            {src.title}
-                          </span>
-                        </div>
-                        <span
-                          className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                            selected ? 'border-brand' : 'border-line-strong'
-                          }`}
-                        >
-                          {selected && (
-                            <span className="w-2 h-2 rounded-full bg-brand" />
-                          )}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted truncate">{src.subtitle}</div>
-                    </button>
-                  );
-                })}
+      {/* Main 12-Column Grid matching Image 11 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT 8 COLUMNS */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* 2 Hero CBT Cards: JEE Main CBT + JEE Advanced Paper 1 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="lm-card-editorial p-5 bg-gradient-to-br from-indigo-50/90 via-white to-blue-50/60 border-indigo-200/80 flex flex-col justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[11px] font-bold">
+                    NTA Official Pattern
+                  </span>
+                  <span className="text-xs font-semibold text-muted">300 Marks</span>
+                </div>
+                <h2 className="text-lg font-bold text-ink">
+                  JEE Main CBT (Full Mock)
+                </h2>
+                <p className="text-xs text-muted leading-relaxed">
+                  75 Questions · 180 min · +4 / −1 marking · 5-state NTA Question Palette &amp; Virtual Numerical Keypad
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={launchFullJeeMainMock}
+                data-testid="launch-jee-cbt-mock-btn"
+                className="w-full py-2.5 px-4 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>Start Full Mock</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="lm-card-editorial p-5 bg-white flex flex-col justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-bold">
+                    IIT Advanced Pattern
+                  </span>
+                  <span className="text-xs font-semibold text-muted">Partial Credit</span>
+                </div>
+                <h2 className="text-lg font-bold text-ink">
+                  JEE Advanced Paper 1
+                </h2>
+                <p className="text-xs text-muted leading-relaxed">
+                  Single-Choice (+3/−1), Multi-Correct (+4/−2 with +3/+2/+1 partial marks), &amp; Non-Negative Integer (+4/0)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={launchJeeAdvancedPaper}
+                data-testid="launch-jee-advanced-mock-btn"
+                className="w-full py-2.5 px-4 rounded-xl border border-brand/40 bg-brand-soft/60 hover:bg-brand hover:text-white text-brand text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>Start Paper</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* TAB 1 & 2: OFFICIAL PAPERS TABLE (Matches Image 11) */}
+          {(hubTab === 'mock_tests' || hubTab === 'pyqs') && (
+            <div className="lm-card-editorial p-5 sm:p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-ink">Official Papers</h2>
+                  <p className="text-xs text-muted">
+                    Verified shift-wise JEE Main &amp; JEE Advanced papers with downloadable PDFs and CBT simulation.
+                  </p>
+                </div>
+
+                {/* Filters: Year, Session, Shift */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    aria-label="Filter by Year"
+                    value={paperYearFilter}
+                    onChange={(e) =>
+                      setPaperYearFilter(
+                        e.target.value === 'All' ? 'All' : Number(e.target.value)
+                      )
+                    }
+                    className="px-2.5 py-1.5 rounded-lg border border-line bg-canvas text-xs font-semibold text-ink"
+                  >
+                    <option value="All">Year: All</option>
+                    <option value={2025}>2025</option>
+                    <option value={2024}>2024</option>
+                    <option value={2023}>2023</option>
+                    <option value={2022}>2022</option>
+                    <option value={2021}>2021</option>
+                  </select>
+
+                  <select
+                    aria-label="Filter by Session"
+                    value={paperSessionFilter}
+                    onChange={(e) => setPaperSessionFilter(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-line bg-canvas text-xs font-semibold text-ink"
+                  >
+                    <option value="All">Session: All</option>
+                    <option value="January">January</option>
+                    <option value="April">April</option>
+                    <option value="May">May (Advanced)</option>
+                  </select>
+
+                  <select
+                    aria-label="Filter by Shift"
+                    value={paperShiftFilter}
+                    onChange={(e) => setPaperShiftFilter(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-line bg-canvas text-xs font-semibold text-ink"
+                  >
+                    <option value="All">Shift: All</option>
+                    <option value="Shift 1">Shift 1</option>
+                    <option value="Shift 2">Shift 2</option>
+                    <option value="Paper 1">Paper 1</option>
+                  </select>
+                </div>
               </div>
 
-              {documents.length > 1 && sourceMode === 'notes' && (
-                <div className="pt-1 flex items-center gap-2 text-xs">
-                  <span className="text-muted">Active Note Source:</span>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-line text-muted">
+                      <th className="py-2.5 px-3 font-semibold">Paper</th>
+                      <th className="py-2.5 px-3 font-semibold">Questions</th>
+                      <th className="py-2.5 px-3 font-semibold">Duration</th>
+                      <th className="py-2.5 px-3 font-semibold">Marking</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {filteredOfficialPapers.map((paper) => (
+                      <tr key={paper.id} className="hover:bg-canvas/60">
+                        <td className="py-3.5 px-3">
+                          <div className="font-bold text-ink text-xs sm:text-sm">
+                            {paper.title}
+                          </div>
+                          <div className="text-[11px] text-muted">
+                            {paper.examDate} · {paper.shift} · Verified v{paper.syllabusVersion}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3 font-semibold text-ink tabular-nums">
+                          {paper.totalQuestions}
+                        </td>
+                        <td className="py-3.5 px-3 text-muted tabular-nums">
+                          {paper.durationMinutes} min
+                        </td>
+                        <td className="py-3.5 px-3 text-muted">
+                          {paper.markingSummary}
+                        </td>
+                        <td className="py-3.5 px-3 text-right">
+                          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void handleDownloadPaperPdf(paper, false)}
+                              data-testid={`download-paper-pdf-${paper.id}`}
+                              className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
+                            >
+                              <Download className="w-3 h-3 text-muted" />
+                              <span>Paper PDF</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDownloadPaperPdf(paper, true)}
+                              data-testid={`download-solutions-pdf-${paper.id}`}
+                              className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
+                            >
+                              <FileText className="w-3 h-3 text-brand" />
+                              <span>Solutions PDF</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => launchOfficialPaperMock(paper)}
+                              data-testid={`start-official-mock-${paper.id}`}
+                              className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
+                            >
+                              Start Mock
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* CHAPTER-WISE & YEAR-WISE PYQ SOLVER (Always accessible in PYQs tab or below Official Papers) */}
+          {hubTab === 'pyqs' && (
+            <div className="lm-card-editorial p-5 sm:p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-4">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-brand">
+                    Chapter-Wise &amp; Shift-Wise PYQ Bank
+                  </span>
+                  <h2 className="text-lg font-bold text-ink">
+                    Verified Past Questions ({filteredPyqQuestions.length})
+                  </h2>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['All', 'Physics', 'Chemistry', 'Mathematics'] as const).map(
+                    (subj) => (
+                      <button
+                        key={subj}
+                        type="button"
+                        onClick={() => setPyqSubjectFilter(subj)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                          pyqSubjectFilter === subj
+                            ? 'bg-brand text-white border-brand'
+                            : 'bg-white text-muted border-line hover:text-ink'
+                        }`}
+                      >
+                        {subj}
+                      </button>
+                    )
+                  )}
+
                   <select
-                    value={currentDoc?.id || ''}
-                    onChange={(e) => {
-                      const found = documents.find((d) => d.id === e.target.value);
-                      if (found) onSelectDoc(found);
-                    }}
-                    className="px-2.5 py-1 rounded-lg border border-line bg-canvas text-xs font-medium text-ink"
+                    aria-label="Filter PYQs by Chapter"
+                    value={paperChapterFilter}
+                    onChange={(e) => setPaperChapterFilter(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-line bg-canvas text-xs font-semibold text-ink max-w-[200px]"
                   >
-                    {documents.map((doc) => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.title} ({doc.pages.length} pages)
+                    <option value="All">All Chapters</option>
+                    {JEE_SYLLABUS_CHAPTERS.map((ch) => (
+                      <option key={ch.id} value={ch.id}>
+                        {ch.subject}: {ch.title}
                       </option>
                     ))}
                   </select>
                 </div>
-              )}
+              </div>
+
+              <div className="space-y-4">
+                {filteredPyqQuestions.map((q, idx) => {
+                  const selectedIndices = pyqSelectedOptions[q.id] || [];
+                  const numInput = pyqNumericalInputs[q.id] || '';
+                  const checkRes = pyqCheckedMap[q.id];
+                  const isReported = Boolean(reportedQuestionIds[q.id]);
+
+                  return (
+                    <div
+                      key={q.id}
+                      data-testid={`pyq-card-${q.id}`}
+                      className="p-5 rounded-2xl bg-canvas border border-line space-y-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-md bg-brand text-white text-xs font-bold">
+                            Q{idx + 1}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-white border border-line text-xs font-semibold text-ink">
+                            {q.shiftLabel}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-brand-soft text-brand text-xs font-semibold">
+                            {q.subject} · {q.chapterTitle}
+                          </span>
+                          {q.questionType === 'mcq_multiple' && (
+                            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-[11px] font-bold">
+                              Multi-Correct (+4/−2 Partial)
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            submitPyqErrorReport({
+                              questionId: q.id,
+                              paperId: q.paperId,
+                              issueCategory: 'answer_key_mismatch',
+                              description: `Student flagged ${q.id} (${q.shiftLabel}) for editorial review.`,
+                            });
+                            setReportedQuestionIds((prev) => ({ ...prev, [q.id]: true }));
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-muted hover:text-danger cursor-pointer"
+                          title="Report an issue with this question or key"
+                        >
+                          <Flag className="w-3 h-3" />
+                          <span>{isReported ? 'Reported for Review' : 'Report Error'}</span>
+                        </button>
+                      </div>
+
+                      <MathText
+                        text={q.stem}
+                        className="text-sm sm:text-base font-medium text-ink leading-relaxed"
+                      />
+
+                      {q.questionType === 'numerical' ? (
+                        <div className="flex items-center gap-3 max-w-xs">
+                          <input
+                            type="text"
+                            value={numInput}
+                            onChange={(e) =>
+                              setPyqNumericalInputs((prev) => ({
+                                ...prev,
+                                [q.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="Enter numerical value..."
+                            className="flex-1 px-3 py-2 rounded-xl border border-line bg-white text-sm font-mono font-bold text-ink"
+                          />
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {(q.options || []).map((opt, optIdx) => {
+                            const isSel = selectedIndices.includes(optIdx);
+                            const isCorrectOpt = (q.correctOptionIndices || []).includes(
+                              optIdx
+                            );
+                            let btnStyle =
+                              'bg-white border-line text-ink hover:border-brand/50';
+                            if (checkRes) {
+                              if (isCorrectOpt) {
+                                btnStyle =
+                                  'bg-emerald-50 border-emerald-500 text-emerald-950 font-semibold';
+                              } else if (isSel) {
+                                btnStyle =
+                                  'bg-red-50 border-red-400 text-red-900';
+                              }
+                            } else if (isSel) {
+                              btnStyle =
+                                'bg-brand-soft border-brand text-brand font-semibold';
+                            }
+
+                            return (
+                              <button
+                                key={optIdx}
+                                type="button"
+                                onClick={() => {
+                                  setPyqSelectedOptions((prev) => {
+                                    const curr = prev[q.id] || [];
+                                    if (q.questionType === 'mcq_multiple') {
+                                      return {
+                                        ...prev,
+                                        [q.id]: curr.includes(optIdx)
+                                          ? curr.filter((i) => i !== optIdx)
+                                          : [...curr, optIdx].sort(),
+                                      };
+                                    }
+                                    return { ...prev, [q.id]: [optIdx] };
+                                  });
+                                }}
+                                className={`p-3 rounded-xl border text-left text-xs sm:text-sm flex items-center gap-2.5 transition-all cursor-pointer ${btnStyle}`}
+                              >
+                                <span className="w-6 h-6 rounded-full bg-canvas border border-line font-bold text-xs flex items-center justify-center shrink-0">
+                                  {['A', 'B', 'C', 'D'][optIdx]}
+                                </span>
+                                <MathText text={opt} variant="inline" />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleCheckPyqQuestion(q)}
+                          data-testid={`check-pyq-btn-${q.id}`}
+                          className="px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
+                        >
+                          Check Official Answer &amp; Marks
+                        </button>
+
+                        {checkRes && (
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-bold ${
+                              checkRes.status === 'correct'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : checkRes.status === 'partially_correct'
+                                ? 'bg-blue-100 text-blue-800'
+                                : checkRes.status === 'incorrect'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {checkRes.explanationNote} ({checkRes.marksAwarded >= 0 ? `+${checkRes.marksAwarded}` : checkRes.marksAwarded} / {checkRes.maxMarks} marks)
+                          </span>
+                        )}
+                      </div>
+
+                      {checkRes && (
+                        <div className="p-4 rounded-xl bg-white border border-line space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-brand">
+                              LearnMate Verified Solution · Key Formula:{' '}
+                              <MathText text={q.keyFormula} variant="inline" />
+                            </span>
+                            <span className="text-[11px] text-muted">
+                              Rule: {q.markingRuleId}
+                            </span>
+                          </div>
+                          <MathText
+                            text={q.solutionExplanation}
+                            className="text-slate-700 leading-relaxed"
+                          />
+                          <div className="text-amber-800 pt-1">
+                            <strong>Common Trap:</strong>{' '}
+                            <MathText text={q.commonTrap} variant="inline" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+          )}
 
-            <div className="border-t border-soft" />
+          {/* TAB 3: CUSTOM SET BUILDER */}
+          {hubTab === 'custom_set' && (
+            <div className="lm-card-editorial p-6 space-y-6">
+              <div className="space-y-3">
+                <h2 className="font-serif-editorial text-lg font-bold text-ink">
+                  Choose what to practice
+                </h2>
 
-            {/* Section 2: Refine your set */}
-            <div className="space-y-4">
-              <h2 className="font-serif-editorial text-lg font-bold text-ink">
-                Refine your set
-              </h2>
-
-              {/* Topics Row */}
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-muted">Topics</label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {topicPills.map((pill) => {
-                    const active = selectedTopicPill === pill;
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  {[
+                    {
+                      id: 'notes' as PracticeSourceMode,
+                      title: 'My Notes',
+                      subtitle: currentDoc
+                        ? `${currentDoc.title} (${currentDoc.pages.length} pages)`
+                        : 'Built-in JEE chapter notes',
+                      icon: FileText,
+                    },
+                    {
+                      id: 'chapters' as PracticeSourceMode,
+                      title: 'Chapters',
+                      subtitle: '17 JEE Main & Advanced chapters',
+                      icon: BookOpen,
+                    },
+                    {
+                      id: 'past_papers' as PracticeSourceMode,
+                      title: 'Past Papers',
+                      subtitle: 'Official shift-wise PYQ bank',
+                      icon: ClipboardCheck,
+                    },
+                  ].map((src) => {
+                    const Icon = src.icon;
+                    const selected = sourceMode === src.id;
                     return (
                       <button
-                        key={pill}
+                        key={src.id}
                         type="button"
-                        onClick={() => setSelectedTopicPill(pill)}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer border ${
-                          active
-                            ? 'bg-brand-soft border-[#F2C9BC] text-brand font-semibold'
-                            : 'bg-white border-line text-body hover:border-brand/40'
+                        onClick={() => setSourceMode(src.id)}
+                        className={`relative p-4 rounded-xl border text-left transition-all flex flex-col justify-between gap-2 cursor-pointer ${
+                          selected
+                            ? 'bg-brand-soft/60 border-brand ring-1 ring-brand/25'
+                            : 'bg-white border-line hover:border-brand/40'
                         }`}
                       >
-                        {pill}
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-2">
+                            <Icon
+                              className={`w-4 h-4 ${
+                                selected ? 'text-brand' : 'text-muted'
+                              }`}
+                            />
+                            <span className="font-serif-editorial font-bold text-sm text-ink">
+                              {src.title}
+                            </span>
+                          </div>
+                          <span
+                            className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                              selected ? 'border-brand' : 'border-line-strong'
+                            }`}
+                          >
+                            {selected && (
+                              <span className="w-2 h-2 rounded-full bg-brand" />
+                            )}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted truncate">{src.subtitle}</div>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Questions & Difficulty Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="border-t border-soft" />
+
+              <div className="space-y-4">
+                <h2 className="font-serif-editorial text-lg font-bold text-ink">
+                  Refine your set
+                </h2>
+
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-muted">Questions</label>
-                  <div className="flex items-center gap-1.5">
-                    {[5, 10, 15, 20, 30].map((cnt) => (
-                      <button
-                        key={cnt}
-                        type="button"
-                        onClick={() => setQuestionCount(cnt)}
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                          questionCount === cnt
-                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
-                            : 'bg-white border-line text-body hover:bg-canvas'
-                        }`}
-                      >
-                        {cnt}
-                      </button>
-                    ))}
+                  <label className="block text-xs font-medium text-muted">Topics</label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {topicPills.map((pill) => {
+                      const active = selectedTopicPill === pill;
+                      return (
+                        <button
+                          key={pill}
+                          type="button"
+                          onClick={() => setSelectedTopicPill(pill)}
+                          className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer border ${
+                            active
+                              ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
+                              : 'bg-white border-line text-body hover:border-brand/40'
+                          }`}
+                        >
+                          {pill}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-muted">Difficulty</label>
-                  <div className="flex items-center gap-1.5">
-                    {(['Mixed', 'Easy', 'Medium', 'Hard'] as const).map((diff) => (
-                      <button
-                        key={diff}
-                        type="button"
-                        onClick={() => setDifficulty(diff)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                          difficulty === diff
-                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
-                            : 'bg-white border-line text-body hover:bg-canvas'
-                        }`}
-                      >
-                        {diff}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Time Limit & Mode Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-muted">Time Limit</label>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {(['No Limit', '10 min', '20 min', '30 min'] as const).map((tl) => (
-                      <button
-                        key={tl}
-                        type="button"
-                        onClick={() => setTimeLimit(tl)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                          timeLimit === tl
-                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
-                            : 'bg-white border-line text-body hover:bg-canvas'
-                        }`}
-                      >
-                        {tl}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-muted">Mode</label>
-                  <div className="flex items-center gap-1.5">
-                    {(['Practice Mode', 'Exam Mode'] as const).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setPracticeMode(m)}
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                          practiceMode === m
-                            ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
-                            : 'bg-white border-line text-body hover:bg-canvas'
-                        }`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Summary & Generate Practice Set Action Bar */}
-            <div className="pt-4 border-t border-soft flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="text-xs text-muted">
-                <strong className="text-ink">{questionCount} questions</strong> &nbsp;·&nbsp;{' '}
-                {difficulty} difficulty &nbsp;·&nbsp;{' '}
-                {timeLimit === 'No Limit' ? 'Untimed' : timeLimit.replace('min', 'minutes')}{' '}
-                &nbsp;·&nbsp; {practiceMode}
-              </div>
-
-              <button
-                type="button"
-                disabled={isGenerating}
-                onClick={() => void handleStartPracticeSet()}
-                data-testid="generate-practice-set-btn"
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg lm-btn-accent text-xs cursor-pointer shrink-0"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Preparing Questions...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>Generate Practice Set →</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Recent Attempts Card matching Image 10 */}
-          <div className="lm-card-editorial p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-serif-editorial text-lg font-bold text-ink">
-                Recent Attempts
-              </h2>
-              <button
-                type="button"
-                onClick={() => void handleStartPracticeSet()}
-                className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline cursor-pointer"
-              >
-                <span>View all</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {recentAttemptRows.length === 0 && (
-              <p className="text-xs text-muted">
-                No practice sets yet. Your completed sets will be listed here.
-              </p>
-            )}
-
-            <div className="divide-y divide-soft">
-              {recentAttemptRows.map((row) => (
-                <div
-                  key={row.id}
-                  className="py-3.5 flex items-center justify-between gap-4 first:pt-1 last:pb-1"
-                >
-                  <div className="min-w-0">
-                    <div className="font-serif-editorial font-bold text-sm text-ink truncate">
-                      {row.title}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-muted">Questions</label>
+                    <div className="flex items-center gap-1.5">
+                      {[5, 10, 15, 20, 30].map((cnt) => (
+                        <button
+                          key={cnt}
+                          type="button"
+                          onClick={() => setQuestionCount(cnt)}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                            questionCount === cnt
+                              ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
+                              : 'bg-white border-line text-body hover:bg-canvas'
+                          }`}
+                        >
+                          {cnt}
+                        </button>
+                      ))}
                     </div>
-                    <div className="text-xs text-muted mt-0.5">{row.meta}</div>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="px-2.5 py-1 rounded-md bg-success-soft text-success font-bold text-xs tabular-nums">
-                      {row.pct}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => void handleStartPracticeSet()}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
-                    >
-                      <span>Review</span>
-                      <ChevronDown className="w-3 h-3 text-muted" />
-                    </button>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-muted">Difficulty</label>
+                    <div className="flex items-center gap-1.5">
+                      {(['Mixed', 'Easy', 'Medium', 'Hard'] as const).map((diff) => (
+                        <button
+                          key={diff}
+                          type="button"
+                          onClick={() => setDifficulty(diff)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                            difficulty === diff
+                              ? 'bg-brand-soft border-brand/40 text-brand font-semibold'
+                              : 'bg-white border-line text-body hover:bg-canvas'
+                          }`}
+                        >
+                          {diff}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ))}
+              </div>
+
+              <div className="pt-4 border-t border-soft flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="text-xs text-muted">
+                  <strong className="text-ink">{questionCount} questions</strong> &nbsp;·&nbsp;{' '}
+                  {difficulty} difficulty &nbsp;·&nbsp; {practiceMode}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isGenerating}
+                  onClick={() => void handleStartPracticeSet()}
+                  data-testid="generate-practice-set-btn"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg lm-btn-accent text-xs cursor-pointer shrink-0"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Generate Practice Set →</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* TAB 4: ANALYSIS & RECENT ATTEMPTS */}
+          {(hubTab === 'analysis' || hubTab === 'mock_tests') && (
+            <div className="lm-card-editorial p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-serif-editorial text-lg font-bold text-ink">
+                  Recent Practice &amp; Mock Attempts
+                </h2>
+                <span className="text-xs text-muted tabular-nums">
+                  {attempts.length} saved {attempts.length === 1 ? 'attempt' : 'attempts'}
+                </span>
+              </div>
+
+              {recentAttemptRows.length === 0 ? (
+                <p className="text-xs text-muted">
+                  No practice sets or mock exams completed yet. Launch a mock above or generate a custom set on the right.
+                </p>
+              ) : (
+                <div className="divide-y divide-soft">
+                  {recentAttemptRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className="py-3.5 flex items-center justify-between gap-4 first:pt-1 last:pb-1"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-serif-editorial font-bold text-sm text-ink truncate">
+                          {row.title}
+                        </div>
+                        <div className="text-xs text-muted mt-0.5">{row.meta}</div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="px-2.5 py-1 rounded-md bg-success-soft text-success font-bold text-xs tabular-nums">
+                          {row.pct}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleStartPracticeSet()}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink cursor-pointer"
+                        >
+                          <span>Practice Again</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Right 4 Columns: Your Practice Progress + Focus on these topics */}
+        {/* RIGHT 4 COLUMNS (Matches Image 11): My Notes Set Builder + Practice Progress + Weak Topics */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Your Practice Progress Chart Card */}
-          <div className="lm-card-editorial p-6 space-y-4">
-            <h2 className="font-serif-editorial text-lg font-bold text-ink">
-              Your Practice Progress
+          {/* Quick My Notes Set Builder Card */}
+          <div className="lm-card-editorial p-5 space-y-4">
+            <h2 className="font-display text-base font-bold text-ink">
+              My Notes Set Builder
             </h2>
 
-            <div className="flex items-baseline gap-2">
-              <span className="font-serif-editorial font-bold text-3xl text-ink tabular-nums">
-                {avgAccuracy === null ? '—' : `${avgAccuracy}%`}
-              </span>
-              <span className="text-xs text-muted">Avg. Accuracy</span>
-              <span className="text-xs text-muted ml-auto">
-                {attempts.length} {attempts.length === 1 ? 'set' : 'sets'}
-              </span>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-muted">Material</label>
+              {documents.length > 0 ? (
+                <select
+                  aria-label="Select Note Material"
+                  value={currentDoc?.id || ''}
+                  onChange={(e) => {
+                    const found = documents.find((d) => d.id === e.target.value);
+                    if (found) onSelectDoc(found);
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-line bg-canvas text-xs font-semibold text-ink"
+                >
+                  {documents.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.title} ({doc.pages.length} pages)
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="px-3 py-2 rounded-xl border border-line bg-canvas text-xs text-muted">
+                  Using built-in JEE Syllabus &amp; PYQ Bank
+                </div>
+              )}
             </div>
 
-            {trendPoints.length < 2 ? (
-              <p className="text-xs text-muted pt-2">
-                Complete at least two practice sets to see your accuracy trend.
-              </p>
-            ) : (
-              <div className="pt-2">
-                <svg viewBox="0 0 280 120" className="w-full h-28 overflow-visible">
-                  {[20, 58, 96].map((y) => (
-                    <line
-                      key={y}
-                      x1="24"
-                      y1={y}
-                      x2="268"
-                      y2={y}
-                      stroke="#E2E8F0"
-                      strokeWidth="1"
-                    />
-                  ))}
-                  <text x="0" y="23" fontSize="9" fill="#94A3B8">
-                    100%
-                  </text>
-                  <text x="0" y="61" fontSize="9" fill="#94A3B8">
-                    50%
-                  </text>
-                  <text x="0" y="99" fontSize="9" fill="#94A3B8">
-                    0%
-                  </text>
-                  <polyline
-                    fill="none"
-                    stroke="#4F46E5"
-                    strokeWidth="2.2"
-                    points={trendPoints.map((pt) => `${pt.x},${pt.y}`).join(' ')}
-                  />
-                  {trendPoints.map((pt, i) => (
-                    <g key={i}>
-                      <circle
-                        cx={pt.x}
-                        cy={pt.y}
-                        r="3.5"
-                        fill="#FFFFFF"
-                        stroke="#4F46E5"
-                        strokeWidth="2"
-                      />
-                      <text
-                        x={pt.x}
-                        y="112"
-                        textAnchor="middle"
-                        fontSize="9"
-                        fill="#94A3B8"
-                      >
-                        {pt.label}
-                      </text>
-                    </g>
-                  ))}
-                </svg>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-muted">Count</label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[5, 10, 15, 20].map((cnt) => (
+                  <button
+                    key={cnt}
+                    type="button"
+                    onClick={() => setQuestionCount(cnt)}
+                    className={`py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                      questionCount === cnt
+                        ? 'bg-brand-soft border-brand text-brand'
+                        : 'bg-white border-line text-ink hover:bg-canvas'
+                    }`}
+                  >
+                    {cnt}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-muted">Mode</label>
+              <div className="grid grid-cols-2 gap-2">
+                {(['Practice Mode', 'Exam Mode'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setPracticeMode(m)}
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                      practiceMode === m
+                        ? 'bg-brand-soft border-brand text-brand'
+                        : 'bg-white border-line text-ink hover:bg-canvas'
+                    }`}
+                  >
+                    {m.replace(' Mode', '')}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isGenerating}
+              onClick={() => void handleStartPracticeSet()}
+              data-testid="sidebar-generate-practice-btn"
+              className="w-full py-2.5 px-4 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+            >
+              {isGenerating ? 'Generating Set...' : 'Generate Set'}
+            </button>
           </div>
 
-          {/* Focus on these topics Card matching Image 10 */}
-          <div className="lm-card-editorial p-6 space-y-4">
-            <div className="space-y-1">
-              <h2 className="font-serif-editorial text-lg font-bold text-ink">
-                Focus on these topics
+          {/* Practice Progress Card */}
+          <div className="lm-card-editorial p-5 space-y-3">
+            <h2 className="font-display text-base font-bold text-ink">
+              Practice Progress
+            </h2>
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="p-3 rounded-xl bg-canvas border border-line text-center">
+                <div className="text-lg font-extrabold text-ink tabular-nums">
+                  {avgAccuracy === null ? '—' : `${avgAccuracy}%`}
+                </div>
+                <div className="text-[11px] text-muted">Avg. Accuracy</div>
+              </div>
+              <div className="p-3 rounded-xl bg-canvas border border-line text-center">
+                <div className="text-lg font-extrabold text-ink tabular-nums">
+                  {attempts.length}
+                </div>
+                <div className="text-[11px] text-muted">Sets Done</div>
+              </div>
+              <div className="p-3 rounded-xl bg-canvas border border-line text-center">
+                <div className="text-lg font-extrabold text-brand tabular-nums">
+                  {solvedPyqCount}
+                </div>
+                <div className="text-[11px] text-muted">PYQs Checked</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Weak Topics Card */}
+          <div className="lm-card-editorial p-5 space-y-4">
+            <div className="space-y-0.5">
+              <h2 className="font-display text-base font-bold text-ink">
+                Weak Topics
               </h2>
               <p className="text-xs text-muted">
-                Based on your recent mistakes and quiz results:
+                Calculated from your saved quiz and mock responses:
               </p>
             </div>
 
-            {weakTopicRows.length === 0 && (
+            {weakTopicRows.length === 0 ? (
               <p className="text-xs text-muted">
-                No weak topics yet. They will appear here after you answer practice questions.
+                Complete a practice set or mock test to automatically detect weak topics.
               </p>
-            )}
-
-            <div className="space-y-3.5 pt-1">
-              {weakTopicRows.map((wt) => (
-                <div key={wt.name} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-ink flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-brand" />
-                      {wt.name}
-                    </span>
-                    <span className="font-bold text-brand tabular-nums">{wt.pct}%</span>
+            ) : (
+              <div className="space-y-3">
+                {weakTopicRows.map((wt) => (
+                  <div key={wt.name} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-ink truncate">{wt.name}</span>
+                      <span className="font-bold text-brand tabular-nums">{wt.pct}%</span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-brand-soft overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-brand"
+                        style={{ width: `${wt.pct}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="w-full h-1.5 rounded-full bg-brand-soft overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-brand"
-                      style={{ width: `${wt.pct}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {weakTopicRows.length > 0 && (
-              <button
-                type="button"
-                onClick={() => void handleStartPracticeSet(weakTopicRows[0].name)}
-                className="w-full py-2.5 px-4 rounded-lg border border-line bg-canvas hover:bg-brand-soft hover:text-brand text-xs font-semibold text-ink transition-colors cursor-pointer"
-              >
-                Practice Weakest Topic: {weakTopicRows[0].name}
-              </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => void handleStartPracticeSet(weakTopicRows[0].name)}
+                  className="w-full py-2 px-3 rounded-xl border border-brand/30 bg-brand-soft/60 hover:bg-brand hover:text-white text-brand text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Practice Weakest Topic
+                </button>
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Proctored Fullscreen Enforcement with 3 Warnings */}
+      {/* Proctored Fullscreen Enforcement for Custom Timed Sets */}
       <QuizProctorOverlay
-        isQuizActive={sessionActive && !submittedResult && questions.length > 0}
+        isQuizActive={
+          sessionActive &&
+          practiceMode === 'Exam Mode' &&
+          !submittedResult &&
+          questions.length > 0
+        }
         onAutoSubmit={handleSubmitSession}
         quizTitle="Timed Practice Set"
       />
 
-      {/* Official 75-Question JEE Main CBT Exam Simulator */}
+      {/* Official JEE Main & JEE Advanced CBT Simulator */}
       <JeeCbtExamModal
         isOpen={isJeeExamModalOpen}
         onClose={() => setIsJeeExamModalOpen(false)}
         studentProfile={studentProfile}
-        examTitle={`JEE (Main) 2027 Full Mock Paper — ${currentDoc?.title || 'Comprehensive'}`}
+        examTitle={
+          activeCbtPaper?.title ||
+          `JEE (Main) 2027 Full Mock Paper — ${currentDoc?.title || 'Comprehensive'}`
+        }
+        examVariant={activeCbtPaper?.variant || examFilter}
+        officialPaperId={activeCbtPaper?.paperId}
+        customPyqQuestions={activeCbtPaper?.questions}
+        durationMinutes={activeCbtPaper?.durationMinutes || 180}
         sourceNoteTitle={currentDoc?.title}
         onSaveResult={(res) => {
-          // Save attempt into studyStorage so it syncs with Recent Attempts and Mistake DNA
           const attempt: QuizAttempt = {
             id: res.id,
-            documentId: currentDoc?.id || 'jee-mock-75',
+            documentId: currentDoc?.id || res.examVariant,
             documentTitle: res.examTitle,
             mode: 'jee_simulator',
-            examType: 'jee_main',
+            examType: res.examVariant === 'jee_advanced' ? 'jee_advanced' : 'jee_main',
             examTitle: res.examTitle,
             questions: [],
             answers: [],
@@ -1106,7 +1650,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             completedAt: res.completedAt,
             negativeMarkingUsed: true,
             rawMarks: res.marksObtained,
-            maxMarks: 300,
+            maxMarks: res.maxMarks,
             timeTakenSeconds: res.timeTakenSeconds,
           };
           studyStorage.saveQuizAttempt(attempt);
