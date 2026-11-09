@@ -21,6 +21,11 @@ import {
   Volume2,
   VolumeX,
   RotateCcw,
+  HelpCircle,
+  Target,
+  Lightbulb,
+  ArrowRight,
+  Award,
 } from 'lucide-react';
 import type { StudyDocument, CreativeAsset, ThemeMode } from '../types/study';
 import type { StructuredDiagramSpec } from '../types/diagram';
@@ -32,19 +37,35 @@ import {
 } from '../services/aiClient';
 import { DiagramRenderer } from './DiagramRenderer';
 import { ReportButton } from './ReportButton';
+import { MathText } from './MathText';
+import {
+  stopAllGlobalAudioAndSpeech,
+  type ContextualCreateTransferPayload,
+} from '../utils/phase6Engine';
 import {
   serializeDiagramSpecToSvg,
   getDeterministicDiagramTemplate,
 } from '../utils/diagramEngine';
 import {
   buildAnimatedExplanationScenes,
+  buildDeterministicSceneConceptCheck,
+  buildDeterministicSceneReteaching,
+  computeLessonMasteryAndRecommendation,
+  createInitialSceneMasteryMap,
   createInitialScenePlayerState,
-  transitionScenePlayerState,
+  evaluateConceptCheckSubmission,
+  getHighlightedDiagramSpecForReteaching,
   getSceneSpecForProgressiveStep,
-  validateAndSanitizeAnimatedExplanation,
   resolveSupportedCitedPages,
-  type ScenePlayerState,
+  skipSceneConceptCheck,
+  transitionScenePlayerState,
+  validateAndSanitizeAnimatedExplanation,
+  type ConceptCheckDifficulty,
+  type RecommendedNextAction,
+  type SceneConceptCheckQuestion,
+  type SceneConceptMasteryState,
   type ScenePlayerAction,
+  type ScenePlayerState,
 } from '../utils/educationalSpecsEngine';
 
 interface CreativeStudioViewProps {
@@ -53,6 +74,9 @@ interface CreativeStudioViewProps {
   onSelectDocument: (id: string) => void;
   themeMode?: ThemeMode;
   onNavigateToPage?: (pageNumber: number) => void;
+  onNavigateTab?: (tab: 'practice' | 'revision' | 'study') => void;
+  contextualTransfer?: ContextualCreateTransferPayload | null;
+  onReturnToTutor?: () => void;
 }
 
 type StudioSubTab = 'visualize' | 'videolesson' | 'saved';
@@ -115,6 +139,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
   onSelectDocument,
   themeMode = 'light',
   onNavigateToPage,
+  onNavigateTab,
+  contextualTransfer,
+  onReturnToTutor,
 }) => {
   const isDark = themeMode === 'dark';
   const [subTab, setSubTab] = useState<StudioSubTab>('visualize');
@@ -299,13 +326,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
       window.clearTimeout(playbackTimerRef.current);
       playbackTimerRef.current = null;
     }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // Ignore speech synthesis errors in headless browsers
-      }
-    }
+    stopAllGlobalAudioAndSpeech('creative_studio_scene_transition');
   }, []);
 
   const dispatchPlayer = useCallback(
@@ -332,6 +353,266 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
   const activeScene =
     currentScenes[Math.min(playerState.activeSceneIndex, Math.max(0, currentScenes.length - 1))];
   const activeSceneSteps = activeScene?.progressiveSteps || [];
+
+  /* =====================================================================
+   * PHASE 5.3 — INTERACTIVE CONCEPT MASTERY & ADAPTIVE RETEACHING STATE
+   * ===================================================================== */
+  const [masteryByScene, setMasteryByScene] = useState<Record<number, SceneConceptMasteryState>>(
+    {}
+  );
+  const [isCheckOpen, setIsCheckOpen] = useState<boolean>(false);
+  const [isReteachingOpen, setIsReteachingOpen] = useState<boolean>(false);
+  const [customQuestionsByScene, setCustomQuestionsByScene] = useState<
+    Record<number, SceneConceptCheckQuestion>
+  >({});
+  const [selectedMcqOption, setSelectedMcqOption] = useState<number | null>(null);
+  const [numericalInputText, setNumericalInputText] = useState<string>('');
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [isRefreshingQuestion, setIsRefreshingQuestion] = useState<boolean>(false);
+  const [mistakeDnaSyncNotice, setMistakeDnaSyncNotice] = useState<string | null>(null);
+  const conceptRequestEpochRef = useRef<number>(0);
+
+  // Reset per-scene transient input UI when switching scenes while preserving persisted mastery state
+  useEffect(() => {
+    conceptRequestEpochRef.current += 1;
+    setSelectedMcqOption(null);
+    setNumericalInputText('');
+    setValidationError(null);
+    setMistakeDnaSyncNotice(null);
+    setIsRefreshingQuestion(false);
+    const scNum = activeScene?.sceneNumber || 1;
+    const scMastery = masteryByScene[scNum];
+    setIsReteachingOpen(Boolean(scMastery?.status === 'needs_reteaching'));
+  }, [playerState.activeSceneIndex, activeScene?.sceneNumber]);
+
+  const activeSceneNum = activeScene?.sceneNumber || 1;
+  const activeSceneMastery: SceneConceptMasteryState | undefined = masteryByScene[activeSceneNum];
+
+  const activeQuestion: SceneConceptCheckQuestion | undefined = activeScene
+    ? customQuestionsByScene[activeSceneNum] ||
+      activeScene.conceptCheck ||
+      buildDeterministicSceneConceptCheck(activeScene, {
+        topic: videoResult?.topic || selectedTopic,
+        difficulty: activeSceneMastery?.activeVariant || 'standard',
+        sourceDocumentTitle: activeDocument.title,
+      })
+    : undefined;
+
+  const activeReteaching = activeScene
+    ? activeScene.reteaching ||
+      buildDeterministicSceneReteaching(activeScene, {
+        topic: videoResult?.topic || selectedTopic,
+        sourceDocumentTitle: activeDocument.title,
+      })
+    : undefined;
+
+  const lessonMasterySummary =
+    videoResult && videoResult.scenes.length > 0
+      ? computeLessonMasteryAndRecommendation(videoResult.scenes, masteryByScene)
+      : null;
+
+  const initializeOrRestoreLessonMastery = useCallback(
+    (
+      docId: string,
+      topic: string,
+      scenes: VideoLessonResponse['scenes'],
+      savedMastery?: Record<number, SceneConceptMasteryState>
+    ) => {
+      const stored = savedMastery || studyStorage.getLessonMasteryState(docId, topic);
+      const base = createInitialSceneMasteryMap(scenes);
+      if (stored && typeof stored === 'object') {
+        for (const sc of scenes) {
+          if (stored[sc.sceneNumber]) {
+            base[sc.sceneNumber] = stored[sc.sceneNumber];
+          }
+        }
+      }
+      setMasteryByScene(base);
+      setCustomQuestionsByScene({});
+      setIsCheckOpen(false);
+      setIsReteachingOpen(false);
+      setSelectedMcqOption(null);
+      setNumericalInputText('');
+      setValidationError(null);
+      setMistakeDnaSyncNotice(null);
+    },
+    []
+  );
+
+  const handleOpenConceptCheck = () => {
+    dispatchPlayer({ type: 'OPEN_CONCEPT_CHECK' });
+    setIsCheckOpen(true);
+    setValidationError(null);
+  };
+
+  const handleLoadQuestionVariant = async (
+    variant: ConceptCheckDifficulty,
+    useLiveAi = false
+  ) => {
+    if (!activeScene || !videoResult) return;
+    dispatchPlayer({ type: 'OPEN_CONCEPT_CHECK' });
+    setIsCheckOpen(true);
+    setSelectedMcqOption(null);
+    setNumericalInputText('');
+    setValidationError(null);
+
+    if (!useLiveAi) {
+      const nextQ =
+        variant === 'reteach' && activeReteaching?.followUpQuestion
+          ? activeReteaching.followUpQuestion
+          : buildDeterministicSceneConceptCheck(activeScene, {
+              topic: videoResult.topic,
+              difficulty: variant,
+              sourceDocumentTitle: activeDocument.title,
+            });
+      setCustomQuestionsByScene((prev) => ({
+        ...prev,
+        [activeScene.sceneNumber]: nextQ,
+      }));
+      return;
+    }
+
+    const requestEpoch = ++conceptRequestEpochRef.current;
+    setIsRefreshingQuestion(true);
+    const { contextText, citedPages, validPageNumbers } = extractDocumentContextForTopic(
+      videoResult.topic
+    );
+
+    try {
+      const res = await aiStudyClient.generateConceptCheck({
+        topic: videoResult.topic,
+        sceneNumber: activeScene.sceneNumber,
+        heading: activeScene.heading,
+        teachingPoint: activeScene.teachingPoint,
+        keyFormula: activeScene.keyFormula,
+        difficulty: variant,
+        contextText,
+        documentTitle: activeDocument.title,
+        citedPages,
+        validPageNumbers,
+        preferredLanguage: studyStorage.getStudentProfile()?.preferredLanguage,
+      });
+      if (conceptRequestEpochRef.current !== requestEpoch) return;
+      setCustomQuestionsByScene((prev) => ({
+        ...prev,
+        [activeScene.sceneNumber]: res.question,
+      }));
+    } catch {
+      if (conceptRequestEpochRef.current !== requestEpoch) return;
+      const fallbackQ = buildDeterministicSceneConceptCheck(activeScene, {
+        topic: videoResult.topic,
+        difficulty: variant,
+        sourceDocumentTitle: activeDocument.title,
+      });
+      setCustomQuestionsByScene((prev) => ({
+        ...prev,
+        [activeScene.sceneNumber]: fallbackQ,
+      }));
+    } finally {
+      if (conceptRequestEpochRef.current === requestEpoch) {
+        setIsRefreshingQuestion(false);
+      }
+    }
+  };
+
+  const handleSubmitConceptCheck = () => {
+    if (!activeScene || !activeQuestion || !videoResult) return;
+    dispatchPlayer({ type: 'PAUSE' });
+
+    const evalResult = evaluateConceptCheckSubmission({
+      question: activeQuestion,
+      selectedOptionIndex: selectedMcqOption ?? undefined,
+      enteredNumericalText: numericalInputText,
+      previousSceneState: masteryByScene[activeScene.sceneNumber],
+      documentId: activeDocument.id,
+      documentTitle: activeDocument.title,
+    });
+
+    if (!evalResult.validSubmission || !evalResult.attemptRecord) {
+      setValidationError(evalResult.validationError || 'Please provide a valid answer.');
+      return;
+    }
+
+    setValidationError(null);
+    const updatedMap: Record<number, SceneConceptMasteryState> = {
+      ...masteryByScene,
+      [activeScene.sceneNumber]: evalResult.nextSceneState,
+    };
+    setMasteryByScene(updatedMap);
+    studyStorage.saveLessonMasteryState(activeDocument.id, videoResult.topic, updatedMap);
+
+    const dnaSync = studyStorage.saveConceptCheckAttempt(
+      evalResult.attemptRecord,
+      evalResult.nextSceneState
+    );
+
+    if (dnaSync.evidenceLevel === 'repeated_misconception') {
+      setMistakeDnaSyncNotice(
+        'Synced to Mistake DNA & High-Priority Revision Plan (repeated misconception detected).'
+      );
+      setIsReteachingOpen(true);
+      dispatchPlayer({
+        type: 'START_RETEACHING',
+        totalSteps: activeSceneSteps.length,
+      });
+    } else if (dnaSync.evidenceLevel === 'recovered_after_reteaching') {
+      setMistakeDnaSyncNotice(
+        'Recovery recorded in Mistake DNA! Revision priority downgraded to medium.'
+      );
+    } else {
+      setMistakeDnaSyncNotice(null);
+    }
+  };
+
+  const handleSkipConceptCheck = () => {
+    if (!activeScene || !videoResult) return;
+    dispatchPlayer({ type: 'PAUSE' });
+    setValidationError(null);
+    const nextSceneState = skipSceneConceptCheck(
+      masteryByScene[activeScene.sceneNumber],
+      activeScene.sceneNumber
+    );
+    const updatedMap: Record<number, SceneConceptMasteryState> = {
+      ...masteryByScene,
+      [activeScene.sceneNumber]: nextSceneState,
+    };
+    setMasteryByScene(updatedMap);
+    studyStorage.saveLessonMasteryState(activeDocument.id, videoResult.topic, updatedMap);
+  };
+
+  const handleExecuteRecommendedAction = (action: RecommendedNextAction) => {
+    if (!videoResult) return;
+    if (action.targetTab && onNavigateTab) {
+      dispatchPlayer({ type: 'LEAVE_CREATE' });
+      onNavigateTab(action.targetTab);
+      return;
+    }
+    if (typeof action.targetSceneNumber === 'number') {
+      const targetIdx = Math.max(
+        0,
+        Math.min(videoResult.scenes.length - 1, action.targetSceneNumber - 1)
+      );
+      dispatchPlayer({
+        type: 'SELECT_SCENE',
+        sceneIndex: targetIdx,
+        totalScenes: videoResult.scenes.length,
+      });
+    }
+    if (action.kind === 'open_visual_reteaching') {
+      setIsCheckOpen(true);
+      setIsReteachingOpen(true);
+      dispatchPlayer({
+        type: 'START_RETEACHING',
+        totalSteps: activeSceneSteps.length,
+      });
+    } else if (action.kind === 'try_challenge') {
+      void handleLoadQuestionVariant('challenge', false);
+    } else if (action.kind === 'review_and_retry_scene') {
+      void handleLoadQuestionVariant('reteach', false);
+    } else if (action.kind === 'resume_scene' || action.kind === 'continue_next_scene') {
+      setIsCheckOpen(true);
+    }
+  };
 
   // Handle narrated slideshow playback & progressive step advancement
   useEffect(() => {
@@ -440,13 +721,31 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
     [activeDocument.pages]
   );
 
-  const handleRunVideoLesson = async (topicOverride?: string) => {
+  const isGeneratingVideoRef = useRef<boolean>(false);
+  const videoLessonCacheRef = useRef<Map<string, VideoLessonResponse>>(new Map());
+
+  const handleRunVideoLesson = async (topicOverride?: string, forceRegenerate = false) => {
+    if (isGeneratingVideoRef.current) return;
     const targetTopic = (topicOverride ?? videoTopicInput).trim() || selectedTopic || 'Core Concept';
     if (topicOverride) {
       setVideoTopicInput(topicOverride);
     }
 
+    const cacheKey = `${activeDocument.id}::${targetTopic.toLowerCase()}::${videoAspectRatio}`;
+    if (!forceRegenerate && !videoSourceImage && videoLessonCacheRef.current.has(cacheKey)) {
+      const cached = videoLessonCacheRef.current.get(cacheKey)!;
+      cancelSpeechAndTimers();
+      setVideoResult(cached);
+      initializeOrRestoreLessonMastery(activeDocument.id, targetTopic, cached.scenes);
+      setPlayerState((prev) => ({
+        ...createInitialScenePlayerState(),
+        isMuted: prev.isMuted,
+      }));
+      return;
+    }
+
     cancelSpeechAndTimers();
+    isGeneratingVideoRef.current = true;
     setIsGeneratingVideo(true);
 
     const { contextText, citedPages, validPageNumbers } =
@@ -475,13 +774,16 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         }
       );
 
-      setVideoResult({
+      const nextVideoResult: VideoLessonResponse = {
         ...res,
         topic: targetTopic,
         citedPages: validated.citedPages,
         isSupportedByMaterial: validated.isSupportedByMaterial,
         scenes: validated.scenes,
-      });
+      };
+      videoLessonCacheRef.current.set(cacheKey, nextVideoResult);
+      setVideoResult(nextVideoResult);
+      initializeOrRestoreLessonMastery(activeDocument.id, targetTopic, validated.scenes);
       setPlayerState((prev) => ({
         ...createInitialScenePlayerState(),
         isMuted: prev.isMuted,
@@ -493,7 +795,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         citedPages,
         validPageNumbers
       );
-      setVideoResult({
+      const fallbackResult: VideoLessonResponse = {
         topic: targetTopic,
         omniStatus: 'animated_explanation_ready',
         isAiGenerated: false,
@@ -506,12 +808,16 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
             ? `Could not reach live AI service (${err.message}). Showing the built-in JEE multi-scene animated explanation template.`
             : 'Could not reach live AI service. Showing the built-in JEE multi-scene animated explanation template.',
         scenes: fallbackScenes,
-      });
+      };
+      videoLessonCacheRef.current.set(cacheKey, fallbackResult);
+      setVideoResult(fallbackResult);
+      initializeOrRestoreLessonMastery(activeDocument.id, targetTopic, fallbackScenes);
       setPlayerState((prev) => ({
         ...createInitialScenePlayerState(),
         isMuted: prev.isMuted,
       }));
     } finally {
+      isGeneratingVideoRef.current = false;
       setIsGeneratingVideo(false);
     }
   };
@@ -528,6 +834,32 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
     reader.readAsDataURL(file);
   };
 
+  // Phase 6 Section 5: Automatically apply contextual transfer from AI Study Tutor
+  const lastAppliedTransferIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!contextualTransfer) return;
+    const transferKey = `${contextualTransfer.sourceTutorMessageId}::${contextualTransfer.selectedMode}`;
+    if (lastAppliedTransferIdRef.current === transferKey) return;
+    lastAppliedTransferIdRef.current = transferKey;
+
+    const targetConcept =
+      contextualTransfer.conceptTitle || contextualTransfer.topic || activeDocument.title;
+    setSelectedTopic(contextualTransfer.topic || targetConcept);
+    setVisualConceptInput(targetConcept);
+    setVideoTopicInput(targetConcept);
+
+    if (
+      contextualTransfer.selectedMode === 'create_diagram' ||
+      contextualTransfer.selectedMode === 'visual_understanding'
+    ) {
+      setSubTab('visualize');
+      void handleRunVisualize(targetConcept, 'auto');
+    } else {
+      setSubTab('videolesson');
+      void handleRunVideoLesson(targetConcept, false);
+    }
+  }, [contextualTransfer]);
+
   // Filtered saved assets
   const filteredSavedAssets = savedAssets.filter((a) => {
     if (savedFilter === 'current') {
@@ -537,7 +869,48 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
   });
 
   return (
-    <div className="max-w-[1340px] mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-6">
+    <div className="w-full max-w-[1340px] mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-6 overflow-x-hidden">
+      {/* Phase 6 Section 5: Contextual AI Study Tutor Transfer Banner */}
+      {contextualTransfer && (
+        <div
+          data-testid="contextual-create-banner"
+          className="p-3.5 sm:p-4 rounded-2xl bg-brand-soft/60 dark:bg-indigo-950/60 border border-brand-200 dark:border-indigo-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-brand text-white">
+                Transferred from AI Study Tutor
+              </span>
+              <span className="text-xs font-bold text-ink dark:text-slate-100">
+                {contextualTransfer.conceptTitle}
+              </span>
+              {contextualTransfer.citedPages.length > 0 && (
+                <span className="text-[11px] font-semibold text-brand dark:text-indigo-300">
+                  (Cited Page {contextualTransfer.citedPages.join(', ')})
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted dark:text-slate-300 line-clamp-1">
+              Question: &ldquo;{contextualTransfer.question}&rdquo;
+            </p>
+          </div>
+          {onReturnToTutor && (
+            <button
+              type="button"
+              data-testid="return-to-tutor-btn"
+              onClick={() => {
+                cancelSpeechAndTimers();
+                onReturnToTutor();
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-brand-200 dark:border-indigo-700 text-xs font-bold text-brand dark:text-indigo-300 hover:bg-brand hover:text-white transition-colors cursor-pointer shrink-0"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Return to AI Tutor Question</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Editorial Header */}
       <div className="space-y-4 border-b border-line dark:border-slate-800 pb-0">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-2">
@@ -552,12 +925,12 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 self-start lg:self-end">
+          <div className="flex flex-wrap items-center gap-2 self-start lg:self-end max-w-full">
             <select
               aria-label="Select active study document for studio"
               value={activeDocument.id}
               onChange={(e) => onSelectDocument(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-line dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-ink dark:text-slate-100"
+              className="max-w-full px-3 py-2 rounded-lg border border-line dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-ink dark:text-slate-100"
             >
               {documents.map((doc) => (
                 <option key={doc.id} value={doc.id}>
@@ -570,7 +943,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               aria-label="Select topic for studio creation"
               value={selectedTopic}
               onChange={(e) => setSelectedTopic(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-line dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-ink dark:text-slate-100"
+              className="max-w-full px-3 py-2 rounded-lg border border-line dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-ink dark:text-slate-100"
             >
               {activeDocument.topics.map((t) => (
                 <option key={t.id} value={t.name}>
@@ -585,7 +958,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           {(
             [
               { id: 'visualize', label: 'Diagram Maker' },
-              { id: 'videolesson', label: 'Animated Explanation (Phase 5.2)' },
+              { id: 'videolesson', label: 'Animated Explanation (Phase 5.3)' },
               { id: 'saved', label: `Saved Library (${savedAssets.length})` },
             ] as const
           ).map((item) => {
@@ -850,16 +1223,16 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           {/* Header & Controls */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-md bg-brand-soft dark:bg-indigo-950/70 text-brand dark:text-indigo-300 text-[11px] font-bold uppercase tracking-wider">
-                  Phase 5.2 · Narrated Scene Player
+                  Phase 5.3 · Interactive Concept Mastery
                 </span>
                 <span className="text-[11px] text-muted dark:text-slate-400">
-                  4–6 Progressive Diagram Scenes · App-Owned SVG
+                  4–6 Progressive Diagram Scenes · Concept Checks &amp; Visual Reteaching
                 </span>
               </div>
               <h2 className="text-lg sm:text-xl font-bold text-ink dark:text-slate-100">
-                Animated Concept Explanations
+                Animated Concept Explanations &amp; Adaptive Mastery
               </h2>
               <p className="text-xs text-muted dark:text-slate-400">
                 Choose a concept from <span className="font-semibold text-ink dark:text-slate-200">{activeDocument.title}</span> or enter a JEE Physics, Chemistry, or Maths request below.
@@ -1003,7 +1376,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
               <button
                 type="button"
                 disabled={isGeneratingVideo}
-                onClick={() => void handleRunVideoLesson()}
+                onClick={() => void handleRunVideoLesson(undefined, true)}
                 data-testid="retry-animated-lesson-btn"
                 className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-ink dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer shrink-0 self-start sm:self-center"
               >
@@ -1149,7 +1522,10 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         handleSaveCreativeAsset(
                           'video_lesson',
                           `Animated Lesson: ${videoResult.topic}`,
-                          videoResult
+                          {
+                            ...videoResult,
+                            masteryByScene,
+                          }
                         )
                       }
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-ink dark:text-slate-100 cursor-pointer"
@@ -1171,10 +1547,45 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   </div>
                 </div>
 
-                {/* Scene Selector Strip (Scenes 1..N) */}
+                {/* Scene Selector Strip (Scenes 1..N) with Phase 5.3 Mastery Badges */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {videoResult.scenes.map((sc, i) => {
                     const isSelected = playerState.activeSceneIndex === i;
+                    const scState = masteryByScene[sc.sceneNumber];
+                    const badgeInfo =
+                      scState?.status === 'correct_first_try' ||
+                      scState?.status === 'correct_after_retry'
+                        ? {
+                            label: 'Verified ✓',
+                            cls: isSelected
+                              ? 'bg-emerald-400/25 text-white'
+                              : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300',
+                          }
+                        : scState?.status === 'needs_reteaching'
+                          ? {
+                              label: 'Reteach !',
+                              cls: isSelected
+                                ? 'bg-rose-400/30 text-white'
+                                : 'bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300',
+                            }
+                          : scState?.status === 'in_progress'
+                            ? {
+                                label: 'Retry',
+                                cls: isSelected
+                                  ? 'bg-amber-400/30 text-white'
+                                  : 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300',
+                              }
+                            : scState?.status === 'skipped'
+                              ? {
+                                  label: 'Skipped',
+                                  cls: isSelected
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-slate-200 dark:bg-slate-800 text-muted dark:text-slate-400',
+                                }
+                              : {
+                                  label: `${sc.durationSeconds}s`,
+                                  cls: 'opacity-80',
+                                };
                     return (
                       <button
                         key={sc.sceneNumber}
@@ -1193,9 +1604,11 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                             : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-ink dark:text-slate-200 hover:border-brand/40'
                         }`}
                       >
-                        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider opacity-80">
+                        <div className="flex items-center justify-between gap-1 text-[10px] font-bold uppercase tracking-wider">
                           <span>Scene {sc.sceneNumber}</span>
-                          <span>{sc.durationSeconds}s</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] ${badgeInfo.cls}`}>
+                            {badgeInfo.label}
+                          </span>
                         </div>
                         <div className="text-xs font-semibold line-clamp-1 mt-0.5">
                           {sc.heading}
@@ -1205,10 +1618,10 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   })}
                 </div>
 
-                {/* Main 2-Column Content: Progressive Diagram + Teaching Point / Formula / Narration */}
+                {/* Main 2-Column Content: Progressive Diagram + Teaching Point / Formula / Narration / Concept Check */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-                  {/* Left Column: Progressive Step Controls + App-Owned SVG DiagramRenderer */}
-                  <div className="lg:col-span-7 space-y-3">
+                  {/* Left Column: Progressive Step Controls + App-Owned SVG DiagramRenderer + Adaptive Visual Reteaching */}
+                  <div className="lg:col-span-7 min-w-0 space-y-3">
                     {activeSceneSteps.length > 0 && (
                       <div
                         data-testid="progressive-steps-bar"
@@ -1290,29 +1703,127 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     )}
 
                     <DiagramRenderer
-                      spec={getSceneSpecForProgressiveStep(
-                        activeScene,
-                        playerState.activeStepIndex
-                      )}
+                      spec={
+                        isReteachingOpen && activeReteaching
+                          ? getHighlightedDiagramSpecForReteaching(
+                              getSceneSpecForProgressiveStep(
+                                activeScene,
+                                playerState.activeStepIndex
+                              ),
+                              activeReteaching.highlightElementIds
+                            )
+                          : getSceneSpecForProgressiveStep(
+                              activeScene,
+                              playerState.activeStepIndex
+                            )
+                      }
                       isDarkTheme={isDark}
                       onNavigateToPage={onNavigateToPage}
                     />
+
+                    {/* Phase 5.3 — Adaptive Visual Reteaching Panel (when unlocked or opened) */}
+                    {isReteachingOpen && activeReteaching && (
+                      <div
+                        data-testid="adaptive-reteaching-panel"
+                        className="p-4 sm:p-5 rounded-2xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50/90 dark:bg-amber-950/40 space-y-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Lightbulb className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span className="text-xs font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                              Adaptive Visual Reteaching · Scene {activeScene.sceneNumber}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsReteachingOpen(false)}
+                            className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 hover:underline cursor-pointer"
+                          >
+                            Hide Reteaching
+                          </button>
+                        </div>
+
+                        <div
+                          data-testid="reteaching-alternative-explanation"
+                          className="text-xs sm:text-sm font-medium text-amber-950 dark:text-amber-100 leading-relaxed"
+                        >
+                          <MathText text={activeReteaching.alternativeExplanation} />
+                        </div>
+
+                        {activeReteaching.highlightElementIds.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                              Highlighted Diagram Elements:
+                            </span>
+                            {activeReteaching.highlightElementIds.map((elId) => (
+                              <span
+                                key={elId}
+                                data-testid={`reteach-highlight-${elId}`}
+                                className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-[11px] font-mono font-semibold text-amber-900 dark:text-amber-200"
+                              >
+                                {elId}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="space-y-1.5 bg-white/80 dark:bg-slate-900/80 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                            Step-by-Step Visual &amp; Formula Breakdown
+                          </div>
+                          <ul className="space-y-1 text-xs text-ink dark:text-slate-200">
+                            {activeReteaching.stepByStepBreakdown.map((stepStr, idx) => (
+                              <li key={idx} className="leading-relaxed">
+                                <MathText text={stepStr} variant="inline" />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                            Formula: <MathText text={activeReteaching.keyFormula} variant="inline" />
+                          </span>
+                          <button
+                            type="button"
+                            data-testid="attempt-reteach-followup-btn"
+                            onClick={() => void handleLoadQuestionVariant('reteach', false)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer"
+                          >
+                            <Target className="w-3.5 h-3.5" />
+                            <span>Try Equivalent Follow-Up Question</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Right Column: Scene Heading, Teaching Point, Key Formula & Visible Narration */}
-                  <div className="lg:col-span-5 space-y-4">
+                  {/* Right Column: Scene Heading, Teaching Point, Key Formula, Narration & Interactive Concept Check */}
+                  <div className="lg:col-span-5 min-w-0 space-y-4">
                     {/* Scene Heading & Governing Formula */}
                     <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
-                      <div className="space-y-1">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-brand dark:text-indigo-400">
-                          Scene {activeScene.sceneNumber} Breakdown
-                        </span>
-                        <h3
-                          data-testid="scene-heading"
-                          className="text-base sm:text-lg font-bold text-ink dark:text-slate-100"
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="space-y-1">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-brand dark:text-indigo-400">
+                            Scene {activeScene.sceneNumber} Breakdown
+                          </span>
+                          <h3
+                            data-testid="scene-heading"
+                            className="text-base sm:text-lg font-bold text-ink dark:text-slate-100"
+                          >
+                            {activeScene.heading}
+                          </h3>
+                        </div>
+
+                        <button
+                          type="button"
+                          data-testid="open-concept-check-btn"
+                          onClick={handleOpenConceptCheck}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer shrink-0 shadow-2xs"
                         >
-                          {activeScene.heading}
-                        </h3>
+                          <HelpCircle className="w-3.5 h-3.5" />
+                          <span>Check Understanding</span>
+                        </button>
                       </div>
 
                       {/* Teaching Point */}
@@ -1323,9 +1834,9 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                         <div className="text-[10px] font-bold uppercase tracking-wider text-brand dark:text-indigo-300">
                           Key Teaching Point
                         </div>
-                        <p className="text-xs sm:text-sm font-medium text-ink dark:text-slate-100 leading-relaxed">
-                          {activeScene.teachingPoint}
-                        </p>
+                        <div className="text-xs sm:text-sm font-medium text-ink dark:text-slate-100 leading-relaxed">
+                          <MathText text={activeScene.teachingPoint} />
+                        </div>
                       </div>
 
                       {/* Governing Formula */}
@@ -1337,8 +1848,8 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                           <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
                             Governing JEE Formula
                           </div>
-                          <div className="font-mono text-xs sm:text-sm font-bold text-white break-words">
-                            {activeScene.keyFormula}
+                          <div className="text-xs sm:text-sm font-bold text-white break-words">
+                            <MathText text={activeScene.keyFormula} />
                           </div>
                         </div>
                       )}
@@ -1386,18 +1897,470 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
 
                       {/* Safety Disclosure & Report Action */}
                       <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-muted dark:text-slate-400">
-                        <span>
-                          Verify formulas against your NCERT / JEE notes.
-                        </span>
+                        <span>Verify formulas against your NCERT / JEE notes.</span>
                         <ReportButton
-                          kind="tutor_answer"
+                          kind="animated_explanation"
                           excerpt={`${activeScene.heading}: ${activeScene.teachingPoint} — ${activeScene.narration}`}
                           documentId={activeDocument.id}
                         />
                       </div>
                     </div>
+
+                    {/* Phase 5.3 — Interactive Concept Check Card */}
+                    {isCheckOpen && activeQuestion && (
+                      <div
+                        data-testid="concept-check-panel"
+                        className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border-2 border-brand/40 dark:border-indigo-500/50 space-y-4 shadow-xs"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded-md bg-brand-soft dark:bg-indigo-950/80 text-brand dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider">
+                              Scene {activeScene.sceneNumber} Concept Check (
+                              {activeQuestion.difficulty})
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-muted dark:text-slate-300">
+                              {activeQuestion.questionType === 'numerical'
+                                ? 'Numerical Input'
+                                : 'Single-Choice MCQ'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              data-testid="load-equivalent-question-btn"
+                              disabled={isRefreshingQuestion}
+                              onClick={() =>
+                                void handleLoadQuestionVariant(
+                                  activeQuestion.difficulty === 'reteach' ? 'standard' : 'reteach',
+                                  false
+                                )
+                              }
+                              className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-ink dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                              title="Switch to an equivalent question for this teaching point"
+                            >
+                              Equivalent Q
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="ai-refresh-concept-check-btn"
+                              disabled={isRefreshingQuestion}
+                              onClick={() =>
+                                void handleLoadQuestionVariant(activeQuestion.difficulty, true)
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-brand dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer disabled:opacity-50"
+                              title="Generate fresh AI concept check"
+                            >
+                              <RefreshCw
+                                className={`w-3 h-3 ${isRefreshingQuestion ? 'animate-spin' : ''}`}
+                              />
+                              <span>AI New</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Source Grounding Badge inside Concept Check */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          {activeQuestion.isSupportedByMaterial &&
+                          activeQuestion.citedPages.length > 0 ? (
+                            <span
+                              data-testid="concept-check-source-cited"
+                              className="text-brand dark:text-indigo-300 font-semibold"
+                            >
+                              Source-Grounded: Page {activeQuestion.citedPages.join(', ')} of{' '}
+                              {activeDocument.title}
+                            </span>
+                          ) : (
+                            <span
+                              data-testid="concept-check-source-syllabus"
+                              className="text-muted dark:text-slate-400 font-medium"
+                            >
+                              Standard JEE Syllabus — Not in Uploaded Pages
+                            </span>
+                          )}
+                          <span className="text-[10px] text-muted dark:text-slate-400">
+                            {activeQuestion.provenance === 'ai_grounded'
+                              ? 'AI-Generated & Validated'
+                              : 'Verified JEE Checkpoint'}
+                          </span>
+                        </div>
+
+                        {/* Question Statement */}
+                        <div
+                          data-testid="concept-check-statement"
+                          className="text-xs sm:text-sm font-semibold text-ink dark:text-slate-100 leading-relaxed"
+                        >
+                          <MathText text={activeQuestion.statement} />
+                        </div>
+
+                        {/* MCQ Options OR Numerical Input */}
+                        {activeQuestion.questionType === 'mcq' && activeQuestion.options ? (
+                          <div
+                            role="radiogroup"
+                            aria-label={`Scene ${activeScene.sceneNumber} concept check options`}
+                            className="space-y-2"
+                          >
+                            {activeQuestion.options.map((optText, optIdx) => {
+                              const isChosen = selectedMcqOption === optIdx;
+                              const letter = String.fromCharCode(65 + optIdx);
+                              return (
+                                <button
+                                  key={optIdx}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={isChosen}
+                                  data-testid={`concept-option-${optIdx}`}
+                                  onClick={() => {
+                                    setSelectedMcqOption(optIdx);
+                                    setValidationError(null);
+                                  }}
+                                  className={`w-full p-3 rounded-xl border text-left text-xs sm:text-sm flex items-start gap-2.5 transition-all cursor-pointer ${
+                                    isChosen
+                                      ? 'border-brand bg-brand-soft/60 dark:bg-indigo-950/70 text-ink dark:text-slate-100 font-semibold ring-2 ring-brand/30'
+                                      : 'border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/60 text-body dark:text-slate-200 hover:border-brand/40'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-6 h-6 rounded-lg text-xs font-bold flex items-center justify-center shrink-0 ${
+                                      isChosen
+                                        ? 'bg-brand text-white'
+                                        : 'bg-white dark:bg-slate-700 text-ink dark:text-slate-200 border border-slate-200 dark:border-slate-600'
+                                    }`}
+                                  >
+                                    {letter}
+                                  </span>
+                                  <span className="leading-snug">
+                                    <MathText text={optText} variant="inline" />
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <label
+                              htmlFor={`concept-num-input-${activeScene.sceneNumber}`}
+                              className="block text-xs font-semibold text-muted dark:text-slate-300"
+                            >
+                              Enter Numerical Value (decimals or fractions like 1/6 accepted
+                              {activeQuestion.unitHint
+                                ? ` · Unit: ${activeQuestion.unitHint}`
+                                : ''}
+                              ):
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                id={`concept-num-input-${activeScene.sceneNumber}`}
+                                type="text"
+                                data-testid="concept-numerical-input"
+                                value={numericalInputText}
+                                onChange={(e) => {
+                                  setNumericalInputText(e.target.value);
+                                  setValidationError(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleSubmitConceptCheck();
+                                  }
+                                }}
+                                placeholder={
+                                  activeQuestion.unitHint
+                                    ? `e.g., 10 or 10 ${activeQuestion.unitHint}`
+                                    : 'e.g., 0.0594 or 1/6'
+                                }
+                                className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs sm:text-sm font-mono font-semibold text-ink dark:text-slate-100 focus:outline-none focus:border-brand"
+                              />
+                              {activeQuestion.unitHint && (
+                                <span className="px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-ink dark:text-slate-200">
+                                  <MathText text={activeQuestion.unitHint} variant="inline" />
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {validationError && (
+                          <div
+                            data-testid="concept-validation-error"
+                            className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs font-semibold text-rose-700 dark:text-rose-300"
+                          >
+                            {validationError}
+                          </div>
+                        )}
+
+                        {/* Submit & Skip Action Bar */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          <button
+                            type="button"
+                            data-testid="submit-concept-check-btn"
+                            onClick={handleSubmitConceptCheck}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer shadow-2xs"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Submit Answer</span>
+                          </button>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              data-testid="skip-concept-check-btn"
+                              onClick={handleSkipConceptCheck}
+                              className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-muted dark:text-slate-400 hover:text-ink dark:hover:text-slate-200 cursor-pointer"
+                            >
+                              Skip Check
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Feedback & Targeted Misconception Diagnosis Box (shown after attempt) */}
+                        {activeSceneMastery?.lastAttempt && (
+                          <div
+                            data-testid="concept-feedback-banner"
+                            className={`p-4 rounded-2xl border space-y-3 ${
+                              activeSceneMastery.lastAttempt.isCorrect
+                                ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-950 dark:text-emerald-100'
+                                : 'bg-rose-50/90 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-950 dark:text-rose-100'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="font-bold text-xs sm:text-sm flex items-center gap-1.5">
+                                {activeSceneMastery.lastAttempt.isCorrect ? (
+                                  <>
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                    <span>
+                                      Correct! Concept Verified (Attempt #
+                                      {activeSceneMastery.lastAttempt.attemptNumberForScene})
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                                    <span>
+                                      Incorrect (Attempt #
+                                      {activeSceneMastery.lastAttempt.attemptNumberForScene}) —
+                                      Correct Answer:{' '}
+                                      <MathText
+                                        text={activeSceneMastery.lastAttempt.correctAnswerDisplay}
+                                        variant="inline"
+                                      />
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Targeted Misconception Diagnosis */}
+                            {!activeSceneMastery.lastAttempt.isCorrect &&
+                              activeSceneMastery.lastAttempt.detectedMisconception && (
+                                <div
+                                  data-testid="misconception-diagnosis-box"
+                                  className="p-3 rounded-xl bg-white/90 dark:bg-slate-900/90 border border-rose-200 dark:border-rose-800/80 space-y-1.5 text-ink dark:text-slate-100"
+                                >
+                                  <div className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                                    Targeted Misconception Diagnosis
+                                  </div>
+                                  <p className="text-xs font-bold">
+                                    <MathText
+                                      text={
+                                        activeSceneMastery.lastAttempt.detectedMisconception.summary
+                                      }
+                                      variant="inline"
+                                    />
+                                  </p>
+                                  <p className="text-xs text-body dark:text-slate-300 leading-relaxed">
+                                    <strong>Why this happens:</strong>{' '}
+                                    <MathText
+                                      text={
+                                        activeSceneMastery.lastAttempt.detectedMisconception
+                                          .whyIncorrect
+                                      }
+                                      variant="inline"
+                                    />
+                                  </p>
+                                  <p className="text-xs text-emerald-800 dark:text-emerald-300 font-semibold leading-relaxed">
+                                    <strong>Core Concept Fix:</strong>{' '}
+                                    <MathText
+                                      text={
+                                        activeSceneMastery.lastAttempt.detectedMisconception
+                                          .coreConceptFix
+                                      }
+                                      variant="inline"
+                                    />
+                                  </p>
+                                </div>
+                              )}
+
+                            {/* Step-by-Step Explanation */}
+                            <div className="text-xs leading-relaxed opacity-95">
+                              <strong>Explanation:</strong>{' '}
+                              <MathText text={activeQuestion.explanation} variant="inline" />
+                            </div>
+
+                            {mistakeDnaSyncNotice && (
+                              <div
+                                data-testid="mistake-dna-sync-badge"
+                                className="p-2.5 rounded-xl bg-amber-100/90 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 text-[11px] font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5"
+                              >
+                                <Award className="w-3.5 h-3.5 shrink-0" />
+                                <span>{mistakeDnaSyncNotice}</span>
+                              </div>
+                            )}
+
+                            {/* Post-Feedback Next Actions */}
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                data-testid="replay-scene-after-check-btn"
+                                onClick={() => dispatchPlayer({ type: 'REPLAY_SCENE' })}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-ink dark:text-slate-100 cursor-pointer"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Replay Scene</span>
+                              </button>
+
+                              {!activeSceneMastery.lastAttempt.isCorrect && (
+                                <>
+                                  <button
+                                    type="button"
+                                    data-testid="retry-concept-check-btn"
+                                    onClick={() =>
+                                      void handleLoadQuestionVariant('reteach', false)
+                                    }
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer"
+                                  >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    <span>Retry Equivalent Question</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="open-reteaching-btn"
+                                    onClick={() => {
+                                      setIsReteachingOpen(true);
+                                      dispatchPlayer({
+                                        type: 'START_RETEACHING',
+                                        totalSteps: activeSceneSteps.length,
+                                      });
+                                    }}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold cursor-pointer"
+                                  >
+                                    <Lightbulb className="w-3.5 h-3.5" />
+                                    <span>Visual Reteaching</span>
+                                  </button>
+                                </>
+                              )}
+
+                              {activeSceneMastery.lastAttempt.isCorrect && (
+                                <>
+                                  {playerState.activeSceneIndex <
+                                    videoResult.scenes.length - 1 && (
+                                    <button
+                                      type="button"
+                                      data-testid="continue-after-check-btn"
+                                      onClick={() =>
+                                        dispatchPlayer({
+                                          type: 'NEXT_SCENE',
+                                          totalScenes: videoResult.scenes.length,
+                                        })
+                                      }
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold cursor-pointer"
+                                    >
+                                      <span>Continue to Next Scene</span>
+                                      <ArrowRight className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    data-testid="try-challenge-question-btn"
+                                    onClick={() =>
+                                      void handleLoadQuestionVariant('challenge', false)
+                                    }
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-brand dark:text-indigo-300 cursor-pointer"
+                                  >
+                                    <Target className="w-3.5 h-3.5" />
+                                    <span>Try Challenge Q</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* Phase 5.3 — Smart Next-Action Recommendation & Evidence-Based Lesson Mastery Bar */}
+                {lessonMasterySummary && (
+                  <div
+                    data-testid="lesson-mastery-recommendation-card"
+                    className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-brand-soft dark:bg-indigo-950/80 text-brand dark:text-indigo-300">
+                          Lesson Checkpoint Evidence &amp; Next Best Action
+                        </span>
+                        <span
+                          data-testid="lesson-evidence-score"
+                          className="text-xs font-bold text-ink dark:text-slate-100"
+                        >
+                          Checkpoints: {lessonMasterySummary.verifiedScenes} of{' '}
+                          {lessonMasterySummary.totalScenes} ({lessonMasterySummary.checkpointCompletionPct}%) · Observed Score:{' '}
+                          {lessonMasterySummary.evidenceScorePct}%
+                        </span>
+                        <span
+                          data-testid="lesson-readiness-label"
+                          className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-muted dark:text-slate-300"
+                        >
+                          Status: {lessonMasterySummary.estimatedConceptReadinessLabel}
+                        </span>
+                        {lessonMasterySummary.skippedScenes.length > 0 && (
+                          <span className="text-[11px] text-muted dark:text-slate-400">
+                            ({lessonMasterySummary.skippedScenes.length} skipped — 0% evidence)
+                          </span>
+                        )}
+                      </div>
+                      <h4
+                        data-testid="lesson-mastery-headline"
+                        className="text-sm font-bold text-ink dark:text-slate-100"
+                      >
+                        {lessonMasterySummary.headline}
+                      </h4>
+                      <p className="text-xs text-muted dark:text-slate-400 leading-relaxed">
+                        {lessonMasterySummary.rationale}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        data-testid="recommended-primary-action-btn"
+                        onClick={() =>
+                          handleExecuteRecommendedAction(lessonMasterySummary.recommendedAction)
+                        }
+                        className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer shadow-2xs"
+                      >
+                        <span>{lessonMasterySummary.recommendedAction.label}</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      {lessonMasterySummary.secondaryAction && (
+                        <button
+                          type="button"
+                          data-testid="recommended-secondary-action-btn"
+                          onClick={() =>
+                            lessonMasterySummary.secondaryAction &&
+                            handleExecuteRecommendedAction(lessonMasterySummary.secondaryAction)
+                          }
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-ink dark:text-slate-100 cursor-pointer"
+                        >
+                          <span>{lessonMasterySummary.secondaryAction.label}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div
@@ -1578,8 +2541,18 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                             type="button"
                             data-testid="open-saved-lesson-btn"
                             onClick={() => {
-                              setVideoResult(asset.payload as VideoLessonResponse);
-                              setVideoTopicInput(asset.payload?.topic || asset.topic);
+                              const payload = asset.payload as VideoLessonResponse & {
+                                masteryByScene?: Record<number, SceneConceptMasteryState>;
+                              };
+                              const targetTopic = payload?.topic || asset.topic;
+                              setVideoResult(payload);
+                              setVideoTopicInput(targetTopic);
+                              initializeOrRestoreLessonMastery(
+                                asset.documentId || activeDocument.id,
+                                targetTopic,
+                                payload.scenes,
+                                payload.masteryByScene
+                              );
                               setPlayerState(createInitialScenePlayerState());
                               setSubTab('videolesson');
                             }}

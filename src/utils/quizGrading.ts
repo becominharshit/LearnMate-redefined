@@ -16,8 +16,8 @@ import type {
   FocusSessionRecord,
 } from '../types/study';
 
-export const MAX_PDF_PAGES = 20;
-export const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+export const MAX_PDF_PAGES = 60;
+export const MAX_PDF_SIZE_BYTES = 40 * 1024 * 1024; // 40 MB
 export const MIN_TEXT_LENGTH = 40;
 
 export interface MaterialValidationResult {

@@ -54,7 +54,7 @@
     },
     "DocumentStudyState": {
       "title": "DocumentStudyState",
-      "description": "Per-document tutor chat history, mistake insights, revision plan, cached quiz questions, and quick revise bundle.",
+      "description": "Per-document tutor chat history, mistake insights, revision plan, cached quiz questions, quick revise bundle, concept check attempts, scene mastery state, and saved creative studio assets.",
       "type": "object",
       "properties": {
         "documentId": { "type": "string" },
@@ -64,9 +64,28 @@
         "revisionPlanJson": { "type": "string" },
         "cachedQuizJson": { "type": "string" },
         "quickReviseJson": { "type": "string" },
+        "conceptAttemptsJson": { "type": "string" },
+        "conceptMasteryJson": { "type": "string" },
+        "creativeAssetsJson": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["documentId", "uid", "updatedAt"]
+    },
+    "AiReport": {
+      "title": "AiReport",
+      "description": "Student report about an AI tutor answer, practice question, diagram, animated explanation, or concept check.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "kind": { "type": "string", "enum": ["tutor_answer", "practice_question", "diagram", "animated_explanation", "concept_check"] },
+        "reason": { "type": "string", "enum": ["wrong", "unclear", "inappropriate", "other"] },
+        "note": { "type": "string" },
+        "excerpt": { "type": "string" },
+        "documentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "kind", "reason", "excerpt", "createdAt"]
     }
   },
   "firestore": {
@@ -84,7 +103,11 @@
     },
     "/users/{userId}/studyState/{docId}": {
       "schema": { "$ref": "#/entities/DocumentStudyState" },
-      "description": "User-scoped tutor conversations, Mistake DNA, and revision plans."
+      "description": "User-scoped tutor conversations, Mistake DNA, revision plans, concept-check mastery, and creative studio assets."
+    },
+    "/users/{userId}/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/AiReport" },
+      "description": "User-scoped AI content reports."
     }
   }
 }

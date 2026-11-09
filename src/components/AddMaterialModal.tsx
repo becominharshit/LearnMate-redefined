@@ -25,7 +25,7 @@ interface AddMaterialModalProps {
   onClose: () => void;
   onUploadPdf: (file: File) => Promise<void>;
   onUploadPhotoNotes: (imageDataUrl: string, title: string) => Promise<void>;
-  onSubmitYouTube: (url: string, transcript: string, title?: string) => Promise<void>;
+  onSubmitYouTube: (url: string, transcript?: string, title?: string) => Promise<void>;
   onSubmitTextNotes: (title: string, rawText: string) => Promise<void>;
 }
 
@@ -161,15 +161,9 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
       setLocalError(parsedYouTube.error || 'Please enter a valid YouTube link.');
       return;
     }
-    if (youtubeTranscript.trim().length < 25) {
-      setLocalError(
-        'Please paste the video transcript (Step 3 below) so Claude can build timestamped notes.'
-      );
-      return;
-    }
     await onSubmitYouTube(
       youtubeUrl.trim(),
-      youtubeTranscript.trim(),
+      youtubeTranscript.trim() || undefined,
       youtubeTitle.trim() || undefined
     );
   };
@@ -320,7 +314,7 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
                     : 'Drop your chapter PDF here, or tap to browse'}
                 </p>
                 <p className="mt-1 text-xs text-muted">
-                  Up to 20 pages per PDF. Your original file stays on your device.
+                  Up to 60 pages per PDF. Stored locally in IndexedDB with smart page-aware retrieval.
                 </p>
               </div>
             </div>
@@ -419,49 +413,50 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
             </form>
           )}
 
-          {/* 3. YOUTUBE + TRANSCRIPT TAB */}
+          {/* 3. YOUTUBE URL-FIRST LECTURE PROCESSOR TAB (Up to 12 Hours / 720 Mins) */}
           {mode === 'youtube' && (
-            <form onSubmit={handleYouTubeSubmit} className="space-y-4">
-              {/* Three illustrated steps */}
-              <div className="rounded-2xl border border-line bg-canvas p-3.5 sm:p-4">
-                <p className="text-xs font-bold text-ink mb-2.5">
-                  How to bring any YouTube lecture in 3 quick steps (free, no AI video download):
+            <form onSubmit={handleYouTubeSubmit} className="space-y-4" data-testid="youtube-url-first-form">
+              <div className="rounded-2xl border border-line bg-canvas p-3.5 sm:p-4 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-ink">
+                    URL-First Lecture Analyzer • Supports up to 12-hour (720 min) JEE marathons
+                  </p>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-brand-soft text-brand border border-brand-200">
+                    No transcript pasting required
+                  </span>
+                </div>
+                <p className="text-xs text-muted leading-relaxed">
+                  Paste any YouTube lecture URL below. LearnMate automatically discovers available captions/chapters, chunks multi-hour lectures with timestamp preservation, and builds chapter-wise study notes, formulas, flashcards, and quizzes.
                 </p>
-                <ol className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-                  <li className="rounded-xl bg-white dark:bg-[#121A2E] border border-line p-2.5 flex items-start gap-2">
-                    <span className="w-5 h-5 rounded-full bg-brand-soft text-brand font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
-                      1
-                    </span>
-                    <div>
-                      <span className="font-semibold text-ink block">Open description</span>
-                      <span className="text-muted text-[11px]">
-                        Under the YouTube video, tap <strong>…more</strong> in the description box.
-                      </span>
-                    </div>
-                  </li>
-                  <li className="rounded-xl bg-white dark:bg-[#121A2E] border border-line p-2.5 flex items-start gap-2">
-                    <span className="w-5 h-5 rounded-full bg-brand-soft text-brand font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
-                      2
-                    </span>
-                    <div>
-                      <span className="font-semibold text-ink block">Show transcript</span>
-                      <span className="text-muted text-[11px]">
-                        Scroll down and click the <strong>Show transcript</strong> button.
-                      </span>
-                    </div>
-                  </li>
-                  <li className="rounded-xl bg-white dark:bg-[#121A2E] border border-line p-2.5 flex items-start gap-2">
-                    <span className="w-5 h-5 rounded-full bg-brand-soft text-brand font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
-                      3
-                    </span>
-                    <div>
-                      <span className="font-semibold text-ink block">Copy &amp; paste</span>
-                      <span className="text-muted text-[11px]">
-                        Select the transcript lines, copy them, and paste them below.
-                      </span>
-                    </div>
-                  </li>
-                </ol>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] font-semibold text-muted">Try verified marathon:</span>
+                  <button
+                    type="button"
+                    data-testid="preset-youtube-12hr-physics"
+                    onClick={() => {
+                      setYoutubeUrl('https://www.youtube.com/watch?v=jee12hrphys');
+                      setYoutubeTitle('JEE Main Complete Physics 12-Hour Revision Marathon');
+                      setLocalError(null);
+                      onClearError();
+                    }}
+                    className="px-2.5 py-1 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:border-brand text-[11px] font-semibold text-ink cursor-pointer transition-colors"
+                  >
+                    12-Hr Physics Marathon (720m)
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="preset-youtube-6hr-chem"
+                    onClick={() => {
+                      setYoutubeUrl('https://www.youtube.com/watch?v=jee6hrochem');
+                      setYoutubeTitle('Complete Organic Chemistry 6.5-Hour Marathon');
+                      setLocalError(null);
+                      onClearError();
+                    }}
+                    className="px-2.5 py-1 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:border-brand text-[11px] font-semibold text-ink cursor-pointer transition-colors"
+                  >
+                    6.5-Hr Organic Chem Marathon (390m)
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -487,14 +482,15 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
                     htmlFor="youtube-title-input"
                     className="block text-xs font-semibold text-ink mb-1"
                   >
-                    Lecture title (optional)
+                    Lecture title (optional — auto-detected)
                   </label>
                   <input
                     id="youtube-title-input"
                     type="text"
                     value={youtubeTitle}
                     onChange={(e) => setYoutubeTitle(e.target.value)}
-                    placeholder="e.g. Electrostatics One-Shot"
+                    placeholder="Auto-detected from YouTube"
+                    data-testid="youtube-title-input"
                     className="w-full h-10 rounded-xl border border-line bg-canvas px-3.5 text-sm text-ink placeholder:text-muted focus:outline-none focus:border-brand"
                   />
                 </div>
@@ -513,23 +509,40 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
                 </div>
               )}
 
-              <div>
-                <label
-                  htmlFor="youtube-transcript-input"
-                  className="block text-xs font-semibold text-ink mb-1"
+              {/* Optional manual transcript override collapsed by default */}
+              <details className="rounded-xl border border-line bg-canvas px-3.5 py-2.5 text-xs">
+                <summary className="font-semibold text-muted hover:text-ink cursor-pointer select-none">
+                  Advanced / Optional: Provide custom lecture notes or transcript override
+                </summary>
+                <div className="mt-2.5">
+                  <textarea
+                    id="youtube-transcript-input"
+                    rows={4}
+                    value={youtubeTranscript}
+                    onChange={(e) => setYoutubeTranscript(e.target.value)}
+                    placeholder="Optional: only needed if a restricted video has disabled public captions and you want to supply your own lecture notes..."
+                    data-testid="youtube-transcript-input"
+                    className="w-full rounded-xl border border-line bg-white dark:bg-[#121A2E] p-3 text-xs text-ink placeholder:text-muted focus:outline-none focus:border-brand font-mono leading-relaxed"
+                  />
+                </div>
+              </details>
+
+              {isProcessing && (
+                <div
+                  data-testid="youtube-processing-stages"
+                  className="rounded-xl border border-brand-200 bg-brand-soft/40 p-3 text-xs text-ink flex items-center gap-2.5"
                 >
-                  Paste YouTube transcript (with or without timestamps)
-                </label>
-                <textarea
-                  id="youtube-transcript-input"
-                  rows={5}
-                  value={youtubeTranscript}
-                  onChange={(e) => setYoutubeTranscript(e.target.value)}
-                  placeholder={`0:00 Welcome to Electrostatics for JEE Main\n02:15 Coulomb's Law in vector form: F = k q1 q2 / r^2...\n05:40 Superposition principle and electric field lines...`}
-                  data-testid="youtube-transcript-input"
-                  className="w-full rounded-xl border border-line bg-canvas p-3.5 text-xs sm:text-sm text-ink placeholder:text-muted focus:outline-none focus:border-brand font-mono leading-relaxed"
-                />
-              </div>
+                  <Loader2 className="w-4 h-4 text-brand animate-spin shrink-0" />
+                  <div>
+                    <p className="font-bold text-ink">
+                      Analyzing YouTube lecture &amp; extracting timestamped chapters…
+                    </p>
+                    <p className="text-[11px] text-muted">
+                      Validating URL → Fetching captions &amp; metadata → Hierarchical chunking (up to 12 hours) → Extracting JEE formulas &amp; study pages
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
@@ -549,12 +562,12 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
                   {isProcessing ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Building timestamped notes…
+                      Analyzing lecture…
                     </>
                   ) : (
                     <>
                       <CheckCircle2 className="w-4 h-4" />
-                      Create lecture notes
+                      Analyze Lecture &amp; Generate Study Material
                     </>
                   )}
                 </button>

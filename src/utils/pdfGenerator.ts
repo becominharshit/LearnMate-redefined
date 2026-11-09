@@ -8,6 +8,7 @@ import type {
   StickyNoteItem,
   StudyDocument,
 } from '../types/study';
+import type { HandwrittenNoteDocument } from './phase6Engine';
 
 /**
  * Normalizes mathematical and Greek Unicode symbols into clean WinAnsi-compatible
@@ -16,6 +17,96 @@ import type {
  */
 export function normalizePdfText(input: string): string {
   if (!input) return '';
+
+  // Strip raw LaTeX math delimiters and translate common LaTeX commands into readable ASCII math
+  let out = input
+    .replace(/\$\$([\s\S]*?)\$\$/g, '$1')
+    .replace(/\$([^$\n]+)\$/g, '$1')
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$1')
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$1')
+    .replace(
+      /\\begin\{(pmatrix|bmatrix|vmatrix|matrix)\}([\s\S]*?)\\end\{\1\}/g,
+      (_m, _env: string, body: string) => {
+        const rows = body
+          .trim()
+          .split(/\\\\/)
+          .map((r) =>
+            r
+              .trim()
+              .split(/\s*&\s*/)
+              .join(', ')
+          )
+          .filter(Boolean);
+        return `[ ${rows.join(' ; ')} ]`;
+      }
+    )
+    .replace(/\\ce\{([^{}]*)\}/g, '$1')
+    .replace(/\\(?:text|mathrm|mathbf|mathit|mathcal)\{([^{}]*)\}/g, '$1')
+    .replace(/\\vec\{([^{}]*)\}/g, '$1')
+    .replace(/\\hat\{([^{}]*)\}/g, '$1_hat')
+    .replace(/\\overline\{([^{}]*)\}/g, '$1_bar')
+    .replace(/\\(?:d|t)?frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)')
+    .replace(/\\(?:d|t)?frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)')
+    .replace(/\\sqrt\[([^{}\]]*)\]\{([^{}]*)\}/g, 'root($1, $2)')
+    .replace(/\\sqrt\{([^{}]*)\}/g, 'sqrt($1)')
+    .replace(/\\times\b/g, 'x')
+    .replace(/\\cdot\b/g, '*')
+    .replace(/\\div\b/g, '/')
+    .replace(/\\pm\b/g, '+/-')
+    .replace(/\\mp\b/g, '-/+')
+    .replace(/\\leq?\b/g, '<=')
+    .replace(/\\geq?\b/g, '>=')
+    .replace(/\\neq?\b/g, '!=')
+    .replace(/\\approx\b/g, '~=')
+    .replace(/\\equiv\b/g, '===')
+    .replace(/\\propto\b/g, 'prop_to')
+    .replace(/\\rightleftharpoons\b|\\leftrightarrow\b|\\Leftrightarrow\b/g, '<=>')
+    .replace(/\\rightarrow\b|\\to\b/g, '->')
+    .replace(/\\leftarrow\b/g, '<-')
+    .replace(/\\Rightarrow\b/g, '=>')
+    .replace(/\\Leftarrow\b/g, '<=')
+    .replace(/\\infty\b/g, 'infinity')
+    .replace(/\\partial\b/g, 'd')
+    .replace(/\\nabla\b/g, 'grad')
+    .replace(/\\perp\b/g, '_|_')
+    .replace(/\\parallel\b/g, '||')
+    .replace(/\\angle\b/g, 'angle ')
+    .replace(/\\\^\{\\circ\}|\\circ\b/g, ' deg')
+    .replace(/\\alpha\b/g, 'alpha')
+    .replace(/\\beta\b/g, 'beta')
+    .replace(/\\gamma\b/g, 'gamma')
+    .replace(/\\delta\b/g, 'delta')
+    .replace(/\\Delta\b/g, 'Delta')
+    .replace(/\\epsilon\b|\\varepsilon\b/g, 'epsilon')
+    .replace(/\\theta\b|\\vartheta\b/g, 'theta')
+    .replace(/\\lambda\b/g, 'lambda')
+    .replace(/\\Lambda\b/g, 'Lambda')
+    .replace(/\\mu\b/g, 'mu')
+    .replace(/\\nu\b/g, 'nu')
+    .replace(/\\pi\b/g, 'pi')
+    .replace(/\\Pi\b/g, 'Pi')
+    .replace(/\\rho\b/g, 'rho')
+    .replace(/\\sigma\b/g, 'sigma')
+    .replace(/\\Sigma\b/g, 'Sigma')
+    .replace(/\\tau\b/g, 'tau')
+    .replace(/\\phi\b|\\varphi\b/g, 'phi')
+    .replace(/\\Phi\b/g, 'Phi')
+    .replace(/\\omega\b/g, 'omega')
+    .replace(/\\Omega\b/g, 'Omega')
+    .replace(/\\oint\b/g, 'ContourIntegral')
+    .replace(/\\int\b/g, 'Integral')
+    .replace(/\\sum\b/g, 'Sum')
+    .replace(/\\prod\b/g, 'Prod')
+    .replace(/\\lim\b/g, 'lim')
+    .replace(/\\sin\b/g, 'sin')
+    .replace(/\\cos\b/g, 'cos')
+    .replace(/\\tan\b/g, 'tan')
+    .replace(/\\ln\b/g, 'ln')
+    .replace(/\\log\b/g, 'log')
+    .replace(/\\\{/g, '{')
+    .replace(/\\\}/g, '}')
+    .replace(/\{([^{}]+)\}/g, '($1)');
+
   const map: Record<string, string> = {
     'Ω': 'Omega',
     'ω': 'omega',
@@ -102,7 +193,6 @@ export function normalizePdfText(input: string): string {
     '…': '...',
   };
 
-  let out = input;
   for (const [k, v] of Object.entries(map)) {
     out = out.split(k).join(v);
   }
@@ -831,6 +921,400 @@ export async function generateAnnotatedDocumentPdfBytes(
         });
       }
     }
+  }
+
+  return pdfDoc.save();
+}
+
+/**
+ * Generates an AI-generated handwritten-style study notebook PDF (.pdf binary)
+ * with ruled/grid/cornell paper background lines, margin callouts, boxed formulas,
+ * and an explicit "AI-GENERATED HANDWRITTEN-STYLE STUDY NOTES" disclosure badge.
+ */
+export async function generateHandwrittenNotesPdfBytes(
+  noteDoc: HandwrittenNoteDocument
+): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.setTitle(`${noteDoc.title} — AI-Generated Handwritten-Style Study Notes`);
+  pdfDoc.setAuthor('LearnMate JEE Study Companion');
+  pdfDoc.setSubject(`AI-Generated Handwritten-Style Notes (${noteDoc.subject})`);
+
+  const fontInk = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+  const fontHeading = await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic);
+  const fontFormula = await pdfDoc.embedFont(StandardFonts.CourierBold);
+  const fontBadge = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const PAGE_WIDTH = 595.28;
+  const PAGE_HEIGHT = 841.89;
+  const MARGIN_LEFT = noteDoc.notebookStyle === 'cornell' ? 140 : 68;
+  const MARGIN_RIGHT = 42;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
+
+  const inkRgb: [number, number, number] =
+    noteDoc.inkColor === 'emerald_notes'
+      ? [0.06, 0.35, 0.22]
+      : noteDoc.inkColor === 'navy_pen'
+        ? [0.08, 0.16, 0.36]
+        : [0.16, 0.14, 0.52];
+
+  const drawNotebookSheetBackground = (page: PDFPage, pageNum: number, totalPages: number) => {
+    // Warm cream notebook paper fill
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: PAGE_WIDTH,
+      height: PAGE_HEIGHT,
+      color: rgb(0.995, 0.99, 0.968),
+    });
+
+    // Horizontal ruled or grid lines
+    if (noteDoc.notebookStyle === 'ruled' || noteDoc.notebookStyle === 'cornell') {
+      for (let y = 56; y < PAGE_HEIGHT - 84; y += 20) {
+        page.drawLine({
+          start: { x: 32, y },
+          end: { x: PAGE_WIDTH - 32, y },
+          thickness: 0.45,
+          color: rgb(0.84, 0.89, 0.95),
+        });
+      }
+    } else if (noteDoc.notebookStyle === 'grid') {
+      for (let y = 56; y < PAGE_HEIGHT - 84; y += 18) {
+        page.drawLine({
+          start: { x: 32, y },
+          end: { x: PAGE_WIDTH - 32, y },
+          thickness: 0.35,
+          color: rgb(0.87, 0.91, 0.95),
+        });
+      }
+      for (let x = 32; x < PAGE_WIDTH - 32; x += 18) {
+        page.drawLine({
+          start: { x, y: 56 },
+          end: { x, y: PAGE_HEIGHT - 84 },
+          thickness: 0.35,
+          color: rgb(0.87, 0.91, 0.95),
+        });
+      }
+    }
+
+    // Left vertical red/coral margin line
+    page.drawLine({
+      start: { x: MARGIN_LEFT - 12, y: 44 },
+      end: { x: MARGIN_LEFT - 12, y: PAGE_HEIGHT - 44 },
+      thickness: 1.1,
+      color: rgb(0.91, 0.42, 0.45),
+    });
+
+    // Top Header Disclosure Banner
+    page.drawText('AI-GENERATED HANDWRITTEN-STYLE STUDY NOTES • LEARNMATE JEE', {
+      x: MARGIN_LEFT,
+      y: PAGE_HEIGHT - 34,
+      size: 8,
+      font: fontBadge,
+      color: rgb(0.32, 0.36, 0.48),
+    });
+
+    page.drawText(normalizePdfText(noteDoc.title).slice(0, 74), {
+      x: MARGIN_LEFT,
+      y: PAGE_HEIGHT - 52,
+      size: 13.5,
+      font: fontHeading,
+      color: rgb(inkRgb[0], inkRgb[1], inkRgb[2]),
+    });
+
+    // Underline main title
+    page.drawLine({
+      start: { x: MARGIN_LEFT, y: PAGE_HEIGHT - 56 },
+      end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: PAGE_HEIGHT - 56 },
+      thickness: 1.2,
+      color: rgb(inkRgb[0], inkRgb[1], inkRgb[2]),
+    });
+
+    // Footer
+    page.drawText(
+      normalizePdfText(
+        `AI-Generated Handwritten-Style Notes • Source: ${noteDoc.documentTitle} • Page ${pageNum} of ${totalPages}`
+      ),
+      {
+        x: MARGIN_LEFT,
+        y: 26,
+        size: 8,
+        font: fontBadge,
+        color: rgb(0.42, 0.46, 0.54),
+      }
+    );
+  };
+
+  const pdfPages: PDFPage[] = [];
+  for (let pIdx = 0; pIdx < noteDoc.pages.length; pIdx++) {
+    const hwPage = noteDoc.pages[pIdx];
+    let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    pdfPages.push(page);
+    let cursorY = PAGE_HEIGHT - 82;
+
+    const ensureSpace = (needed: number) => {
+      if (cursorY - needed < 62) {
+        page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+        pdfPages.push(page);
+        cursorY = PAGE_HEIGHT - 82;
+      }
+    };
+
+    for (const sec of hwPage.sections) {
+      ensureSpace(64);
+      // Section Heading + Source Badge
+      const secHeader = normalizePdfText(`${sec.heading}  [${sec.sourceLabel}]`);
+      page.drawText(secHeader.slice(0, 82), {
+        x: MARGIN_LEFT,
+        y: cursorY,
+        size: 12,
+        font: fontHeading,
+        color: rgb(inkRgb[0], inkRgb[1], inkRgb[2]),
+      });
+      page.drawLine({
+        start: { x: MARGIN_LEFT, y: cursorY - 3 },
+        end: { x: MARGIN_LEFT + Math.min(CONTENT_WIDTH, secHeader.length * 5.8), y: cursorY - 3 },
+        thickness: 0.9,
+        color: rgb(0.88, 0.58, 0.08),
+      });
+      cursorY -= 20;
+
+      // Cornell Margin Callout (if cornell style)
+      if (noteDoc.notebookStyle === 'cornell' && sec.marginCallout) {
+        const cueLines = wrapPdfTextLines(sec.marginCallout, fontHeading, 8.5, 86);
+        cueLines.slice(0, 4).forEach((cl, cIdx) => {
+          page.drawText(cl, {
+            x: 36,
+            y: cursorY + 12 - cIdx * 11,
+            size: 8.5,
+            font: fontHeading,
+            color: rgb(0.68, 0.18, 0.24),
+          });
+        });
+      }
+
+      // Highlighted Key Terms Pill Strip
+      if (sec.highlightedTerms.length > 0) {
+        const termsLine = normalizePdfText(`Key Terms: ${sec.highlightedTerms.join('  •  ')}`);
+        ensureSpace(22);
+        page.drawRectangle({
+          x: MARGIN_LEFT,
+          y: cursorY - 4,
+          width: Math.min(CONTENT_WIDTH, termsLine.length * 5.1 + 12),
+          height: 15,
+          color: rgb(0.99, 0.94, 0.62),
+          opacity: 0.65,
+        });
+        page.drawText(termsLine.slice(0, 86), {
+          x: MARGIN_LEFT + 5,
+          y: cursorY,
+          size: 9.5,
+          font: fontHeading,
+          color: rgb(0.24, 0.18, 0.04),
+        });
+        cursorY -= 20;
+      }
+
+      // Bullet Points
+      for (const bullet of sec.bulletPoints) {
+        const lines = wrapPdfTextLines(`• ${bullet}`, fontInk, 10.5, CONTENT_WIDTH - 8);
+        for (const line of lines) {
+          ensureSpace(18);
+          page.drawText(line, {
+            x: MARGIN_LEFT + 4,
+            y: cursorY,
+            size: 10.5,
+            font: fontInk,
+            color: rgb(inkRgb[0], inkRgb[1], inkRgb[2]),
+          });
+          cursorY -= 17;
+        }
+      }
+
+      // Boxed Formulas
+      if (sec.formulas.length > 0) {
+        for (const f of sec.formulas) {
+          const fText = normalizePdfText(`${f.label}:  ${f.latex}`);
+          const fLines = wrapPdfTextLines(fText, fontFormula, 9.5, CONTENT_WIDTH - 24);
+          const boxH = fLines.length * 14 + 12;
+          ensureSpace(boxH + 8);
+          page.drawRectangle({
+            x: MARGIN_LEFT + 6,
+            y: cursorY - boxH + 10,
+            width: CONTENT_WIDTH - 12,
+            height: boxH,
+            color: rgb(0.95, 0.97, 1.0),
+            borderColor: rgb(0.25, 0.38, 0.82),
+            borderWidth: 1,
+          });
+          fLines.forEach((fl, flIdx) => {
+            page.drawText(fl, {
+              x: MARGIN_LEFT + 14,
+              y: cursorY - 2 - flIdx * 14,
+              size: 9.5,
+              font: fontFormula,
+              color: rgb(0.08, 0.16, 0.42),
+            });
+          });
+          cursorY -= boxH + 8;
+        }
+      }
+
+      // Exam Trap Warning
+      if (sec.examTrapWarning) {
+        const trapLines = wrapPdfTextLines(
+          `[JEE Exam Caution] ${sec.examTrapWarning}`,
+          fontHeading,
+          9.5,
+          CONTENT_WIDTH - 16
+        );
+        for (const tl of trapLines) {
+          ensureSpace(16);
+          page.drawText(tl, {
+            x: MARGIN_LEFT + 6,
+            y: cursorY,
+            size: 9.5,
+            font: fontHeading,
+            color: rgb(0.72, 0.14, 0.18),
+          });
+          cursorY -= 15;
+        }
+      }
+
+      cursorY -= 12;
+    }
+  }
+
+  // Draw backgrounds/headers/footers on all pages (since we draw text over background, let's stamp header/footer lines)
+  const allPages = pdfDoc.getPages();
+  allPages.forEach((p, idx) => {
+    p.drawText('AI-GENERATED HANDWRITTEN-STYLE STUDY NOTES • LEARNMATE JEE', {
+      x: MARGIN_LEFT,
+      y: PAGE_HEIGHT - 34,
+      size: 8,
+      font: fontBadge,
+      color: rgb(0.32, 0.36, 0.48),
+    });
+    p.drawText(normalizePdfText(noteDoc.title).slice(0, 74), {
+      x: MARGIN_LEFT,
+      y: PAGE_HEIGHT - 52,
+      size: 13.5,
+      font: fontHeading,
+      color: rgb(inkRgb[0], inkRgb[1], inkRgb[2]),
+    });
+    p.drawLine({
+      start: { x: MARGIN_LEFT - 12, y: 44 },
+      end: { x: MARGIN_LEFT - 12, y: PAGE_HEIGHT - 44 },
+      thickness: 1,
+      color: rgb(0.91, 0.42, 0.45),
+    });
+    p.drawText(
+      normalizePdfText(
+        `AI-Generated Handwritten-Style Notes • Source: ${noteDoc.documentTitle} • Page ${idx + 1} of ${allPages.length}`
+      ),
+      {
+        x: MARGIN_LEFT,
+        y: 26,
+        size: 8,
+        font: fontBadge,
+        color: rgb(0.42, 0.46, 0.54),
+      }
+    );
+  });
+  void drawNotebookSheetBackground;
+
+  return pdfDoc.save();
+}
+
+/**
+ * Generates an accessible PDF summary report of a student's exported academic data
+ * (Section 10 Student Data Control).
+ */
+export async function generateStudentDataExportPdfBytes(archive: {
+  exportedAt: string;
+  studentProfile: {
+    fullName: string;
+    schoolClass?: string;
+    targetExam?: string;
+    preferredLanguage?: string;
+    weakAreas?: string[];
+  };
+  documents: Array<{ id: string; title: string; sourceType: string; pageCount: number }>;
+  quizAttempts: Array<{ documentTitle: string; mode: string; score: number; totalQuestions: number; percentage: number; completedAt: string }>;
+  handwrittenNotesCount?: number;
+  creativeAssetsCount?: number;
+}): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.setTitle('LearnMate JEE — Student Academic Data Export Summary');
+  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  let y = 785;
+
+  page.drawText('LEARNMATE JEE — STUDENT DATA EXPORT SUMMARY', {
+    x: 48,
+    y,
+    size: 14,
+    font: fontBold,
+    color: rgb(0.1, 0.25, 0.65),
+  });
+  y -= 22;
+
+  page.drawText(normalizePdfText(`Exported At: ${archive.exportedAt}`), {
+    x: 48,
+    y,
+    size: 9.5,
+    font: fontRegular,
+    color: rgb(0.35, 0.4, 0.48),
+  });
+  y -= 28;
+
+  const profileLines = [
+    `Student Name: ${archive.studentProfile.fullName || 'Not set'}`,
+    `Class / Stage: ${archive.studentProfile.schoolClass || 'Not set'}`,
+    `Target Exam: ${archive.studentProfile.targetExam || 'jee_main'}`,
+    `Preferred Language: ${archive.studentProfile.preferredLanguage || 'English'}`,
+    `Tracked Weak Areas: ${(archive.studentProfile.weakAreas || []).join(', ') || 'None recorded'}`,
+    `Uploaded Study Materials: ${archive.documents.length}`,
+    `Completed Practice & Mock Attempts: ${archive.quizAttempts.length}`,
+    `Saved Handwritten Note Packs: ${archive.handwrittenNotesCount ?? 0}`,
+    `Saved Creative Visual Assets: ${archive.creativeAssetsCount ?? 0}`,
+  ];
+
+  for (const line of profileLines) {
+    page.drawText(normalizePdfText(line).slice(0, 95), {
+      x: 48,
+      y,
+      size: 10.5,
+      font: fontRegular,
+      color: rgb(0.12, 0.16, 0.24),
+    });
+    y -= 18;
+  }
+
+  y -= 14;
+  page.drawText('STUDY MATERIALS IN ARCHIVE:', {
+    x: 48,
+    y,
+    size: 11,
+    font: fontBold,
+    color: rgb(0.1, 0.25, 0.65),
+  });
+  y -= 18;
+
+  for (const docItem of archive.documents.slice(0, 15)) {
+    if (y < 70) break;
+    page.drawText(
+      normalizePdfText(`• ${docItem.title} (${docItem.sourceType}, ${docItem.pageCount} pages)`).slice(0, 92),
+      {
+        x: 56,
+        y,
+        size: 9.5,
+        font: fontRegular,
+        color: rgb(0.2, 0.24, 0.32),
+      }
+    );
+    y -= 15;
   }
 
   return pdfDoc.save();

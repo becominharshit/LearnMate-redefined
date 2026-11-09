@@ -1,0 +1,1306 @@
+# LEARNMATE JEE — PHASE 6: COMPLETE PLATFORM UPGRADE, INTELLIGENT LEARNING EXPERIENCE & PRODUCTION READINESS
+
+## ROLE AND MISSION
+
+Act as the Principal Full-Stack Engineer, AI Systems Architect, Educational Product Designer, Firebase Engineer, Multimedia Processing Engineer, and Senior QA Lead for **LearnMate JEE**.
+
+You are continuing development of the existing LearnMate JEE application.
+
+Original local project path:
+
+`C:\Users\LOQ\LearnMate`
+
+**Your objective is to implement the ENTIRE Phase 6 in one comprehensive development execution.**
+
+Do not divide Phase 6 into separate deliverable phases or ask me to provide additional prompts for Phase 6.1, Phase 6.2, and Phase 6.3.
+
+You may organize internal engineering work into tasks, but the final goal is a fully integrated Phase 6 implementation with one final completion report.
+
+Do not stop after implementing only some features and call the phase complete.
+
+If external credentials, account permissions, or infrastructure prevent particular operations, complete everything feasible and explicitly identify what remains blocked.
+
+Do not claim functionality works unless supported by actual verification.
+
+---
+
+# PRODUCT CONTEXT
+
+LearnMate JEE is an AI-powered personalized mentor for Indian Class 11, Class 12, and dropper students preparing for JEE Main 2027.
+
+Its core capabilities include:
+
+- Uploaded coaching notes and PDF-based learning.
+- Source-grounded AI Study Tutor.
+- Personalized explanations.
+- Mistake DNA and adaptive revision.
+- Adaptive practice.
+- JEE mock examinations.
+- One-page revision sheets.
+- Creative Studio.
+- Educational diagrams.
+- Animated explanations.
+- Concept-check questions.
+- Misconception detection.
+- Targeted visual reteaching.
+- Voice Tutor.
+- Student academic progress and Firebase synchronization.
+
+The platform must remain focused on JEE Physics, Chemistry, and Mathematics.
+
+## Previous baseline
+
+The previous Phase 5 completion report states:
+
+- Phases 5.1–5.4 are implemented.
+- 121 tests pass.
+- TypeScript and production builds pass.
+- Firebase student synchronization is implemented.
+- The AI Tutor and Creative Studio are integrated with Mistake DNA.
+- The animated lesson player supports concept checks and visual reteaching.
+- Higgsfield is intentionally paused.
+
+Actual speaker/microphone hardware testing and live Firebase cross-device validation were not fully completed.
+
+Treat these as reported findings requiring independent verification.
+
+Do not remove, replace, or damage existing features.
+
+---
+
+# 1. YOUTUBE LECTURE PROCESSING — UP TO 12 HOURS
+
+## Problem
+
+Currently, the YouTube lecture workflow requires students to paste transcripts manually or has other limitations preventing convenient processing of long lectures.
+
+This creates unnecessary friction.
+
+Many JEE lectures are two, four, six, eight, or even twelve hours long.
+
+Students should not need to manually collect and paste a transcript to use LearnMate.
+
+## Required user experience
+
+The primary workflow must be:
+
+**Paste YouTube URL → Analyze Lecture → Generate Study Material**
+
+The student should only have to paste the video URL and choose the desired output.
+
+Remove the manual transcript-pasting requirement from the primary YouTube learning interface.
+
+Do not make a pasted transcript a prerequisite for generating notes, summaries, chapter breakdowns, or revision material.
+
+## Duration requirements
+
+Design the processing system to support videos with durations up to at least **12 hours (720 minutes)**.
+
+The pipeline must not assume that a lecture is limited to 30, 60, or 120 minutes.
+
+Do not send a twelve-hour transcript or all video-derived material into one LLM prompt.
+
+Implement a scalable processing architecture.
+
+## YouTube input pipeline
+
+Inspect the existing YouTube integration first.
+
+Use official APIs or other permitted, authorized content-access mechanisms.
+
+Important:
+
+- The official YouTube captions download API has authorization limitations.
+- Do not assume captions can be downloaded for every public video.
+- Do not bypass access restrictions, DRM, or platform authorization.
+- Do not use unauthorized scraping or downloading as a hidden fallback.
+- Where the user or application has legitimate access to an audio source, an authorized transcription pipeline may be used.
+- If an inaccessible video cannot be processed lawfully or technically, explain the reason clearly.
+- Never generate fictional lecture notes while claiming the video was analyzed.
+
+The user experience should remain URL-first and should never require manual transcript pasting.
+
+## Long-lecture architecture
+
+Implement or prepare an appropriate backend processing pipeline supporting:
+
+- Video URL validation.
+- Metadata retrieval.
+- Lecture duration detection.
+- Available caption or authorized audio-source discovery.
+- Timestamped text processing.
+- Transcript/source chunking.
+- Overlapping contextual boundaries where appropriate.
+- Chunk-level summaries.
+- Hierarchical summary aggregation.
+- Topic and chapter detection.
+- Formula extraction.
+- Important concept extraction.
+- Timestamp references.
+- Checkpointing.
+- Resumable processing.
+- Cancellation and retry.
+- Partial failure recovery.
+- Bounded concurrency.
+- Provider rate-limit handling.
+- Duplicate-job protection.
+
+Processing must not depend on keeping one browser request open for hours.
+
+Use a durable asynchronous job architecture if appropriate for the existing backend.
+
+Provide real progress updates and persist recoverable job state.
+
+Do not display invented percentages or artificial progress.
+
+## Student-facing outputs
+
+For successfully processed lectures, support:
+
+1. Complete structured study notes.
+2. Topic-wise lecture breakdown.
+3. Important formulas and definitions.
+4. Chapter or concept summaries.
+5. One-page revision sheets.
+6. Practice questions.
+7. Flashcards where supported.
+8. Handwritten-style notes.
+9. Relevant diagram creation.
+10. Connections to AI Tutor and Creative Studio.
+
+For accessible source material, allow students to click timestamps to navigate to the corresponding video position.
+
+Where a source chunk is unavailable, do not invent its content.
+
+## Performance and cost controls
+
+Twelve-hour lecture processing may be resource-intensive.
+
+Implement:
+
+- Efficient chunk-level caching.
+- Per-user quotas and job limits.
+- Reuse of previously processed chunks.
+- Controlled provider concurrency.
+- Processing cancellation.
+- Retry from failed chunks.
+- Server-side cost safeguards.
+- Fair usage protections.
+- Accurate processing status.
+
+Avoid repeatedly processing an entire lecture when a student requests only one section.
+
+## Verification
+
+Test with authorized or controlled fixtures representing:
+
+- 30-minute lecture.
+- 2-hour lecture.
+- 6-hour lecture.
+- 12-hour lecture.
+- Video without available captions.
+- Invalid or private video.
+- Provider failure.
+- Interrupted processing.
+- Repeated request for an already processed lecture.
+
+For the twelve-hour test, verify full duration coverage and complete chunk processing, not merely URL acceptance.
+
+Clearly distinguish real end-to-end source processing from synthetic long-duration fixture tests.
+
+---
+
+# 2. PDF UPLOADS — SUPPORT AT LEAST 60 PAGES
+
+## Problem
+
+The existing PDF workflow reportedly restricts some uploads to approximately 20 pages.
+
+This is too restrictive for JEE coaching notes, worksheets, and study material.
+
+## Objective
+
+Extend the supported PDF limit to **at least 60 pages** across the relevant learning workflows.
+
+Inspect all frontend and backend page-limit checks before modifying them.
+
+Do not simply change a numeric constant while leaving downstream processing broken.
+
+## Requirements
+
+Support:
+
+- PDF upload.
+- Text extraction.
+- Text-searchable PDFs.
+- Supported scanned PDFs.
+- Multi-page document indexing.
+- Accurate page numbering.
+- Source-grounded AI explanations.
+- Note generation.
+- Formula extraction.
+- Diagram generation.
+- Revision-sheet generation.
+- PDF-based AI Tutor questions.
+
+Use bounded, page-aware chunking and retrieval.
+
+A 60-page PDF should not require sending all extracted text to the model for every question.
+
+## Source accuracy
+
+The AI must identify the relevant pages before answering.
+
+Preserve exact source references and avoid invented citations.
+
+If the student asks about Page 47, retrieve the relevant content rather than silently processing only the first 20 pages.
+
+Where a PDF is scanned or contains image-based mathematics, use the application's supported visual extraction pipeline where available.
+
+Show honest status for pages whose content cannot be reliably extracted.
+
+## Verification
+
+Test:
+
+- 20-page PDF.
+- 50-page PDF.
+- 60-page PDF.
+- PDF with complex formulas.
+- PDF containing diagrams.
+- Scanned PDF.
+- Large mixed-content PDF.
+
+Check first, middle, and final page retrieval.
+
+Verify document restoration and storage persistence.
+
+---
+
+# 3. FASTER NOTE GENERATION
+
+## Objective
+
+Improve the actual speed of note generation without sacrificing educational correctness or source grounding.
+
+Do not simply hide delays behind a loading animation.
+
+## Required improvements
+
+Profile the current note-generation pipeline and identify bottlenecks.
+
+Consider:
+
+- Unnecessary repeated PDF extraction.
+- Oversized model contexts.
+- Duplicate provider calls.
+- Sequential operations that can safely be parallelized.
+- Inefficient document retrieval.
+- Repeated formula extraction.
+- Missing intermediate caching.
+- Excessive frontend re-rendering.
+
+Implement targeted optimizations.
+
+Where possible:
+
+- Cache extracted source chunks.
+- Generate section-level notes progressively.
+- Display completed sections as they become available.
+- Reuse previously processed material.
+- Avoid generating irrelevant sections.
+- Support cancel and retry.
+- Limit requests to relevant document segments.
+
+Maintain source references where applicable.
+
+Measure generation performance before and after changes using equivalent representative workloads.
+
+Report actual measurements rather than invented speed improvements.
+
+Do not trade away source accuracy simply to make responses appear faster.
+
+---
+
+# 4. IMPROVE EDUCATIONAL DIAGRAM ACCURACY
+
+## Problem
+
+Previously generated diagrams were sometimes inaccurate.
+
+In JEE preparation, a wrong diagram can cause a misunderstanding of the underlying concept.
+
+## Objective
+
+Make generated diagrams more scientifically, mathematically, and visually reliable.
+
+Inspect:
+
+- Diagram Maker.
+- DiagramRenderer.
+- StructuredDiagramSpec.
+- Progressive animated diagrams.
+- AI Tutor diagram generation.
+- Existing validation and sanitization logic.
+
+## Physics requirements
+
+Validate:
+
+- Force directions.
+- Vector origins and arrowheads.
+- Normal reactions.
+- Gravitational forces.
+- Friction direction and assumptions.
+- Inclined-plane geometry.
+- Ray diagrams.
+- Circuit symbols and connectivity.
+- Axis orientation.
+- Labels and angles.
+
+Do not silently invent physical conditions.
+
+For friction, explain or infer direction only when justified by the described motion or tendency of motion.
+
+## Chemistry requirements
+
+Validate:
+
+- Molecular geometry.
+- Bond connectivity.
+- Lone pairs.
+- Electron-domain geometry.
+- Molecular shape.
+- Standard VSEPR relationships.
+- Bond-angle labels.
+- Structural representations.
+
+## Mathematics requirements
+
+Validate:
+
+- Coordinate axes.
+- Conic sections.
+- Graph shapes.
+- Marked points.
+- Formula labels.
+- Intersections.
+- Scale assumptions.
+- Domain restrictions.
+
+## Architecture
+
+Use structured semantic validation before rendering.
+
+Continue using the existing app-owned renderer.
+
+Do not substitute attractive but scientifically unreliable image generation for validated educational diagrams.
+
+Use model output to propose a diagram specification, but validate subject-specific constraints before rendering.
+
+If the engine cannot represent a requested topic accurately:
+
+- Show an honest unsupported or validation state.
+- Offer a mathematically reliable alternative.
+- Never present an unverified diagram as fact.
+
+## Verification
+
+Add representative golden fixtures, numerical geometry checks, and visual regression tests.
+
+Test diagram correctness, not just whether SVG successfully renders.
+
+---
+
+# 5. AI STUDY TUTOR → CONTEXTUAL CREATE INTEGRATION
+
+## Product vision
+
+The AI Tutor and Create section should operate as parts of the same learning experience.
+
+A student should not need to repeatedly type the same question, upload the same material, or explain the same context.
+
+### Example
+
+A student uploads Physics notes about Newton's Laws.
+
+They ask:
+
+"Why does normal force change when a block is placed on an inclined plane?"
+
+The AI Tutor explains the concept.
+
+Directly in that response, LearnMate recognizes that a visual explanation may help.
+
+A contextual **Create** action appears.
+
+The student can choose:
+
+- Create Diagram.
+- Visual Understanding.
+- Animated Explanation.
+- Video-style Explanation.
+
+The selected tool should automatically receive the relevant question and document context.
+
+No redundant typing should be required.
+
+## Required implementation
+
+Integrate contextual creation actions into the existing AI Study Tutor.
+
+Inspect the current `StudyView`, `CreativeStudioView`, shared state, routing, and document context systems.
+
+Reuse existing generation engines.
+
+## Contextual detection
+
+Determine when visual creation is educationally useful.
+
+Examples include:
+
+- Force diagrams.
+- Molecular geometry.
+- Mathematical graphs.
+- Coordinate geometry.
+- Motion and physical processes.
+- Step-by-step problem solving.
+- Processes that benefit from progressive visual explanation.
+
+Do not show the Create action after every single tutor response by default.
+
+Use a validated, lightweight intent-detection mechanism and safe fallback behavior.
+
+## Context transfer
+
+When the student chooses a creation option, transfer:
+
+- Original student question.
+- Relevant AI Tutor answer context.
+- Active document ID.
+- Relevant source pages.
+- Subject.
+- Chapter or concept.
+- Selected explanation type.
+- Validated diagram or lesson data where already available.
+
+Avoid transferring unrelated private conversations or the entire document unnecessarily.
+
+## UX requirements
+
+- Creation should launch naturally from the tutor answer.
+- The existing Create Studio must remain independently accessible.
+- The student can return to the original AI Tutor question.
+- The created educational asset can be saved.
+- The student can reopen it from the Studio Library.
+- Relevant artifacts can be associated with their originating question.
+- Repeated clicks should not create duplicate expensive requests.
+- Existing Mistake DNA and revision integrations should continue working.
+
+## Video explanations
+
+Use existing LearnMate animated scene and narration infrastructure for video-style explanations.
+
+Do not imply that a rendered MP4 video exists unless actual video export or rendering has been implemented.
+
+Keep Higgsfield paused unless a future explicitly approved change authorizes it.
+
+## Acceptance test
+
+Upload an inclined-plane PDF, ask the AI Tutor a question, click Create Diagram, and verify that the diagram opens using the actual question and relevant document pages without re-entering them.
+
+Repeat for animated explanations, Mathematics, and Chemistry.
+
+---
+
+# 6. CRITICAL BUG — VOICE TUTOR CONTINUES AFTER END SESSION
+
+## Reported defect
+
+The Voice Tutor continues speaking after the student clicks **End Session**.
+
+This is a confirmed user-observed bug that must be investigated and fixed.
+
+Treat it as a high-priority Phase 6 defect.
+
+## Required behavior
+
+When the student clicks End Session:
+
+- Stop currently playing audio immediately.
+- Cancel pending speech synthesis.
+- Stop active speech recognition.
+- Stop microphone capture.
+- Stop any application-controlled audio stream.
+- Cancel ongoing Gemini Live or equivalent voice streams.
+- Close active voice connections where appropriate.
+- Abort pending voice-specific requests.
+- Clear playback queues.
+- Release media tracks and audio resources.
+- Prevent delayed voice responses from playing after termination.
+- Prevent stale asynchronous callbacks from restarting audio.
+
+## Architecture
+
+Inspect:
+
+- VoiceTutorModal.
+- Web Speech API integration.
+- Existing Gemini Live integration.
+- Speech queues.
+- AudioContext usage.
+- Microphone tracks.
+- Event listeners.
+- Connection cleanup.
+- React effects and component unmounting.
+
+Implement a deterministic session lifecycle.
+
+Recommended conceptual states:
+
+`IDLE → CONNECTING → LISTENING → SPEAKING → ENDING → ENDED`
+
+A session marked ENDED must not emit audio or restart playback from stale callbacks.
+
+Use session tokens or generation identifiers to invalidate late responses.
+
+Make End Session idempotent so repeated clicking does not produce errors.
+
+## Testing
+
+Verify:
+
+1. End Session during speech.
+2. End Session while listening.
+3. End Session while connecting.
+4. End Session while an AI response is pending.
+5. Rapidly end and reopen a session.
+6. Leave the page during narration.
+7. Switch tabs while the session is active.
+8. Deny microphone permission.
+9. Disconnect the network during speech.
+10. Test actual microphone and speaker hardware when accessible.
+
+The result must be silence and released capture after termination.
+
+Do not claim actual acoustic verification from a headless browser.
+
+---
+
+# 7. PROPER MATHEMATICAL AND SCIENTIFIC NOTATION EVERYWHERE
+
+## Critical requirement
+
+All student-facing mathematical and scientific expressions must be clearly readable and presented in standard mathematical form.
+
+Students should not be forced to interpret raw formatting code.
+
+### Bad output
+
+`\\frac{a}{b}`
+
+`x^2 + y^2`
+
+`\\sqrt{25}`
+
+`\\theta`
+
+`\\sum_{i=1}^{n}`
+
+### Desired visual output
+
+\[
+\frac{a}{b}
+\]
+
+\[
+x^2+y^2
+\]
+
+\[
+\sqrt{25}
+\]
+
+\[
+\theta
+\]
+
+\[
+\sum_{i=1}^{n}
+\]
+
+Render these as actual formatted mathematics in the application, not as literal LaTeX strings.
+
+## Supported content
+
+Verify correct rendering for:
+
+- Fractions.
+- Superscripts and subscripts.
+- Square roots and nth roots.
+- Integrals.
+- Summations.
+- Matrices.
+- Vectors.
+- Limits.
+- Derivatives.
+- Greek symbols.
+- Chemical formulas.
+- Reaction arrows.
+- Equilibrium notation.
+- Probability formulas.
+- Set notation.
+- Inequalities.
+- Units and dimensional expressions.
+
+## App-wide requirement
+
+Apply consistent rendering across:
+
+- AI Tutor answers.
+- Uploaded PDF content displays.
+- Generated notes.
+- One-page revision sheets.
+- Practice questions.
+- Mock-test explanations.
+- Concept checks.
+- Creative Studio.
+- Animated explanations.
+- Handwritten-style notes.
+- Exported PDF documents.
+
+Use a safe, maintained mathematical rendering system compatible with the existing frontend.
+
+Inspect the current math-rendering implementation and reuse it where appropriate.
+
+Do not introduce unsafe HTML injection through mathematical markup.
+
+## PDF export requirement
+
+Earlier PDF export code normalized mathematical content into simpler text representations.
+
+That fallback must not cause important notation to lose mathematical meaning.
+
+Improve PDF export so supported equations retain readable structure and visual formatting.
+
+Where necessary, use properly rendered mathematical elements rather than stripping complex notation into ambiguous plain text.
+
+Ensure the resulting PDF is readable on ordinary mobile PDF viewers.
+
+## Verification
+
+Use educational fixtures containing fractions, matrices, vectors, chemical formulas, and Greek symbols.
+
+Test the same expressions in the webpage and exported PDF.
+
+Check rendering quality at desktop and mobile sizes.
+
+Never silently alter a mathematical expression's meaning for visual convenience.
+
+---
+
+# 8. NEW HANDWRITTEN NOTES SECTION
+
+## Objective
+
+Introduce a dedicated **Handwritten Notes** experience within LearnMate.
+
+The objective is to help students obtain visually organized, handwritten-style study material from learning content.
+
+The feature should support generation from lectures and existing revision material.
+
+## Student workflows
+
+Support:
+
+**Workflow A — Lecture to Handwritten Notes**
+
+Student opens an appropriately processed YouTube lecture or other supported lecture material.
+
+They choose Generate Handwritten Notes.
+
+LearnMate uses the actual processed source content to create structured handwritten-style notes.
+
+**Workflow B — One-Page Revision Sheet to Handwritten Notes**
+
+Student generates a one-page revision sheet.
+
+An action appears:
+
+**Convert to Handwritten Notes**
+
+Clicking it converts the actual existing revision content into a handwritten-style document.
+
+The student should not need to regenerate the lesson or re-enter the topic.
+
+**Workflow C — PDF to Handwritten Notes**
+
+Student uploads a supported PDF and selects relevant pages or concepts.
+
+LearnMate generates clear handwritten-style study notes grounded in the selected material.
+
+## New section requirements
+
+Create a dedicated Handwritten Notes section or an appropriately accessible subsection of the current study workspace.
+
+Include:
+
+- Generate Handwritten Notes.
+- Select source material.
+- Choose chapter or topic.
+- Choose full notes or concise notes.
+- Preview pages.
+- Save to Library.
+- Export to PDF.
+- Reopen previous notes.
+
+## Visual design
+
+Use a natural notebook aesthetic with:
+
+- Readable handwriting-style typography.
+- Clear headings.
+- Highlighted keywords.
+- Simple annotations.
+- Appropriate spacing.
+- Correct mathematical expressions.
+- Structured formulas.
+- Diagrams when supported.
+- Optional ruled or plain paper appearance.
+
+Prioritize readability over decorative handwriting effects.
+
+Use legitimately available and appropriately licensed typography assets.
+
+Do not require an image-generation API for every page if a deterministic renderer can produce better results.
+
+## Educational integrity
+
+Preserve actual source concepts.
+
+Do not invent lecture statements, formulas, or diagrams.
+
+Retain links to original page citations or video timestamps wherever available.
+
+Use standard mathematical rendering for equations, even when the surrounding text has a handwriting-style appearance.
+
+## Export
+
+Provide downloadable PDF output with proper page boundaries.
+
+Verify that mathematical notation does not get clipped or converted into raw code.
+
+Clearly label the output as AI-generated handwritten-style notes rather than claiming it was physically handwritten by a person.
+
+---
+
+# 9. ORIGINAL PHASE 6 — STORAGE AND DATA ARCHITECTURE
+
+Preserve the existing roadmap requirement to move large PDF binaries from localStorage into IndexedDB.
+
+Implement reliable local document storage with:
+
+- Binary Blob storage.
+- Document metadata.
+- Stable document identifiers.
+- Safe retrieval.
+- Non-destructive migration.
+- Crash recovery.
+- Quota handling.
+- Legacy document compatibility.
+- Per-account isolation.
+- Large-document performance.
+
+Never delete old local document content until successful migration has been verified.
+
+Ensure AI Tutor, Create Studio, and all document-driven features work with the new storage architecture.
+
+## Firestore storage safety
+
+Audit current Firestore documents, particularly fields storing concept attempts, mastery records, and Creative Studio assets.
+
+Verify compliance with Firestore's document-size limit and related quotas.
+
+Do not rely only on character counts.
+
+Test real serialized sizes.
+
+If necessary, introduce an appropriate collection, subcollection, or bounded-record architecture.
+
+Use secure migration procedures that preserve all existing user data.
+
+## Synchronization
+
+Verify:
+
+- Authenticated cloud sync.
+- Offline changes.
+- Retry behavior.
+- Cross-device restoration.
+- Duplicate prevention.
+- Student account isolation.
+- Conflict handling.
+
+Use actual Firebase Emulator Suite tests for security rules when possible.
+
+Do not equate locally mocked sync with verified cross-device sync.
+
+---
+
+# 10. ORIGINAL PHASE 6 — STUDENT DATA CONTROL
+
+Implement the planned student-data export and account deletion functionality.
+
+## Data export
+
+Provide authenticated students with an export of their available academic data, including:
+
+- Academic profile.
+- Notes.
+- Tutor history.
+- Practice history.
+- Mock-test records.
+- Mistake DNA.
+- Revision records.
+- Concept-check progress.
+- Saved learning assets.
+- Relevant lecture and handwritten-note metadata.
+
+Support structured JSON export and an accessible PDF summary where practical.
+
+Clearly distinguish a complete archive from a summary.
+
+Include local-only data appropriately.
+
+Do not expose provider credentials, tokens, or other students' data.
+
+## Account deletion
+
+Implement a secure, self-service deletion workflow.
+
+Requirements:
+
+- Clear confirmation.
+- Reauthentication where necessary.
+- Authenticated ownership verification.
+- Correct Firebase account and document cleanup.
+- Associated storage cleanup.
+- Protection against deleting another student's records.
+- Retry-safe behavior.
+- Transparent failure states.
+- No false completion message.
+
+Test destructive behavior only with authorized test accounts and isolated test infrastructure.
+
+Do not delete actual student accounts or production records without explicit authorization.
+
+---
+
+# 11. ORIGINAL PHASE 6 — PRODUCTION DEPLOYMENT & SCALABILITY
+
+Audit the current backend, frontend, provider configuration, and deployment roadmap.
+
+Prepare LearnMate for reliable production usage.
+
+## Infrastructure
+
+Verify:
+
+- Backend startup.
+- API routing.
+- Health endpoints.
+- Production configuration.
+- Secret management.
+- Authentication configuration.
+- Firebase rules and indexes.
+- Appropriate CORS behavior.
+- Request timeouts.
+- Graceful shutdown.
+- Provider quota handling.
+- Error recovery.
+- Deployment rollback.
+- Staging versus production separation.
+
+Use the existing documented hosting direction, including Render or Cloud Run where appropriate.
+
+Do not silently switch to an unrelated deployment platform.
+
+Do not incur paid cloud charges or change production infrastructure without explicit authorization.
+
+## Reliability
+
+Implement or refine:
+
+- Error boundaries.
+- Structured application logging.
+- Safe retries.
+- Request deduplication.
+- Long-running task reliability.
+- Job persistence.
+- Cancellation.
+- User-facing failure recovery.
+- Rate limiting.
+
+For large lecture processing, ensure work is not lost merely because the student closes a browser tab.
+
+## Monitoring
+
+Introduce appropriate privacy-conscious telemetry and error monitoring.
+
+Never log raw student PDFs, full conversations, private credentials, or sensitive academic content.
+
+If an external monitoring account is not configured, prepare and test the integration without claiming the monitoring service is live.
+
+## Load testing
+
+Use controlled, provider-independent test workloads where appropriate.
+
+Test:
+
+- Concurrent AI Tutor requests.
+- Large PDF processing.
+- Long-lecture job orchestration.
+- Repeated note generation.
+- Diagram rendering.
+- Storage and synchronization.
+- Export workflows.
+- Account operations.
+
+Measure actual latency, errors, and resource usage.
+
+Do not invent throughput or scalability claims.
+
+---
+
+# 12. PERFORMANCE & MOBILE OPTIMIZATION
+
+LearnMate serves students who may use ordinary Android phones and constrained mobile networks.
+
+All new Phase 6 features must remain usable in that environment.
+
+Review:
+
+- Bundle size.
+- Lazy loading.
+- Large document rendering.
+- Mathematical rendering.
+- Diagram performance.
+- Notebook page previews.
+- Lecture processing status.
+- Memory usage.
+- Network consumption.
+- Repeated backend calls.
+
+Avoid requiring the browser to keep an entire twelve-hour lecture in memory.
+
+Avoid blocking the main thread while rendering large notes.
+
+Support usable loading, retry, and cancellation controls.
+
+Keep layouts accessible and responsive.
+
+---
+
+# 13. DARK MODE SCOPE BOUNDARY
+
+The user has specifically requested a **separate dedicated prompt for complete dark-mode glitch repair**.
+
+Therefore:
+
+- Preserve the existing Light and Night Owl themes.
+- Ensure new Phase 6 features are usable in both themes.
+- Fix critical regressions caused directly by Phase 6 changes.
+- Record pre-existing dark-mode visual defects separately.
+- Do not replace the requested dedicated dark-mode audit with a superficial Phase 6 check.
+
+The complete cross-application dark-mode cleanup will be handled in its own subsequent implementation prompt.
+
+Do not mark that future dedicated audit as complete in this report.
+
+---
+
+# 14. SECURITY, STUDENT PRIVACY & COPYRIGHT COMPLIANCE
+
+LearnMate's users include students aged approximately 16–18.
+
+Apply appropriate security and privacy practices.
+
+Requirements:
+
+- Protect Firebase authentication.
+- Enforce student data ownership.
+- Minimize unnecessary personal data.
+- Avoid storing secrets in frontend code.
+- Sanitize generated educational content.
+- Protect uploaded files.
+- Prevent unauthorized document access.
+- Validate API inputs.
+- Apply relevant rate limits.
+- Avoid leaking student content into logs.
+- Handle unauthorized YouTube content access honestly.
+- Respect applicable platform terms and content access permissions.
+- Provide transparent error messages.
+
+Do not represent unavailable provider functionality as a working feature.
+
+---
+
+# 15. COMPREHENSIVE END-TO-END TESTING
+
+Test the entire LearnMate student journey after implementation.
+
+## Required integration scenario
+
+1. Student signs in.
+2. Uploads a 60-page Physics PDF.
+3. Asks the AI Tutor a question from Page 45.
+4. Receives a source-grounded explanation with correctly formatted mathematics.
+5. Clicks contextual Create Diagram.
+6. Receives a scientifically validated diagram.
+7. Creates an animated explanation.
+8. Completes a concept check.
+9. Receives appropriate misconception feedback.
+10. Sees Mistake DNA and revision updates.
+11. Generates notes and a one-page revision sheet.
+12. Converts the revision sheet to handwritten-style notes.
+13. Saves and exports the content.
+14. Reopens the saved material.
+15. Checks that the appropriate progress synchronizes across devices.
+
+## YouTube integration scenario
+
+1. Student pastes an eligible YouTube lecture URL.
+2. LearnMate validates available content access.
+3. It processes the accessible lecture content without asking for a pasted transcript.
+4. It generates timestamped notes.
+5. Student opens a topic.
+6. Student asks the AI Tutor a question about it.
+7. Student creates a diagram or animated explanation.
+8. Student generates handwritten-style notes from the lecture.
+9. Student saves and exports the notes.
+
+Also run a controlled twelve-hour fixture to validate long-duration processing reliability.
+
+## Voice Tutor scenario
+
+1. Student starts a voice session.
+2. Student asks a question.
+3. Tutor begins speaking.
+4. Student clicks End Session.
+5. All audio stops immediately.
+6. All microphone tracks and session resources are released.
+7. Stale callbacks do not restart speech.
+
+## Mathematical accuracy scenario
+
+Generate and export content containing:
+
+- Fractions.
+- Integrals.
+- Summations.
+- Matrices.
+- Vectors.
+- Greek symbols.
+- Chemical formulas.
+- Scientific units.
+
+Verify correct visual output in both browser and PDF.
+
+---
+
+# 16. AUTOMATED TESTING AND REGRESSION GATES
+
+Preserve the previous baseline of 121 reported passing tests.
+
+Add meaningful new tests for:
+
+- Twelve-hour lecture chunk orchestration.
+- Timestamped source retrieval.
+- Authorized content access failures.
+- Lecture job cancellation and retry.
+- PDF extraction through Page 60.
+- Document migration to IndexedDB.
+- Faster note-generation pipeline integrity.
+- Diagram semantic correctness.
+- Contextual Create routing.
+- Voice Tutor End Session cleanup.
+- Late audio callback rejection.
+- Mathematical notation rendering.
+- Mathematical PDF export.
+- Handwritten-style note generation.
+- Revision-sheet conversion.
+- Firebase authorization.
+- Cloud synchronization.
+- Data export.
+- Account deletion.
+- Storage quota handling.
+- Production configuration.
+- Existing JEE scoring preservation.
+
+Run the actual repository checks:
+
+`npm test`
+
+`npm run lint`
+
+`npm run build`
+
+Use available Playwright or other existing browser automation for real interaction verification.
+
+Where appropriate, add integration tests for backend routes and authenticated student data access.
+
+Do not delete tests merely to improve the pass percentage.
+
+Do not count mocked external integrations as successful live-provider verification.
+
+---
+
+# 17. STRICT DEVELOPMENT RULES
+
+1. Do not rebuild LearnMate from scratch.
+2. Do not create duplicate implementations of existing features.
+3. Do not remove Phase 1–5 functionality.
+4. Do not change JEE mock-test scoring.
+5. Do not fabricate AI results.
+6. Do not invent video transcripts or lecture content.
+7. Do not create incorrect educational diagrams merely for visual appeal.
+8. Do not expose Firebase or AI provider secrets.
+9. Do not introduce unnecessary paid dependencies.
+10. Do not automatically activate Higgsfield.
+11. Keep `HIGGSFIELD_PAUSED = true`.
+12. Do not silently discard student data.
+13. Do not perform destructive production operations.
+14. Do not automatically initiate paid production deployments.
+15. Do not claim that offline fixtures prove live production connectivity.
+16. Do not postpone implementation work merely because it is difficult.
+17. Do not stop after providing a plan or feature outline.
+18. Make real, maintainable changes to the existing codebase.
+19. Reuse the current design system and shared academic state.
+20. Treat student learning correctness as more important than decorative design.
+
+---
+
+# 18. FINAL PHASE 6 COMPLETION REPORT
+
+When implementation is finished, provide one detailed **LearnMate JEE — Phase 6 Completion Report**.
+
+## A. Feature implementation status
+
+Report the status of:
+
+- YouTube URL-only workflow.
+- Twelve-hour lecture support.
+- Removal of mandatory pasted transcripts.
+- Sixty-page PDF support.
+- Faster notes.
+- Diagram accuracy.
+- Contextual AI Tutor → Create actions.
+- Voice Tutor bug fix.
+- Mathematical notation rendering.
+- Handwritten Notes section.
+- Lecture-to-handwritten notes.
+- Revision-sheet-to-handwritten notes.
+- IndexedDB migration.
+- Firebase storage safety.
+- Student data export.
+- Account deletion.
+- Production deployment readiness.
+- Monitoring and scalability.
+
+## B. Files changed
+
+List modified and new files, major functions, and architectural decisions.
+
+## C. Verification evidence
+
+Show:
+
+- Total test count.
+- Passing tests.
+- Failed tests.
+- TypeScript results.
+- Production build results.
+- Real browser test results.
+- PDF boundary tests.
+- Lecture-duration tests.
+- Actual provider results.
+- Firebase security results.
+- Audio testing.
+- Mathematical rendering verification.
+- Storage migration results.
+
+## D. Performance
+
+Report measured improvements where available.
+
+Include test conditions and relevant limitations.
+
+## E. External blockers
+
+Clearly identify required credentials, permissions, infrastructure, physical devices, or provider capabilities that prevented full verification.
+
+Use the following status labels:
+
+- WORKING_VERIFIED
+- WORKING_WITH_FALLBACK
+- IMPLEMENTED_NOT_TESTED
+- BLOCKED_BY_CREDENTIALS
+- BLOCKED_BY_HARDWARE
+- BLOCKED_BY_PROVIDER
+- BLOCKED_BY_CONTENT_ACCESS
+- BLOCKED_BY_DEPLOYMENT_APPROVAL
+- FAILED
+- NOT_IMPLEMENTED
+
+## F. Production safety
+
+Report security risks, unfinished migrations, data-integrity concerns, and unauthorized-access test results.
+
+## G. Final completion decision
+
+Choose exactly one:
+
+**PHASE_6_COMPLETE_VERIFIED**
+
+All Phase 6 implementation requirements and necessary acceptance checks passed.
+
+**PHASE_6_IMPLEMENTED_VERIFICATION_PENDING**
+
+All required implementation work is complete, but specifically identified external verification is outstanding.
+
+**PHASE_6_INCOMPLETE**
+
+Required functionality, integrations, or critical fixes remain unfinished.
+
+Do not use a completion label merely because the production build succeeds.
+
+---
+
+# FINAL EXECUTION DIRECTIVE
+
+**Implement the entire updated Phase 6 as one unified development assignment.**
+
+Do not ask me for separate Phase 6 implementation prompts.
+
+Do not stop after implementing YouTube processing, PDF improvements, or any other individual feature.
+
+Complete the original Phase 6 infrastructure scope together with all newly specified learning improvements.
+
+Prioritize data safety, educational correctness, student experience, and reliable verification.
+
+When code implementation and feasible tests are finished, deliver a single comprehensive completion report.
+
+The intended end result is a LearnMate JEE application where:
+
+- Students can conveniently study from supported long YouTube lectures without manually pasting transcripts.
+- Students can upload at least 60-page study PDFs.
+- AI notes are generated efficiently.
+- Diagrams are educationally accurate.
+- The AI Tutor directly connects students to contextually useful visual learning tools.
+- Voice Tutor sessions terminate cleanly.
+- Mathematical and scientific notation is properly formatted.
+- Students can produce and export handwritten-style study notes.
+- Student information is secure and recoverable.
+- The platform is technically prepared for real-world usage.
+
+**This is the complete Phase 6 assignment. Implement, integrate, test, and report truthfully.**

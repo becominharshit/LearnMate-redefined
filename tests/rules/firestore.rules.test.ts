@@ -139,4 +139,51 @@ test('reports can be created by their owner only and never edited', async () => 
   await assertFails(updateDoc(doc(alice, 'users/alice/reports/report-1'), { reason: 'other' }));
   await assertFails(getDoc(doc(bob, 'users/alice/reports/report-1')));
   await assertFails(setDoc(doc(bob, 'users/alice/reports/report-2'), { ...report, id: 'report-2' }));
+
+  // Creative studio and concept check reports are also allowed for the owner
+  await assertSucceeds(
+    setDoc(doc(alice, 'users/alice/reports/report-diagram-1'), {
+      ...report,
+      id: 'report-diagram-1',
+      kind: 'diagram',
+    })
+  );
+  await assertSucceeds(
+    setDoc(doc(alice, 'users/alice/reports/report-anim-1'), {
+      ...report,
+      id: 'report-anim-1',
+      kind: 'animated_explanation',
+    })
+  );
 });
+
+test('per-document studyState syncs conceptAttemptsJson, conceptMasteryJson, and creativeAssetsJson with owner isolation', async () => {
+  const alice = env.authenticatedContext('alice', verifiedGoogle).firestore();
+  const bob = env.authenticatedContext('bob', verifiedGoogle).firestore();
+
+  const validStudyState = {
+    documentId: 'doc-1',
+    uid: 'alice',
+    updatedAt: now,
+    tutorMessagesJson: '[]',
+    mistakesJson: '[]',
+    revisionPlanJson: '[]',
+    cachedQuizJson: '[]',
+    quickReviseJson: '',
+    conceptAttemptsJson: JSON.stringify([{ attemptId: 'att-1', documentId: 'doc-1', isCorrect: true }]),
+    conceptMasteryJson: JSON.stringify({ 'projectile-motion': { 1: { status: 'mastered_on_first_try' } } }),
+    creativeAssetsJson: JSON.stringify([{ id: 'asset-1', type: 'video_lesson', documentId: 'doc-1' }]),
+  };
+
+  await assertSucceeds(setDoc(doc(alice, 'users/alice/studyState/doc-1'), validStudyState));
+  await assertSucceeds(getDoc(doc(alice, 'users/alice/studyState/doc-1')));
+  await assertFails(getDoc(doc(bob, 'users/alice/studyState/doc-1')));
+  await assertFails(setDoc(doc(bob, 'users/alice/studyState/doc-1'), validStudyState));
+  await assertFails(
+    setDoc(doc(alice, 'users/alice/studyState/doc-1'), {
+      ...validStudyState,
+      conceptAttemptsJson: 'x'.repeat(400001),
+    })
+  );
+});
+

@@ -8,7 +8,12 @@ import {
   Building2,
   Globe,
   Clock,
-  BookOpen
+  BookOpen,
+  Download,
+  FileDown,
+  Trash2,
+  ShieldAlert,
+  Loader2,
 } from 'lucide-react';
 import {
   StudentAcademicProfile,
@@ -16,6 +21,8 @@ import {
   ExamTypeId
 } from '../types/study';
 import { studyStorage } from '../services/storageService';
+import { generateStudentDataExportPdfBytes, triggerPdfDownload } from '../utils/pdfGenerator';
+import { apiFetch } from '../services/apiFetch';
 
 interface StudentProfileModalProps {
   isOpen: boolean;
@@ -44,6 +51,9 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   const [subjectsInput, setSubjectsInput] = useState<string>('');
   const [weakAreasInput, setWeakAreasInput] = useState<string>('');
   const [savedNotice, setSavedNotice] = useState(false);
+  const [dataControlStatus, setDataControlStatus] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -52,8 +62,77 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
       setSubjectsInput(current.subjectsStudied.join(', '));
       setWeakAreasInput(current.weakAreas.join(', '));
       setSavedNotice(false);
+      setDataControlStatus(null);
+      setConfirmDeleteOpen(false);
     }
   }, [isOpen]);
+
+  const handleExportJsonArchive = () => {
+    const archive = studyStorage.exportStudentDataArchive();
+    const jsonString = JSON.stringify(archive, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const safeName = (profile.fullName || 'student').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    link.download = `LearnMate_Student_Data_Export_${safeName}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setDataControlStatus(
+      `Exported complete JSON archive (${archive.documents.length} documents, ${archive.quizAttempts.length} quiz attempts, ${archive.handwrittenNotes.length} handwritten notebooks).`
+    );
+  };
+
+  const handleExportPdfSummary = async () => {
+    const archive = studyStorage.exportStudentDataArchive();
+    const pdfBytes = await generateStudentDataExportPdfBytes({
+      exportedAt: archive.exportedAt,
+      studentProfile: {
+        fullName: archive.studentProfile.fullName,
+        schoolClass: archive.studentProfile.schoolClass,
+        targetExam: archive.studentProfile.targetExam,
+        preferredLanguage: archive.studentProfile.preferredLanguage,
+        weakAreas: archive.studentProfile.weakAreas,
+      },
+      documents: archive.documents.map((d) => ({
+        id: d.id,
+        title: d.title,
+        sourceType: d.sourceType,
+        pageCount: d.pageCount,
+      })),
+      quizAttempts: archive.quizAttempts.map((q) => ({
+        documentTitle: q.documentTitle,
+        mode: q.mode,
+        score: q.score,
+        totalQuestions: q.totalQuestions,
+        percentage: q.percentage,
+        completedAt: q.completedAt,
+      })),
+      handwrittenNotesCount: archive.handwrittenNotes.length,
+      creativeAssetsCount: archive.creativeAssets.length,
+    });
+    const safeName = (profile.fullName || 'student').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    triggerPdfDownload(pdfBytes, `LearnMate_Student_Summary_${safeName}.pdf`);
+    setDataControlStatus('Exported printable PDF Academic Data Summary.');
+  };
+
+  const handleConfirmAccountAndDataDeletion = async () => {
+    if (isDeletingAccount) return;
+    setIsDeletingAccount(true);
+    try {
+      await apiFetch('/api/account/delete', { method: 'DELETE' }).catch(() => {});
+      const result = await studyStorage.deleteStudentAccountAndData();
+      setDataControlStatus(
+        `Deleted ${result.deletedLocalKeysCount} local records, ${result.deletedIndexedDbRecordsCount} IndexedDB files, and ${result.deletedCloudDocumentsCount} cloud records.`
+      );
+      setConfirmDeleteOpen(false);
+      onClose();
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -526,6 +605,108 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 className="w-full p-3 rounded-lg border border-line text-xs text-ink focus:outline-none focus:border-brand"
               />
             </div>
+          </div>
+
+          {/* Phase 6 Section 10: Student Data Control & Privacy (Export & Account Deletion) */}
+          <div
+            data-testid="student-data-control-section"
+            className="p-4 rounded-xl bg-canvas border border-line space-y-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-ink">
+                <BookOpen className="w-4 h-4 text-brand" />
+                <span>Student Data Control &amp; Privacy (DPDP Compliant)</span>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-soft text-brand">
+                Self-Serve Export &amp; Deletion
+              </span>
+            </div>
+            <p className="text-[11px] text-muted leading-relaxed">
+              Download your complete academic history (profile, uploaded documents, revision sheets, handwritten notes, quiz attempts, and Mistake DNA) or permanently delete your account and all stored data.
+            </p>
+
+            {dataControlStatus && (
+              <div
+                data-testid="data-control-status-banner"
+                className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold"
+              >
+                {dataControlStatus}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="export-student-json-btn"
+                onClick={handleExportJsonArchive}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-[#0B1020] border border-line hover:border-brand text-xs font-semibold text-ink cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-brand" />
+                <span>Export My Data (JSON)</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="export-student-pdf-btn"
+                onClick={() => void handleExportPdfSummary()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-[#0B1020] border border-line hover:border-brand text-xs font-semibold text-ink cursor-pointer"
+              >
+                <FileDown className="w-3.5 h-3.5 text-brand" />
+                <span>Export Summary (PDF)</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="delete-student-account-btn"
+                onClick={() => setConfirmDeleteOpen((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-xs font-semibold text-red-700 cursor-pointer ml-auto"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Account &amp; Data</span>
+              </button>
+            </div>
+
+            {confirmDeleteOpen && (
+              <div
+                data-testid="confirm-delete-account-panel"
+                className="p-3 rounded-xl bg-red-50 border border-red-200 space-y-2.5 text-xs text-red-950"
+              >
+                <div className="flex items-start gap-2">
+                  <ShieldAlert className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Confirm Permanent Account &amp; Data Deletion</p>
+                    <p className="text-[11px] text-red-800 mt-0.5">
+                      This will permanently erase your study materials, IndexedDB PDFs, handwritten notes, quiz history, Mistake DNA, cloud sync records, and sign-in account.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteOpen(false)}
+                    className="px-3 py-1.5 rounded-lg bg-white border border-red-200 text-xs font-semibold text-slate-700 cursor-pointer"
+                  >
+                    Keep My Account
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="confirm-delete-account-btn"
+                    disabled={isDeletingAccount}
+                    onClick={() => void handleConfirmAccountAndDataDeletion()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {isDeletingAccount ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Deleting...</span>
+                      </>
+                    ) : (
+                      <span>Yes, Permanently Delete Everything</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {savedNotice && (

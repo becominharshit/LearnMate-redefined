@@ -49,6 +49,13 @@ import {
 } from '../utils/quizGrading';
 import { renderPdfPageToCanvas } from '../utils/pdfExtractor';
 import { classifyJeeSubject } from '../utils/jeeSubjects';
+import {
+  retrieveRelevantPagesForQuery,
+  detectContextualCreateIntent,
+  stopAllGlobalAudioAndSpeech,
+  type ContextualCreateTransferPayload,
+  type ContextualCreateAction,
+} from '../utils/phase6Engine';
 import { VoiceTutorModal } from './VoiceTutorModal';
 import { QuizProctorOverlay } from './QuizProctorOverlay';
 import { MathText } from './MathText';
@@ -69,6 +76,7 @@ interface StudyViewProps {
   onOpenRevise?: (subTab?: QuickReviseSubTab) => void;
   onOpenPdfWorkspace?: () => void;
   onOpenUploadModal?: () => void;
+  onOpenContextualCreate?: (payload: ContextualCreateTransferPayload) => void;
   isCloudSynced?: boolean;
   externalVoiceOpen?: boolean;
   onCloseExternalVoice?: () => void;
@@ -86,6 +94,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
   onOpenRevise,
   onOpenPdfWorkspace,
   onOpenUploadModal,
+  onOpenContextualCreate,
   isCloudSynced = false,
   externalVoiceOpen = false,
   onCloseExternalVoice,
@@ -164,8 +173,9 @@ export const StudyView: React.FC<StudyViewProps> = ({
     }
   }, [initialSubMode]);
 
-  // Load persisted document state when activeDocument changes
+  // Load persisted document state when activeDocument changes & stop any lingering audio
   useEffect(() => {
+    stopAllGlobalAudioAndSpeech('study_view_document_switch');
     setCurrentPage(1);
     setVisitedPages([1]);
     setHighlightedQuote(null);
@@ -332,10 +342,16 @@ export const StudyView: React.FC<StudyViewProps> = ({
 
     try {
       let accumulated = '';
+      const relevantPages = retrieveRelevantPagesForQuery(
+        activeDocument.pages,
+        qText,
+        currentPage,
+        10
+      );
       const response = await aiStudyClient.askTutorStream(
         {
           title: activeDocument.title,
-          pages: activeDocument.pages,
+          pages: relevantPages.selectedPages,
           question: qText,
           history: historyForRequest,
           sourceControlMode,
@@ -1312,29 +1328,133 @@ export const StudyView: React.FC<StudyViewProps> = ({
                     )}
 
                     {msg.content && !isAskingTutor && (
-                      <div className="pt-1 flex flex-wrap items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleAskTutor(
-                              'Simplify your previous explanation in plain steps with a short analogy.'
-                            )
-                          }
-                          className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
-                        >
-                          Simplify
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleAskTutor(
-                              'Show a JEE Main worked numerical example for this concept.'
-                            )
-                          }
-                          className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
-                        >
-                          JEE Example
-                        </button>
+                      <div className="space-y-2.5 pt-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleAskTutor(
+                                'Simplify your previous explanation in plain steps with a short analogy.'
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
+                          >
+                            Explain Simpler
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleAskTutor(
+                                'Explain the previous concept deeper with rigorous first-principles derivation, boundary conditions, and JEE traps.'
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
+                          >
+                            Explain Deeper
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleAskTutor(
+                                'Show a JEE Main worked numerical example for this concept.'
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
+                          >
+                            JEE Example
+                          </button>
+                        </div>
+
+                        {/* Phase 6 Section 5: Contextual AI Study Tutor -> Create Integration */}
+                        {onOpenContextualCreate && (() => {
+                          const msgIdx = tutorMessages.findIndex((m) => m.id === msg.id);
+                          const prevUserMsg =
+                            msgIdx > 0 && tutorMessages[msgIdx - 1]?.role === 'user'
+                              ? tutorMessages[msgIdx - 1].content
+                              : lastAskedQuestion || activePageLabel;
+                          const intent = detectContextualCreateIntent({
+                            question: prevUserMsg,
+                            answer: msg.content,
+                            topic:
+                              msg.relatedTopics?.[0] ||
+                              activePageTopic?.name ||
+                              activePageLabel,
+                            subject: documentSubject || 'Physics',
+                          });
+                          if (!intent.shouldSuggestVisual) return null;
+
+                          const triggerCreateMode = (mode: ContextualCreateAction) => {
+                            const citedNums =
+                              msg.citations && msg.citations.length > 0
+                                ? msg.citations.map((c) => c.pageNumber)
+                                : [currentPage];
+                            onOpenContextualCreate({
+                              sourceTutorMessageId: msg.id,
+                              question: prevUserMsg,
+                              tutorAnswerExcerpt: msg.content.slice(0, 900),
+                              conceptTitle: intent.recommendedConceptTitle,
+                              topic:
+                                msg.relatedTopics?.[0] ||
+                                activePageTopic?.name ||
+                                activePageLabel,
+                              subject:
+                                (documentSubject as 'Physics' | 'Chemistry' | 'Mathematics' | 'General') ||
+                                'Physics',
+                              documentId: activeDocument.id,
+                              documentTitle: activeDocument.title,
+                              citedPages: citedNums,
+                              selectedMode: mode,
+                            });
+                          };
+
+                          return (
+                            <div
+                              data-testid="tutor-contextual-create-bar"
+                              className="p-2.5 rounded-xl bg-brand-soft/45 border border-brand-200 space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-brand flex items-center gap-1">
+                                  <Sparkles className="w-3 h-3" />
+                                  <span>Visual Concept Studio • {intent.reason}</span>
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  data-testid="contextual-create-diagram-btn"
+                                  onClick={() => triggerCreateMode('create_diagram')}
+                                  className="px-2.5 py-1 rounded-lg bg-white hover:bg-brand hover:text-white border border-brand-200 text-[11px] font-bold text-brand transition-colors cursor-pointer"
+                                >
+                                  Create Diagram
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid="contextual-create-visual-btn"
+                                  onClick={() => triggerCreateMode('visual_understanding')}
+                                  className="px-2.5 py-1 rounded-lg bg-white hover:bg-brand hover:text-white border border-brand-200 text-[11px] font-bold text-brand transition-colors cursor-pointer"
+                                >
+                                  Visual Understanding
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid="contextual-create-animated-btn"
+                                  onClick={() => triggerCreateMode('animated_explanation')}
+                                  className="px-2.5 py-1 rounded-lg bg-brand hover:bg-brand-strong text-white text-[11px] font-bold transition-colors cursor-pointer"
+                                >
+                                  Animated Explanation
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid="contextual-create-video-btn"
+                                  onClick={() => triggerCreateMode('video_style_explanation')}
+                                  className="px-2.5 py-1 rounded-lg bg-white hover:bg-brand hover:text-white border border-brand-200 text-[11px] font-bold text-brand transition-colors cursor-pointer"
+                                >
+                                  Video-style Explanation
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </article>

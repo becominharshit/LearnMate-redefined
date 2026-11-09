@@ -32,6 +32,10 @@ import { extractPagesFromPdf } from './utils/pdfExtractor';
 import { aiStudyClient } from './services/aiClient';
 import { splitTextIntoPages } from './utils/quizGrading';
 import {
+  stopAllGlobalAudioAndSpeech,
+  type ContextualCreateTransferPayload,
+} from './utils/phase6Engine';
+import {
   auth,
   firebaseConfigured,
   needsEmailVerification,
@@ -145,8 +149,10 @@ export function App() {
   );
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
-  // Modals
+  // Modals & Phase 6 Contextual Create Transfer State
   const [voiceTutorOpen, setVoiceTutorOpen] = useState(false);
+  const [contextualCreateTransfer, setContextualCreateTransfer] =
+    useState<ContextualCreateTransferPayload | null>(null);
 
   // Night Owl Theme State
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => studyStorage.getThemeMode());
@@ -244,6 +250,7 @@ export function App() {
 
   const goToApp = (tab: ActiveTab) => {
     const normalized = normalizeTab(tab);
+    stopAllGlobalAudioAndSpeech('workspace_tab_navigation');
     setPublicRoute(null);
     publicBackTargetRef.current = null;
     setActiveTab(normalized);
@@ -664,7 +671,7 @@ export function App() {
 
   const handleSubmitYouTubeUrl = async (
     url: string,
-    transcript: string,
+    transcript?: string,
     title?: string
   ) => {
     setErrorMessage(null);
@@ -847,7 +854,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-canvas text-ink pb-20 lg:pb-0">
+    <div className="min-h-screen flex flex-col bg-canvas text-ink pb-20 lg:pb-0 overflow-x-hidden">
       <DynamicCompanion activeDoc={effectiveDoc} />
       <Navbar
         activeTab={activeTab}
@@ -879,7 +886,7 @@ export function App() {
       />
 
       {/* Main Content Container */}
-      <main className="flex-1">
+      <main className="flex-1 min-w-0">
         {(activeTab === 'dashboard' || activeTab === 'home') && (
           <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <StudentDashboardView
@@ -924,6 +931,10 @@ export function App() {
             }}
             onOpenPdfWorkspace={() => goToApp('pdf-workspace')}
             onOpenUploadModal={() => openAddMaterialModal('pdf')}
+            onOpenContextualCreate={(payload) => {
+              setContextualCreateTransfer(payload);
+              goToApp('create');
+            }}
             isCloudSynced={!!user}
           />
         )}
@@ -1022,6 +1033,23 @@ export function App() {
             }}
             themeMode={themeMode}
             onNavigateToPage={(_pageNum) => {
+              setStudyInitialMode('explain');
+              goToApp('study');
+            }}
+            onNavigateTab={(tab) => {
+              if (tab === 'practice') {
+                goToApp('practice');
+              } else if (tab === 'revision') {
+                setReviseInitialSubTab('flashcards');
+                goToApp('revision');
+              } else if (tab === 'study') {
+                setStudyInitialMode('explain');
+                goToApp('study');
+              }
+            }}
+            contextualTransfer={contextualCreateTransfer}
+            onReturnToTutor={() => {
+              setContextualCreateTransfer(null);
               setStudyInitialMode('explain');
               goToApp('study');
             }}

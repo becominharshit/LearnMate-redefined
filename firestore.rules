@@ -38,9 +38,9 @@ service cloud.firestore {
              data.sourceType in ['pdf', 'text', 'youtube', 'scanned_notes', 'voice_note', 'course'] &&
              (!('youtubeUrl' in data) || (data.youtubeUrl is string && data.youtubeUrl.size() <= 1024)) &&
              (!('videoId' in data) || (data.videoId is string && data.videoId.size() <= 64)) &&
-             data.pageCount is int && data.pageCount >= 1 && data.pageCount <= 50 &&
-             data.pagesJson is string && data.pagesJson.size() <= 900000 &&
-             data.topicsJson is string && data.topicsJson.size() <= 200000 &&
+             data.pageCount is int && data.pageCount >= 1 && data.pageCount <= 120 &&
+             data.pagesJson is string && data.pagesJson.size() <= 700000 &&
+             data.topicsJson is string && data.topicsJson.size() <= 150000 &&
              data.overview is string && data.overview.size() <= 10000 &&
              data.createdAt is string && data.createdAt.size() <= 64 &&
              data.lastStudiedAt is string && data.lastStudiedAt.size() <= 64;
@@ -63,15 +63,23 @@ service cloud.firestore {
 
     function isValidStudyState(data, userId, docId) {
       return data.keys().hasAll(['documentId', 'uid', 'updatedAt']) &&
-             data.keys().hasOnly(['documentId', 'uid', 'updatedAt', 'tutorMessagesJson', 'mistakesJson', 'revisionPlanJson', 'cachedQuizJson', 'quickReviseJson']) &&
+             data.keys().hasOnly([
+               'documentId', 'uid', 'updatedAt',
+               'tutorMessagesJson', 'mistakesJson', 'revisionPlanJson',
+               'cachedQuizJson', 'quickReviseJson',
+               'conceptAttemptsJson', 'conceptMasteryJson', 'creativeAssetsJson'
+             ]) &&
              data.uid is string && data.uid == userId &&
              data.documentId is string && data.documentId == docId && data.documentId.size() <= 160 &&
              data.updatedAt is string && data.updatedAt.size() <= 64 &&
-             (!('tutorMessagesJson' in data) || (data.tutorMessagesJson is string && data.tutorMessagesJson.size() <= 600000)) &&
-             (!('mistakesJson' in data) || (data.mistakesJson is string && data.mistakesJson.size() <= 300000)) &&
-             (!('revisionPlanJson' in data) || (data.revisionPlanJson is string && data.revisionPlanJson.size() <= 300000)) &&
-             (!('cachedQuizJson' in data) || (data.cachedQuizJson is string && data.cachedQuizJson.size() <= 300000)) &&
-             (!('quickReviseJson' in data) || (data.quickReviseJson is string && data.quickReviseJson.size() <= 500000));
+             (!('tutorMessagesJson' in data) || (data.tutorMessagesJson is string && data.tutorMessagesJson.size() <= 150000)) &&
+             (!('mistakesJson' in data) || (data.mistakesJson is string && data.mistakesJson.size() <= 100000)) &&
+             (!('revisionPlanJson' in data) || (data.revisionPlanJson is string && data.revisionPlanJson.size() <= 100000)) &&
+             (!('cachedQuizJson' in data) || (data.cachedQuizJson is string && data.cachedQuizJson.size() <= 100000)) &&
+             (!('quickReviseJson' in data) || (data.quickReviseJson is string && data.quickReviseJson.size() <= 150000)) &&
+             (!('conceptAttemptsJson' in data) || (data.conceptAttemptsJson is string && data.conceptAttemptsJson.size() <= 120000)) &&
+             (!('conceptMasteryJson' in data) || (data.conceptMasteryJson is string && data.conceptMasteryJson.size() <= 80000)) &&
+             (!('creativeAssetsJson' in data) || (data.creativeAssetsJson is string && data.creativeAssetsJson.size() <= 150000));
     }
 
     // Reports a student files about an AI answer; reviewed by the LearnMate team in the console.
@@ -80,7 +88,7 @@ service cloud.firestore {
              data.keys().hasAll(['id', 'uid', 'kind', 'reason', 'excerpt', 'createdAt']) &&
              data.uid is string && data.uid == userId &&
              data.id is string && data.id == reportId && data.id.size() <= 160 &&
-             data.kind in ['tutor_answer', 'practice_question'] &&
+             data.kind in ['tutor_answer', 'practice_question', 'diagram', 'animated_explanation', 'concept_check'] &&
              data.reason in ['wrong', 'unclear', 'inappropriate', 'other'] &&
              (!('note' in data) || (data.note is string && data.note.size() <= 500)) &&
              data.excerpt is string && data.excerpt.size() <= 2000 &&

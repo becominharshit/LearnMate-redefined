@@ -284,7 +284,7 @@ export function validateAndSanitizeDiagramSpec(
   const validSubjects = ['Physics', 'Chemistry', 'Mathematics', 'General'] as const;
   const subject = validSubjects.includes(raw.subject) ? raw.subject : 'General';
 
-  return {
+  const candidateSpec: StructuredDiagramSpec = {
     title: sanitizeString(raw.title) || defaultConcept,
     category,
     subject,
@@ -301,6 +301,194 @@ export function validateAndSanitizeDiagramSpec(
     modelUsed: sanitizeString(raw.modelUsed) || undefined,
     provider: sanitizeString(raw.provider) || undefined,
     fallbackNotice: sanitizeString(raw.fallbackNotice) || undefined,
+  };
+
+  const semanticCheck = validateDiagramSemanticAccuracy(candidateSpec, defaultConcept);
+  if (!semanticCheck.isSemanticallyValid && semanticCheck.repairedOrFallbackSpec) {
+    return semanticCheck.repairedOrFallbackSpec;
+  }
+  return candidateSpec;
+}
+
+export interface DiagramSemanticValidationResult {
+  isSemanticallyValid: boolean;
+  warnings: string[];
+  errors: string[];
+  domainChecked: 'Physics' | 'Chemistry' | 'Mathematics' | 'General';
+  repairedOrFallbackSpec?: StructuredDiagramSpec;
+}
+
+/**
+ * Phase 6 Section 4 — Validates scientific and mathematical semantic accuracy
+ * of a `StructuredDiagramSpec` before rendering:
+ * - Physics: Gravity (`mg`) must point downward (+Y in SVG coordinates); Normal reaction (`N`)
+ *   must point upward/perpendicular (-Y); Friction (`f_s` / `f_k`) must only appear when
+ *   motion/tendency or friction is relevant.
+ * - Chemistry: VSEPR bond angles & lone pairs must match canonical values
+ *   (CH4: 109.5°, NH3: 107°, H2O: 104.5°, PCl5: 90°/120°).
+ * - Mathematics: Coordinate axes or conic loci must contain valid curve/axis geometry.
+ */
+export function validateDiagramSemanticAccuracy(
+  spec: StructuredDiagramSpec,
+  conceptHint = ''
+): DiagramSemanticValidationResult {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const combinedText = `${spec.title || ''} ${spec.description || ''} ${conceptHint}`.toLowerCase();
+
+  // 1. Physics Free-Body Diagram Semantic Validation
+  if (
+    spec.category === 'free_body_diagram' ||
+    /\b(free body|fbd|inclined plane|block on incline|normal force|gravity)\b/.test(combinedText)
+  ) {
+    const arrows = spec.elements.filter((el): el is DiagramArrow => el.kind === 'arrow');
+    if (arrows.length === 0) {
+      errors.push('Physics Free-Body Diagram is missing force vector arrows.');
+    }
+
+    for (const arrow of arrows) {
+      const lbl = (arrow.label || '').toLowerCase();
+      const dy = arrow.endY - arrow.startY;
+      // In SVG coordinates, +Y is downward. Gravity (mg / weight / F_g) must have dy > 0.
+      if (/\b(f_g|mg|m\s*g|weight|gravity)\b/.test(lbl) && !lbl.includes('sin') && !lbl.includes('cos')) {
+        if (dy <= 5) {
+          errors.push(
+            `Gravity vector "${arrow.label}" points upward or horizontally (Δy=${dy}); gravity must act vertically downward (+Y).`
+          );
+        }
+      }
+      // Normal reaction N must point upward (-Y, so dy < 0) for standard horizontal/inclined support
+      if (/\b(normal|^n$|\(n\))\b/.test(lbl)) {
+        if (dy >= 0) {
+          errors.push(
+            `Normal force vector "${arrow.label}" points downward (Δy=${dy}); normal reaction must point outward/upward from the contact surface.`
+          );
+        }
+      }
+      // Friction check on frictionless/smooth surface
+      if (
+        /\b(friction|f_s|f_k)\b/.test(lbl) &&
+        /\b(frictionless|smooth surface)\b/.test(combinedText)
+      ) {
+        errors.push(
+          `Friction vector "${arrow.label}" was drawn for a frictionless/smooth surface problem.`
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      const fallback = getDeterministicDiagramTemplate(
+        conceptHint || spec.title,
+        spec.description,
+        spec.citedPages
+      );
+      fallback.fallbackNotice = `Semantic Physics Validator repaired diagram: ${errors[0]}`;
+      return {
+        isSemanticallyValid: false,
+        warnings,
+        errors,
+        domainChecked: 'Physics',
+        repairedOrFallbackSpec: fallback,
+      };
+    }
+
+    return {
+      isSemanticallyValid: true,
+      warnings,
+      errors,
+      domainChecked: 'Physics',
+    };
+  }
+
+  // 2. Chemistry VSEPR & Molecular Geometry Semantic Validation
+  if (
+    spec.category === 'molecular_shape' ||
+    /\b(vsepr|h2o|nh3|ch4|pcl5|bond angle|lone pair|molecular)\b/.test(combinedText)
+  ) {
+    const allLabels = spec.elements
+      .map((el) => ('text' in el ? el.text : 'label' in el ? el.label : ''))
+      .filter(Boolean)
+      .join(' ');
+
+    if (/\bh2o\b|water/i.test(combinedText)) {
+      if (/\b(180|120|90)\s*°/.test(allLabels) && !allLabels.includes('104.5')) {
+        errors.push('H2O VSEPR geometry has inaccurate bond angle; expected 104.5° bent geometry.');
+      }
+    } else if (/\bnh3\b|ammonia/i.test(combinedText)) {
+      if (/\b(180|120|90)\s*°/.test(allLabels) && !allLabels.includes('107')) {
+        errors.push('NH3 VSEPR geometry has inaccurate bond angle; expected ~107° trigonal pyramidal.');
+      }
+    } else if (/\bch4\b|methane/i.test(combinedText)) {
+      if (/\b(180|90)\s*°/.test(allLabels) && !allLabels.includes('109.5')) {
+        errors.push('CH4 VSEPR geometry has inaccurate bond angle; expected 109.5° tetrahedral.');
+      }
+    }
+
+    if (errors.length > 0) {
+      const fallback = getDeterministicDiagramTemplate(
+        conceptHint || spec.title,
+        spec.description,
+        spec.citedPages
+      );
+      fallback.fallbackNotice = `Semantic Chemistry Validator repaired diagram: ${errors[0]}`;
+      return {
+        isSemanticallyValid: false,
+        warnings,
+        errors,
+        domainChecked: 'Chemistry',
+        repairedOrFallbackSpec: fallback,
+      };
+    }
+
+    return {
+      isSemanticallyValid: true,
+      warnings,
+      errors,
+      domainChecked: 'Chemistry',
+    };
+  }
+
+  // 3. Mathematics Conic Sections & Coordinate Geometry Validation
+  if (
+    spec.category === 'conic' ||
+    spec.category === 'conic_section' ||
+    /\b(parabola|ellipse|hyperbola|conic|latus rectum|directrix)\b/.test(combinedText)
+  ) {
+    const hasCurveOrCircle = spec.elements.some(
+      (el) => el.kind === 'path' || el.kind === 'circle' || el.kind === 'arc'
+    );
+    const hasAxis = spec.elements.some((el) => el.kind === 'arrow' || el.kind === 'line');
+
+    if (!hasCurveOrCircle || !hasAxis) {
+      errors.push('Mathematics conic/coordinate diagram is missing either coordinate axes or locus curve.');
+      const fallback = getDeterministicDiagramTemplate(
+        conceptHint || spec.title,
+        spec.description,
+        spec.citedPages
+      );
+      fallback.fallbackNotice = `Semantic Mathematics Validator repaired diagram: ${errors[0]}`;
+      return {
+        isSemanticallyValid: false,
+        warnings,
+        errors,
+        domainChecked: 'Mathematics',
+        repairedOrFallbackSpec: fallback,
+      };
+    }
+
+    return {
+      isSemanticallyValid: true,
+      warnings,
+      errors,
+      domainChecked: 'Mathematics',
+    };
+  }
+
+  return {
+    isSemanticallyValid: spec.elements.length >= 2,
+    warnings,
+    errors: spec.elements.length < 2 ? ['Diagram has fewer than 2 valid geometric elements.'] : [],
+    domainChecked: spec.subject,
   };
 }
 

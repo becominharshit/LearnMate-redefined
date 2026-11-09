@@ -7,6 +7,7 @@
  */
 
 import type { DiagramElement, StructuredDiagramSpec } from '../types/diagram';
+import type { MistakeInsight, RevisionTask } from '../types/study';
 import {
   clampNumber,
   getDeterministicDiagramTemplate,
@@ -168,6 +169,148 @@ export interface AnimatedDiagramStep {
   visibleElementIds: string[];
 }
 
+export type ConceptCheckQuestionType = 'mcq' | 'numerical';
+export type ConceptCheckDifficulty = 'standard' | 'reteach' | 'challenge';
+
+export interface ConceptMisconceptionRule {
+  id: string;
+  distractorIndex?: number;
+  wrongNumericalTarget?: number;
+  wrongNumericalTolerance?: number;
+  misconceptionSummary: string;
+  whyIncorrect: string;
+  coreConceptFix: string;
+  highlightElementIds?: string[];
+}
+
+export interface SceneConceptCheckQuestion {
+  id: string;
+  sceneNumber: number;
+  topic: string;
+  subject: EducationalSubject;
+  teachingPoint: string;
+  questionType: ConceptCheckQuestionType;
+  difficulty: ConceptCheckDifficulty;
+  statement: string;
+  options?: [string, string, string, string];
+  correctIndex?: number;
+  numericalAnswer?: number;
+  numericalTolerance?: number;
+  acceptedUnits?: string[];
+  unitHint?: string;
+  explanation: string;
+  keyFormula: string;
+  misconceptions: ConceptMisconceptionRule[];
+  citedPages: number[];
+  isSupportedByMaterial: boolean;
+  sourceDocumentTitle?: string;
+  provenance: 'ai_grounded' | 'deterministic_fallback';
+}
+
+export interface SceneReteachingSpec {
+  sceneNumber: number;
+  teachingPoint: string;
+  alternativeExplanation: string;
+  stepByStepBreakdown: string[];
+  highlightElementIds: string[];
+  keyFormula: string;
+  followUpQuestion: SceneConceptCheckQuestion;
+}
+
+export interface ConceptCheckAttemptRecord {
+  attemptId: string;
+  studentUid: string;
+  documentId: string;
+  documentTitle: string;
+  topic: string;
+  subject: EducationalSubject;
+  sceneNumber: number;
+  teachingPoint: string;
+  questionId: string;
+  questionType: ConceptCheckQuestionType;
+  provenance: 'ai_grounded' | 'deterministic_fallback';
+  selectedOptionIndex?: number;
+  selectedOptionText?: string;
+  enteredNumericalText?: string;
+  normalizedNumericalValue?: number | null;
+  correctAnswerDisplay: string;
+  isCorrect: boolean;
+  skipped: boolean;
+  attemptNumberForScene: number;
+  detectedMisconception?: {
+    id: string;
+    summary: string;
+    whyIncorrect: string;
+    coreConceptFix: string;
+    highlightElementIds?: string[];
+  } | null;
+  triggeredReteaching: boolean;
+  completedReteaching: boolean;
+  citedPages: number[];
+  isSupportedByMaterial: boolean;
+  timestamp: string;
+}
+
+export type SceneMasteryStatus =
+  | 'unseen'
+  | 'in_progress'
+  | 'skipped'
+  | 'correct_first_try'
+  | 'correct_after_retry'
+  | 'needs_reteaching'
+  | 'struggling';
+
+export interface SceneConceptMasteryState {
+  sceneNumber: number;
+  status: SceneMasteryStatus;
+  attemptsCount: number;
+  wrongAttemptsCount: number;
+  correctAttemptsCount: number;
+  skippedCount: number;
+  activeVariant: ConceptCheckDifficulty;
+  reteachingUnlocked: boolean;
+  reteachingCompleted: boolean;
+  lastAttempt?: ConceptCheckAttemptRecord | null;
+}
+
+export interface RecommendedNextAction {
+  kind:
+    | 'continue_next_scene'
+    | 'try_challenge'
+    | 'review_and_retry_scene'
+    | 'open_visual_reteaching'
+    | 'adaptive_practice'
+    | 'quick_revise'
+    | 'resume_scene';
+  label: string;
+  targetSceneNumber?: number;
+  targetTab?: 'practice' | 'revision' | 'study';
+}
+
+export interface LessonMasterySummary {
+  totalScenes: number;
+  attemptedScenes: number;
+  verifiedScenes: number;
+  firstTryCorrectScenes: number;
+  retryCorrectScenes: number;
+  strugglingScenes: number[];
+  skippedScenes: number[];
+  uncompletedScenes: number[];
+  checkpointCompletionPct: number;
+  evidenceScorePct: number;
+  estimatedConceptReadinessLabel: string;
+  overallStatus:
+    | 'unstarted'
+    | 'incomplete'
+    | 'strong'
+    | 'some_errors'
+    | 'repeated_misunderstanding';
+  headline: string;
+  rationale: string;
+  recommendedAction: RecommendedNextAction;
+  secondaryAction?: RecommendedNextAction;
+}
+
 export interface AnimatedExplanationScene {
   sceneNumber: number;
   durationSeconds: number;
@@ -182,6 +325,8 @@ export interface AnimatedExplanationScene {
   isSupportedByMaterial: boolean;
   spec: StructuredDiagramSpec;
   progressiveSteps: AnimatedDiagramStep[];
+  conceptCheck?: SceneConceptCheckQuestion;
+  reteaching?: SceneReteachingSpec;
 }
 
 export interface ValidatedAnimatedExplanationResult {
@@ -215,6 +360,9 @@ export type ScenePlayerAction =
   | { type: 'PREV_STEP'; totalSteps: number }
   | { type: 'SELECT_STEP'; stepIndex: number; totalSteps: number }
   | { type: 'TOGGLE_MUTE' }
+  | { type: 'OPEN_CONCEPT_CHECK' }
+  | { type: 'START_RETEACHING'; totalSteps?: number }
+  | { type: 'REPLAY_SCENE' }
   | { type: 'CLOSE_PLAYER' }
   | { type: 'LEAVE_CREATE' };
 
@@ -2019,10 +2167,16 @@ export function buildAnimatedExplanationScenes(
         },
       ];
 
-      return rawScenes.map(({ stepLabels, ...scene }) => ({
-        ...scene,
-        progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
-      }));
+      return rawScenes.map(({ stepLabels, ...scene }) =>
+        attachConceptMasteryToScene(
+          {
+            ...scene,
+            progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
+          },
+          cleanTopic,
+          subject
+        )
+      );
     }
 
     // Default Physics: Projectile Motion & 2D Kinematics (4 scenes)
@@ -2165,10 +2319,16 @@ export function buildAnimatedExplanationScenes(
       },
     ];
 
-    return rawPhysicsScenes.map(({ stepLabels, ...scene }) => ({
-      ...scene,
-      progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
-    }));
+    return rawPhysicsScenes.map(({ stepLabels, ...scene }) =>
+      attachConceptMasteryToScene(
+        {
+          ...scene,
+          progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
+        },
+        cleanTopic,
+        subject
+      )
+    );
   }
 
   if (subject === 'Chemistry') {
@@ -2298,10 +2458,16 @@ export function buildAnimatedExplanationScenes(
       },
     ];
 
-    return rawChemistryScenes.map(({ stepLabels, ...scene }) => ({
-      ...scene,
-      progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
-    }));
+    return rawChemistryScenes.map(({ stepLabels, ...scene }) =>
+      attachConceptMasteryToScene(
+        {
+          ...scene,
+          progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
+        },
+        cleanTopic,
+        subject
+      )
+    );
   }
 
   // Mathematics: check if Conic / Parabola / Quadratic vs Probability & Bayes' Theorem
@@ -2437,10 +2603,16 @@ export function buildAnimatedExplanationScenes(
       },
     ];
 
-    return rawConicScenes.map(({ stepLabels, ...scene }) => ({
-      ...scene,
-      progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
-    }));
+    return rawConicScenes.map(({ stepLabels, ...scene }) =>
+      attachConceptMasteryToScene(
+        {
+          ...scene,
+          progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
+        },
+        cleanTopic,
+        subject
+      )
+    );
   }
 
   // Default Mathematics (aligned with built-in JEE Sample Chapter: Probability, Conditional Probability & Bayes' Theorem)
@@ -2585,10 +2757,16 @@ export function buildAnimatedExplanationScenes(
     },
   ];
 
-  return rawMathScenes.map(({ stepLabels, ...scene }) => ({
-    ...scene,
-    progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
-  }));
+  return rawMathScenes.map(({ stepLabels, ...scene }) =>
+    attachConceptMasteryToScene(
+      {
+        ...scene,
+        progressiveSteps: buildProgressiveStepsForDiagram(scene.spec, stepLabels),
+      },
+      cleanTopic,
+      subject
+    )
+  );
 }
 
 /**
@@ -2785,7 +2963,7 @@ export function validateAndSanitizeAnimatedExplanation(
     }
     const progressiveSteps = buildProgressiveStepsForDiagram(sceneSpec, customStepLabels);
 
-    sanitizedScenes.push({
+    const baseScene: AnimatedExplanationScene = {
       sceneNumber: i + 1,
       durationSeconds,
       heading,
@@ -2799,7 +2977,21 @@ export function validateAndSanitizeAnimatedExplanation(
       isSupportedByMaterial: citationInfo.isSupported,
       spec: sceneSpec,
       progressiveSteps,
-    });
+    };
+
+    const enrichedScene = attachConceptMasteryToScene(baseScene, safeTopic, subject);
+    if (s.conceptCheck && typeof s.conceptCheck === 'object') {
+      const validatedCheck = validateAndSanitizeConceptCheck(s.conceptCheck, enrichedScene, {
+        topic: safeTopic,
+        subject,
+        contextText,
+        citedPages: sceneCitedPages,
+        validPageNumbers: options.validPageNumbers,
+      });
+      enrichedScene.conceptCheck = validatedCheck.question;
+    }
+
+    sanitizedScenes.push(enrichedScene);
   }
 
   return {
@@ -2952,6 +3144,35 @@ export function transitionScenePlayerState(
       };
     }
 
+    case 'OPEN_CONCEPT_CHECK':
+      return {
+        ...state,
+        isPlaying: false,
+        speechCancelCount: cancelSpeech(),
+      };
+
+    case 'START_RETEACHING': {
+      const targetStep =
+        typeof action.totalSteps === 'number' && action.totalSteps > 0
+          ? Math.max(0, action.totalSteps - 1)
+          : state.activeStepIndex;
+      return {
+        ...state,
+        isPlaying: false,
+        activeStepIndex: targetStep,
+        speechCancelCount: cancelSpeech(),
+      };
+    }
+
+    case 'REPLAY_SCENE':
+      if (!state.isOpen) return state;
+      return {
+        ...state,
+        activeStepIndex: 0,
+        isPlaying: true,
+        speechCancelCount: cancelSpeech(),
+      };
+
     case 'CLOSE_PLAYER':
       return {
         ...state,
@@ -2973,4 +3194,2603 @@ export function transitionScenePlayerState(
       return state;
   }
 }
+
+/* ============================================================================
+ * PHASE 5.3 — INTERACTIVE CONCEPT MASTERY, MISCONCEPTION DETECTION & RETEACHING
+ * ============================================================================ */
+
+/**
+ * Attaches deterministic, teachingPoint-aligned concept check and visual reteaching
+ * specs to an AnimatedExplanationScene.
+ */
+export function attachConceptMasteryToScene(
+  scene: AnimatedExplanationScene,
+  topic: string,
+  subject?: EducationalSubject
+): AnimatedExplanationScene {
+  const resolvedSubject = subject || detectEducationalSubject(`${topic} ${scene.heading}`);
+  const conceptCheck = buildDeterministicSceneConceptCheck(scene, {
+    topic,
+    subject: resolvedSubject,
+    difficulty: 'standard',
+  });
+  const reteaching = buildDeterministicSceneReteaching(scene, {
+    topic,
+    subject: resolvedSubject,
+  });
+  return {
+    ...scene,
+    conceptCheck,
+    reteaching,
+  };
+}
+
+/**
+ * Normalizes a student's numerical answer string (supporting decimals, fractions like "1/6",
+ * percentages, scientific notation like "1.6e-19" or "1.6 x 10^-19", and trailing units)
+ * and grades it against expectedValue within tolerance.
+ */
+export function normalizeAndGradeNumericalAnswer(
+  rawInput: unknown,
+  expectedValue: number,
+  tolerance?: number,
+  acceptedUnits?: string[]
+): {
+  validInput: boolean;
+  normalizedValue: number | null;
+  isCorrect: boolean;
+  effectiveTolerance: number;
+  errorReason?: string;
+} {
+  const effectiveTolerance =
+    typeof tolerance === 'number' && Number.isFinite(tolerance) && tolerance >= 0
+      ? tolerance
+      : Math.max(0.05, Math.abs(expectedValue) * 0.02);
+
+  if (rawInput === null || rawInput === undefined) {
+    return {
+      validInput: false,
+      normalizedValue: null,
+      isCorrect: false,
+      effectiveTolerance,
+      errorReason: 'Empty numerical answer.',
+    };
+  }
+
+  let text = String(rawInput).trim();
+  if (!text) {
+    return {
+      validInput: false,
+      normalizedValue: null,
+      isCorrect: false,
+      effectiveTolerance,
+      errorReason: 'Empty numerical answer.',
+    };
+  }
+
+  // Normalize unicode minus and multiplication signs
+  text = text
+    .replace(/[−–—]/g, '-')
+    .replace(/,/g, '')
+    .replace(/\s*×\s*10\^?\(?([+-]?\d+)\)?/i, 'e$1')
+    .replace(/\s*\*\s*10\^?\(?([+-]?\d+)\)?/i, 'e$1')
+    .trim();
+
+  // Dimensional unit equivalence groups so synonymous unit notations are accepted
+  // while dimensionally incompatible or unscaled units are rejected.
+  const UNIT_EQUIVALENCE_GROUPS: string[][] = [
+    ['n', 'newton', 'newtons', 'kg m/s^2', 'kg m/s²', 'kg·m/s²'],
+    ['m/s^2', 'm/s²', 'm s^-2', 'ms^-2', 'm·s^-2'],
+    ['m/s', 'm s^-1', 'ms^-1', 'm·s^-1'],
+    ['km/h', 'kmph', 'km h^-1'],
+    ['rad/s', 'rad s^-1'],
+    ['rad', 'radian', 'radians'],
+    ['deg', 'degree', 'degrees', '°'],
+    ['j', 'joule', 'joules', 'n m', 'n·m'],
+    ['w', 'watt', 'watts', 'j/s'],
+    ['pa', 'pascal', 'pascals', 'n/m^2', 'n/m²'],
+    ['hz', 'hertz', 's^-1'],
+    ['c', 'coulomb', 'coulombs'],
+    ['v', 'volt', 'volts'],
+    ['ohm', 'ohms', 'ω', 'Ω'],
+    ['m', 'meter', 'meters', 'metre', 'metres'],
+    ['cm', 'centimeter', 'centimeters'],
+    ['mm', 'millimeter', 'millimeters'],
+    ['s', 'sec', 'second', 'seconds'],
+    ['kg', 'kilogram', 'kilograms'],
+    ['g', 'gram', 'grams'],
+    ['mol', 'mole', 'moles'],
+    ['d', 'debye', 'debyes'],
+    ['å', 'angstrom', 'angstroms'],
+    ['%'],
+  ];
+
+  const areUnitsDimensionallyEquivalent = (u1: string, u2: string): boolean => {
+    const n1 = u1.trim().toLowerCase().replace(/\s+/g, ' ');
+    const n2 = u2.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (n1 === n2) return true;
+    for (const group of UNIT_EQUIVALENCE_GROUPS) {
+      if (group.includes(n1) && group.includes(n2)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Separate leading numeric/fraction expression from any trailing unit string
+  const numWithUnitMatch = text.match(
+    /^([+-]?\d+(?:\.\d+)?\s*\/\s*[+-]?\d+(?:\.\d+)?|[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*(.*)$/i
+  );
+
+  if (!numWithUnitMatch) {
+    return {
+      validInput: false,
+      normalizedValue: null,
+      isCorrect: false,
+      effectiveTolerance,
+      errorReason: 'Input is not a valid number or fraction.',
+    };
+  }
+
+  const numericPart = numWithUnitMatch[1].trim();
+  const trailingUnit = numWithUnitMatch[2].trim();
+
+  if (trailingUnit) {
+    const hasExplicitAcceptedUnits =
+      Array.isArray(acceptedUnits) && acceptedUnits.some((u) => String(u).trim().length > 0);
+
+    if (hasExplicitAcceptedUnits) {
+      const cleanAccepted = (acceptedUnits || []).map((u) => String(u).trim()).filter(Boolean);
+      const isCompatible = cleanAccepted.some((acc) =>
+        areUnitsDimensionallyEquivalent(trailingUnit, acc)
+      );
+      if (!isCompatible) {
+        return {
+          validInput: false,
+          normalizedValue: null,
+          isCorrect: false,
+          effectiveTolerance,
+          errorReason: `Incompatible physical unit "${trailingUnit}". Expected ${cleanAccepted.join(' or ')}.`,
+        };
+      }
+    } else {
+      // No explicit acceptedUnits on question: only allow known standard units, reject arbitrary text
+      const allKnownUnits = UNIT_EQUIVALENCE_GROUPS.flat();
+      const isKnown = allKnownUnits.some((known) =>
+        areUnitsDimensionallyEquivalent(trailingUnit, known)
+      );
+      if (!isKnown) {
+        return {
+          validInput: false,
+          normalizedValue: null,
+          isCorrect: false,
+          effectiveTolerance,
+          errorReason: `Unrecognized trailing unit or text "${trailingUnit}".`,
+        };
+      }
+    }
+  }
+
+  text = numericPart;
+
+  // Check fraction format: "a / b"
+  const fractionMatch = text.match(/^([+-]?\d+(?:\.\d+)?)\s*\/\s*([+-]?\d+(?:\.\d+)?)$/);
+  let parsedValue: number;
+  if (fractionMatch) {
+    const num = Number(fractionMatch[1]);
+    const den = Number(fractionMatch[2]);
+    if (!Number.isFinite(num) || !Number.isFinite(den) || Math.abs(den) < 1e-12) {
+      return {
+        validInput: false,
+        normalizedValue: null,
+        isCorrect: false,
+        effectiveTolerance,
+        errorReason: 'Division by zero or invalid fraction.',
+      };
+    }
+    parsedValue = num / den;
+  } else {
+    // Must strictly match a valid decimal or scientific number
+    if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) {
+      return {
+        validInput: false,
+        normalizedValue: null,
+        isCorrect: false,
+        effectiveTolerance,
+        errorReason: 'Input is not a valid number or fraction.',
+      };
+    }
+    parsedValue = Number(text);
+  }
+
+  if (!Number.isFinite(parsedValue)) {
+    return {
+      validInput: false,
+      normalizedValue: null,
+      isCorrect: false,
+      effectiveTolerance,
+      errorReason: 'Parsed value is not finite.',
+    };
+  }
+
+  const isCorrect = Math.abs(parsedValue - expectedValue) <= effectiveTolerance + 1e-9;
+
+  return {
+    validInput: true,
+    normalizedValue: Number(parsedValue.toFixed(6)),
+    isCorrect,
+    effectiveTolerance,
+  };
+}
+
+/**
+ * Generates a deterministic, teachingPoint-aligned SceneConceptCheckQuestion for any scene,
+ * supporting 'standard', 'reteach' (equivalent retry question), and 'challenge' variants.
+ */
+export function buildDeterministicSceneConceptCheck(
+  scene: Pick<
+    AnimatedExplanationScene,
+    | 'sceneNumber'
+    | 'heading'
+    | 'teachingPoint'
+    | 'keyFormula'
+    | 'citedPages'
+    | 'isSupportedByMaterial'
+    | 'spec'
+  >,
+  options: {
+    topic: string;
+    subject?: EducationalSubject;
+    difficulty?: ConceptCheckDifficulty;
+    sourceDocumentTitle?: string;
+  }
+): SceneConceptCheckQuestion {
+  const safeTopic = sanitizeBoundedString(options.topic || 'Core Study Concept', 120) || 'Core Study Concept';
+  const subject = options.subject || detectEducationalSubject(`${safeTopic} ${scene.heading}`);
+  const difficulty: ConceptCheckDifficulty = options.difficulty || 'standard';
+  const sceneNum = clampNumber(scene.sceneNumber, 1, 6, 1);
+  const lower = `${safeTopic} ${scene.heading} ${scene.teachingPoint}`.toLowerCase();
+  const elementIds = scene.spec?.elements?.map((el) => el.id) || [];
+  const defaultHighlights = elementIds.slice(0, 3);
+
+  const baseMeta = {
+    sceneNumber: sceneNum,
+    topic: safeTopic,
+    subject,
+    teachingPoint: scene.teachingPoint,
+    difficulty,
+    citedPages: Array.isArray(scene.citedPages) ? scene.citedPages : [],
+    isSupportedByMaterial: Boolean(scene.isSupportedByMaterial),
+    sourceDocumentTitle: options.sourceDocumentTitle,
+    provenance: 'deterministic_fallback' as const,
+  };
+
+  // 1. PHYSICS: Inclined Plane Free-Body Diagram & Normal Reaction / Friction
+  if (
+    subject === 'Physics' &&
+    (lower.includes('incline') ||
+      lower.includes('wedge') ||
+      lower.includes('normal') ||
+      lower.includes('friction') ||
+      lower.includes('mg cos') ||
+      lower.includes('free body') ||
+      lower.includes('fbd'))
+  ) {
+    if (sceneNum === 1) {
+      if (difficulty === 'reteach') {
+        return {
+          ...baseMeta,
+          id: `cc-phys-incline-s1-reteach`,
+          questionType: 'mcq',
+          statement:
+            'When a block slides strictly along a rigid inclined plane of angle θ without lifting off, what is the component of acceleration perpendicular to the inclined surface (a_y)?',
+          options: [
+            'a_y = 0 m/s² because motion is constrained parallel to the ramp',
+            'a_y = g = 9.8 m/s² downward along the y-axis',
+            'a_y = g sin θ perpendicular to the incline',
+            'a_y = g cos θ upward away from the ramp',
+          ],
+          correctIndex: 0,
+          explanation:
+            'Because the block neither sinks into the rigid wedge nor flies off it, velocity and acceleration perpendicular to the surface are identically zero (a_y = 0).',
+          keyFormula: 'a_y = 0 (perpendicular to incline)',
+          misconceptions: [
+            {
+              id: 'phys-inc-axes-unrotated',
+              distractorIndex: 1,
+              misconceptionSummary:
+                'Confusing vertical gravitational acceleration g with acceleration normal to the ramp.',
+              whyIncorrect:
+                'The ramp’s normal force N balances the perpendicular component of gravity, keeping a_y = 0.',
+              coreConceptFix:
+                'Rotate axes so +x runs along the ramp and +y is perpendicular to the surface; then ΣF_y = m·a_y = 0.',
+              highlightElementIds: ['s1-axis-x', 's1-axis-y', 's1-ramp'],
+            },
+            {
+              id: 'phys-inc-sin-normal-swap',
+              distractorIndex: 2,
+              misconceptionSummary:
+                'Assigning the parallel driving acceleration g sin θ to the perpendicular axis.',
+              whyIncorrect:
+                'g sin θ acts parallel to the ramp (+x), whereas motion along the normal (+y) is zero.',
+              coreConceptFix:
+                'Keep x-axis parallel to the surface (where a_x = g sin θ on a smooth ramp) and y-axis normal (where a_y = 0).',
+              highlightElementIds: ['s1-axis-x', 's1-axis-y'],
+            },
+          ],
+        };
+      }
+      return {
+        ...baseMeta,
+        id: `cc-phys-incline-s1-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          'Why do we rotate the coordinate axes so that the x-axis is parallel to the incline and the y-axis is perpendicular to the incline?',
+        options: [
+          'So acceleration perpendicular to the ramp is zero (a_y = 0) and motion is 1D along x',
+          'Because normal reaction N always acts vertically upward against gravity',
+          'So that weight mg acts purely along the x-axis with no y-component',
+          'Because friction acts perpendicular to the inclined surface',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Aligning x parallel to the ramp and y normal to the ramp confines all motion to the x-axis, giving ΣF_y = N − mg cos θ = 0 (since a_y = 0).',
+        keyFormula: 'a_y = 0,   ΣF_y = N − mg cos θ = 0',
+        misconceptions: [
+          {
+            id: 'phys-inc-normal-vertical',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Assuming normal reaction N always points vertically upward (so N = mg).',
+            whyIncorrect:
+              'Normal force N is always perpendicular to the contact surface, which is tilted by angle θ from the horizontal.',
+            coreConceptFix:
+              'Draw N perpendicular to the inclined ramp (+y), not straight up; N balances mg cos θ, not full mg.',
+            highlightElementIds: ['s1-axis-y', 's1-ramp', 's1-block'],
+          },
+          {
+            id: 'phys-inc-weight-along-x',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Assuming gravity mg rotates with the inclined plane to act purely along the ramp.',
+            whyIncorrect:
+              'Gravity always pulls straight down toward the center of the Earth and must be resolved into mg sin θ and mg cos θ.',
+            coreConceptFix:
+              'Keep weight mg vertical, then project it onto the tilted x (mg sin θ) and y (mg cos θ) axes.',
+            highlightElementIds: ['s1-axis-x', 's1-axis-y', 's1-arc'],
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 2) {
+      if (difficulty === 'reteach') {
+        return {
+          ...baseMeta,
+          id: `cc-phys-incline-s2-reteach`,
+          questionType: 'mcq',
+          statement:
+            'As the incline angle θ approaches 0° (a flat horizontal table), what must the perpendicular component of weight F_⊥ equal, and which trigonometric function satisfies this limit?',
+          options: [
+            'F_⊥ = mg cos θ, because cos(0°) = 1 gives F_⊥ = mg on a flat surface',
+            'F_⊥ = mg sin θ, because sin(0°) = 1 on a flat surface',
+            'F_⊥ = mg tan θ, because tan(0°) = 1',
+            'F_⊥ = mg always, regardless of incline angle θ',
+          ],
+          correctIndex: 0,
+          explanation:
+            'Checking the boundary limit θ → 0° immediately confirms F_⊥ = mg cos θ (since cos 0° = 1 → mg) and F_∥ = mg sin θ (since sin 0° = 0 → 0).',
+          keyFormula: 'F_⊥ = mg cos θ,   F_∥ = mg sin θ',
+          misconceptions: [
+            {
+              id: 'phys-inc-trig-swap',
+              distractorIndex: 1,
+              misconceptionSummary:
+                'Swapping sin θ and cos θ when resolving vertical weight mg onto tilted axes.',
+              whyIncorrect:
+                'At θ = 0°, sin(0°) = 0, which would falsely predict zero normal force on a flat table.',
+              coreConceptFix:
+                'The angle between vertical mg and the inward normal is θ (adjacent side), so F_⊥ = mg cos θ and F_∥ = mg sin θ.',
+              highlightElementIds: ['s2-mg', 's2-mgcos', 's2-mgsin'],
+            },
+            {
+              id: 'phys-inc-normal-equals-mg',
+              distractorIndex: 3,
+              misconceptionSummary:
+                'Assuming the normal component of gravity equals full weight mg instead of mg cos θ.',
+              whyIncorrect:
+                'As the ramp tilts by θ > 0°, part of gravity (mg sin θ) pulls along the slope, reducing the perpendicular press to mg cos θ.',
+              coreConceptFix:
+                'Resolve vertical mg into orthogonal components: F_⊥ = mg cos θ into the ramp and F_∥ = mg sin θ down the ramp.',
+              highlightElementIds: ['s2-mg', 's2-mgcos', 's2-angle'],
+            },
+          ],
+        };
+      }
+      return {
+        ...baseMeta,
+        id: `cc-phys-incline-s2-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          'A block of mass m rests on an incline of angle θ. How does vertical weight mg resolve into components perpendicular (F_⊥) and parallel (F_∥) to the inclined surface?',
+        options: [
+          'F_⊥ = mg cos θ (into ramp) and F_∥ = mg sin θ (down ramp)',
+          'F_⊥ = mg (into ramp) and F_∥ = mg sin θ (down ramp)',
+          'F_⊥ = mg sin θ (into ramp) and F_∥ = mg cos θ (down ramp)',
+          'F_⊥ = mg / cos θ (into ramp) and F_∥ = mg tan θ (down ramp)',
+        ],
+        correctIndex: 0,
+        explanation:
+          'By similar right triangles, the angle between vertical weight mg and the line perpendicular to the incline is θ. The adjacent component is F_⊥ = mg cos θ and the opposite component is F_∥ = mg sin θ.',
+        keyFormula: 'F_∥ = mg sin θ,   F_⊥ = mg cos θ',
+        misconceptions: [
+          {
+            id: 'phys-inc-normal-always-mg',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Assuming normal component of weight always equals full weight mg instead of mg cos θ.',
+            whyIncorrect:
+              'Full weight mg is the hypotenuse of the force triangle; the perpendicular leg cannot equal the hypotenuse when θ > 0°.',
+            coreConceptFix:
+              'Project mg onto the normal axis using cosine of the incline angle: F_⊥ = mg cos θ.',
+            highlightElementIds: ['s2-mg', 's2-mgcos', 's2-angle'],
+          },
+          {
+            id: 'phys-inc-sin-cos-interchange',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Interchanging sin θ and cos θ components of gravity on an inclined plane.',
+            whyIncorrect:
+              'The angle θ lies between vertical mg and the normal axis, making the normal component adjacent (cos θ), not opposite (sin θ).',
+            coreConceptFix:
+              'Remember: "Cosine crushes the block into the ramp (mg cos θ); Sine slides the block down the ramp (mg sin θ)."',
+            highlightElementIds: ['s2-mgcos', 's2-mgsin', 's2-angle'],
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 3) {
+      if (difficulty === 'challenge') {
+        return {
+          ...baseMeta,
+          id: `cc-phys-incline-s3-challenge`,
+          questionType: 'numerical',
+          statement:
+            'A block of mass m = 4 kg rests on an inclined plane tilted at θ = 60° to the horizontal (take g = 10 m/s² and cos 60° = 0.5). What is the magnitude of the normal reaction N exerted by the incline on the block (in N)?',
+          numericalAnswer: 20,
+          numericalTolerance: 0.5,
+          acceptedUnits: ['N', 'newtons'],
+          unitHint: 'N',
+          explanation:
+            'Perpendicular equilibrium gives N = mg cos θ = 4 × 10 × cos(60°) = 40 × 0.5 = 20 N (not mg = 40 N).',
+          keyFormula: 'N = mg cos θ = 4 × 10 × 0.5 = 20 N',
+          misconceptions: [
+            {
+              id: 'phys-inc-normal-equals-mg-num',
+              wrongNumericalTarget: 40,
+              wrongNumericalTolerance: 1,
+              misconceptionSummary:
+                'Assuming normal reaction N equals full weight mg (40 N) instead of mg cos θ (20 N).',
+              whyIncorrect:
+                'On a 60° incline, gravity acts vertically downward while normal reaction acts perpendicular to the surface, so N balances only mg cos 60° = 0.5 mg = 20 N.',
+              coreConceptFix:
+                'Always apply ΣF_y = N − mg cos θ = 0 perpendicular to the incline: N = mg cos θ.',
+              highlightElementIds: ['s3-normal', 's3-mgcos', 's3-note'],
+            },
+            {
+              id: 'phys-inc-normal-mgsin-num',
+              wrongNumericalTarget: 34.64,
+              wrongNumericalTolerance: 1.0,
+              misconceptionSummary:
+                'Using mg sin 60° (≈ 34.6 N) instead of mg cos 60° for normal reaction N.',
+              whyIncorrect:
+                'mg sin θ is the tangential force pulling the block down the incline, not the perpendicular force pressing into the surface.',
+              coreConceptFix:
+                'Use cosine for the perpendicular normal balance: N = mg cos θ = 20 N.',
+              highlightElementIds: ['s3-normal', 's3-mgcos'],
+            },
+          ],
+        };
+      }
+      if (difficulty === 'reteach') {
+        return {
+          ...baseMeta,
+          id: `cc-phys-incline-s3-reteach`,
+          questionType: 'numerical',
+          statement:
+            'A block of mass m = 2 kg is placed on a ramp inclined at θ = 60° (take g = 10 m/s² and cos 60° = 0.5). Compute the normal reaction force N (in N) exerted by the incline.',
+          numericalAnswer: 10,
+          numericalTolerance: 0.5,
+          acceptedUnits: ['N', 'newtons'],
+          unitHint: 'N',
+          explanation:
+            'Using ΣF_y = N − mg cos θ = 0 gives N = mg cos(60°) = 2 × 10 × 0.5 = 10 N (half of the full 20 N weight).',
+          keyFormula: 'N = mg cos θ = 2 × 10 × cos(60°) = 10 N',
+          misconceptions: [
+            {
+              id: 'phys-inc-normal-equals-mg-reteach',
+              wrongNumericalTarget: 20,
+              wrongNumericalTolerance: 0.8,
+              misconceptionSummary:
+                'Assuming normal reaction N always equals full weight mg (20 N) instead of mg cos θ (10 N).',
+              whyIncorrect:
+                'N = mg holds only on a flat horizontal surface (θ = 0°). On a 60° incline, only mg cos 60° = 10 N presses into the ramp.',
+              coreConceptFix:
+                'Multiply weight mg by cos θ to get the normal reaction: N = mg cos θ = 20 × 0.5 = 10 N.',
+              highlightElementIds: ['s3-normal', 's3-mgcos', 's3-note'],
+            },
+          ],
+        };
+      }
+      return {
+        ...baseMeta,
+        id: `cc-phys-incline-s3-standard`,
+        questionType: 'mcq',
+        statement:
+          'For a block of mass m on an inclined plane of angle θ (with no other external vertical or normal pushes), what is the normal reaction N and maximum static friction f_s,max?',
+        options: [
+          'N = mg cos θ  and  f_s,max = μ_s mg cos θ',
+          'N = mg  and  f_s,max = μ_s mg',
+          'N = mg sin θ  and  f_s,max = μ_s mg sin θ',
+          'N = mg / cos θ  and  f_s,max = μ_s mg tan θ',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Equilibrium perpendicular to the incline (ΣF_y = 0) requires N = mg cos θ. Consequently, the limiting static friction threshold is f_s,max = μ_s N = μ_s mg cos θ.',
+        keyFormula: 'N = mg cos θ,   f_s,max = μ_s N = μ_s mg cos θ',
+        misconceptions: [
+          {
+            id: 'phys-inc-normal-equals-mg',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Assuming normal reaction N always equals mg instead of mg cos θ on an inclined plane.',
+            whyIncorrect:
+              'Normal reaction N acts perpendicular to the tilted ramp, so it balances only the perpendicular component of gravity (mg cos θ), not the full vertical weight mg.',
+            coreConceptFix:
+              'Write ΣF_⊥ = N − mg cos θ = 0 first; substitute N = mg cos θ into f_max = μ N.',
+            highlightElementIds: ['s3-normal', 's3-mgcos', 's3-friction', 's3-note'],
+          },
+          {
+            id: 'phys-inc-normal-mgsin',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Using the parallel component mg sin θ instead of mg cos θ for the normal reaction N.',
+            whyIncorrect:
+              'mg sin θ pulls the block parallel to the ramp; it does not compress the block into the surface.',
+            coreConceptFix:
+              'Normal force balances the cosine component perpendicular to the surface: N = mg cos θ.',
+            highlightElementIds: ['s3-normal', 's3-mgcos'],
+          },
+        ],
+      };
+    }
+
+    // Scene 4: Net Downward Acceleration
+    if (difficulty === 'reteach') {
+      return {
+        ...baseMeta,
+        id: `cc-phys-incline-s4-reteach`,
+        questionType: 'mcq',
+        statement:
+          'If you double the mass of a block (from m to 2m) sliding down a rough incline of angle θ with kinetic friction coefficient μ_k, how does its downward acceleration a = g(sin θ − μ_k cos θ) change?',
+        options: [
+          'Acceleration a remains unchanged because mass m cancels out of both gravity and friction',
+          'Acceleration doubles because gravitational pull 2mg is twice as large',
+          'Acceleration halves because inertia 2m is twice as large while friction stays fixed',
+          'Acceleration becomes zero because normal force doubles',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Both the driving component (mg sin θ) and kinetic friction (μ_k mg cos θ) are proportional to mass m. Dividing ΣF_x = m a by m cancels m completely: a = g(sin θ − μ_k cos θ).',
+        keyFormula: 'a = g (sin θ − μ_k cos θ)',
+        misconceptions: [
+          {
+            id: 'phys-inc-mass-dependence',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Assuming a heavier block accelerates faster down an incline.',
+            whyIncorrect:
+              'Doubling mass m doubles both the driving force mg sin θ and the resisting friction μ_k mg cos θ, as well as the inertia m in F = ma.',
+            coreConceptFix:
+              'Factor out and cancel m in m·a = m·g(sin θ − μ_k cos θ) ⇒ a is independent of mass m.',
+            highlightElementIds: defaultHighlights,
+          },
+        ],
+      };
+    }
+    return {
+      ...baseMeta,
+      id: `cc-phys-incline-s4-${difficulty}`,
+      questionType: 'numerical',
+      statement:
+        'A block slides down a rough incline with sin θ = 0.6, cos θ = 0.8, kinetic friction coefficient μ_k = 0.25, and g = 10 m/s². What is its downward acceleration a along the ramp (in m/s²)?',
+      numericalAnswer: 4,
+      numericalTolerance: 0.15,
+      acceptedUnits: ['m/s^2', 'm/s²', 'm/s2'],
+      unitHint: 'm/s²',
+      explanation:
+        'Using a = g(sin θ − μ_k cos θ) = 10 × (0.6 − 0.25 × 0.8) = 10 × (0.6 − 0.2) = 4.0 m/s².',
+      keyFormula: 'a = g (sin θ − μ_k cos θ)',
+      misconceptions: [
+        {
+          id: 'phys-inc-friction-uses-mg',
+          wrongNumericalTarget: 3.5,
+          wrongNumericalTolerance: 0.15,
+          misconceptionSummary:
+            'Computing kinetic friction as μ_k mg instead of μ_k mg cos θ (using a = g(sin θ − μ_k) = 10(0.6 − 0.25) = 3.5 m/s²).',
+          whyIncorrect:
+            'Normal force on the incline is N = mg cos θ, not mg, so kinetic friction deceleration is μ_k g cos θ = 0.25 × 10 × 0.8 = 2.0 m/s².',
+          coreConceptFix:
+            'Always multiply μ_k by cos θ when computing friction on an incline: a = g(sin θ − μ_k cos θ) = 4 m/s².',
+          highlightElementIds: defaultHighlights,
+        },
+        {
+          id: 'phys-inc-ignore-friction',
+          wrongNumericalTarget: 6,
+          wrongNumericalTolerance: 0.15,
+          misconceptionSummary:
+            'Omitting opposing kinetic friction and computing smooth-incline acceleration a = g sin θ = 6 m/s².',
+          whyIncorrect:
+            'On a rough ramp, kinetic friction f_k = μ_k mg cos θ opposes motion up the slope and must be subtracted.',
+          coreConceptFix:
+            'Subtract μ_k g cos θ = 2 m/s² from g sin θ = 6 m/s² to get net acceleration a = 4 m/s².',
+          highlightElementIds: defaultHighlights,
+        },
+      ],
+    };
+  }
+
+  // 2. PHYSICS: Projectile Motion & 2D Kinematics
+  if (subject === 'Physics') {
+    if (sceneNum === 1) {
+      return {
+        ...baseMeta,
+        id: `cc-phys-proj-s1-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          difficulty === 'reteach'
+            ? 'In ideal projectile motion (negligible air drag), why does the horizontal velocity component u_x = u cos θ remain constant throughout flight?'
+            : 'A projectile is launched at speed u and angle θ above horizontal. What are its initial horizontal (u_x) and vertical (u_y) velocity components, and which component changes with time?',
+        options:
+          difficulty === 'reteach'
+            ? [
+                'Because no horizontal force acts on the projectile (a_x = 0)',
+                'Because gravity g acts horizontally in the direction of motion',
+                'Because u cos θ equals u sin θ at every launch angle',
+                'Because vertical velocity v_y is also constant throughout flight',
+              ]
+            : [
+                'u_x = u cos θ (constant) and u_y = u sin θ (changes due to a_y = −g)',
+                'u_x = u sin θ (constant) and u_y = u cos θ (changes due to a_y = −g)',
+                'Both u_x = u cos θ and u_y = u sin θ decrease to zero at the apex',
+                'u_x = u (constant) and u_y = u tan θ',
+              ],
+        correctIndex: 0,
+        explanation:
+          'Gravity acts strictly vertically downward (a_x = 0, a_y = −g). Thus horizontal velocity u_x = u cos θ stays constant while vertical velocity v_y(t) = u sin θ − gt varies linearly.',
+        keyFormula: 'u_x = u cos θ (a_x = 0),   v_y(t) = u sin θ − g·t',
+        misconceptions: [
+          {
+            id: 'phys-proj-trig-swap',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Swapping horizontal cosine and vertical sine components for launch angle θ measured from the horizontal.',
+            whyIncorrect:
+              'When θ is measured from the horizontal x-axis, the horizontal leg is adjacent (u cos θ) and the vertical leg is opposite (u sin θ).',
+            coreConceptFix:
+              'Project onto the adjacent horizontal axis with cos θ: u_x = u cos θ, u_y = u sin θ.',
+            highlightElementIds: ['p1-ux', 'p1-uy', 'p1-u'],
+          },
+          {
+            id: 'phys-proj-both-zero-apex',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Assuming both horizontal and vertical velocity components vanish at the highest point.',
+            whyIncorrect:
+              'Only vertical velocity v_y becomes zero at the apex; horizontal velocity u_x = u cos θ remains constant.',
+            coreConceptFix:
+              'Keep horizontal and vertical motion independent: a_x = 0 ⇒ v_x = u cos θ everywhere.',
+            highlightElementIds: ['p1-ux', 'p1-uy'],
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 2) {
+      return {
+        ...baseMeta,
+        id: `cc-phys-proj-s2-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          difficulty === 'reteach'
+            ? 'A ball is thrown at speed u = 20 m/s at θ = 60° (cos 60° = 0.5). What is its speed at the highest point (apex) of its trajectory?'
+            : 'At the highest point (apex, H_max) of a projectile launched with speed u at angle θ, what are its instantaneous velocity v_apex and acceleration a_apex?',
+        options:
+          difficulty === 'reteach'
+            ? [
+                '10 m/s horizontally (since v_y = 0 and v_x = u cos 60° = 10 m/s)',
+                '0 m/s (the ball momentarily stops completely at the top)',
+                '20 m/s horizontally',
+                '17.3 m/s vertically',
+              ]
+            : [
+                'v_apex = u cos θ (horizontal) and a_apex = g downward',
+                'v_apex = 0 and a_apex = 0',
+                'v_apex = 0 and a_apex = g downward',
+                'v_apex = u sin θ (horizontal) and a_apex = 0',
+              ],
+        correctIndex: 0,
+        explanation:
+          'At the apex, vertical velocity v_y momentarily crosses zero, but horizontal velocity v_x = u cos θ is unchanged and gravity g = 9.8 m/s² continues to act downward.',
+        keyFormula: 'v_apex = u cos θ (v_y = 0),   H_max = (u² sin²θ) / (2g)',
+        misconceptions: [
+          {
+            id: 'phys-proj-zero-velocity-apex',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Assuming total velocity (and acceleration) is zero at the highest point of a 2D trajectory.',
+            whyIncorrect:
+              'If total velocity were zero and acceleration were zero, the projectile would hover in mid-air forever! Only v_y = 0 at the apex.',
+            coreConceptFix:
+              'At the apex, v_y = 0 but v_x = u cos θ ≠ 0, and downward gravitational acceleration a = g is constant throughout flight.',
+            highlightElementIds: ['p2-vapex', 'p2-hmax', 'p2-g'],
+          },
+          {
+            id: 'phys-proj-zero-speed-apex',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Confusing 1D vertical toss (where speed at top is 0) with 2D projectile motion (where horizontal speed u cos θ persists).',
+            whyIncorrect:
+              'In 2D motion, the projectile is still moving horizontally at speed u cos θ as it passes over the peak.',
+            coreConceptFix:
+              'Speed at apex is v_min = u cos θ, and kinetic energy at apex is K_apex = K_0 cos²θ.',
+            highlightElementIds: ['p2-vapex', 'p2-hmax'],
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 3) {
+      return {
+        ...baseMeta,
+        id: `cc-phys-proj-s3-${difficulty}`,
+        questionType: 'numerical',
+        statement:
+          difficulty === 'reteach'
+            ? 'A projectile is launched at u = 30 m/s at θ = 45° on level ground (take g = 10 m/s²). Calculate the maximum horizontal range R (in m).'
+            : 'A projectile is launched with initial speed u = 20 m/s at angle θ = 45° on level ground (take g = 10 m/s²). What is its horizontal range R (in m)?',
+        numericalAnswer: difficulty === 'reteach' ? 90 : 40,
+        numericalTolerance: 0.5,
+        acceptedUnits: ['m', 'meters'],
+        unitHint: 'm',
+        explanation:
+          difficulty === 'reteach'
+            ? 'R = u² sin(2θ) / g = 30² × sin(90°) / 10 = 900 / 10 = 90 m.'
+            : 'R = u² sin(2θ) / g = 20² × sin(90°) / 10 = 400 / 10 = 40 m.',
+        keyFormula: 'R = (u² sin 2θ) / g',
+        misconceptions: [
+          {
+            id: 'phys-proj-half-range',
+            wrongNumericalTarget: difficulty === 'reteach' ? 45 : 20,
+            wrongNumericalTolerance: 1,
+            misconceptionSummary:
+              'Dividing by 2g (confusing the Range formula R = u² sin 2θ / g with the Maximum Height formula H = u² sin²θ / 2g).',
+            whyIncorrect:
+              'Maximum height has 2g in the denominator, whereas Horizontal Range R = u_x · T = (u cos θ)(2u sin θ / g) = u² sin(2θ) / g has g (not 2g) in the denominator.',
+            coreConceptFix:
+              'Use R = u² sin(2θ) / g without a factor of 2 in the denominator.',
+            highlightElementIds: ['p3-range', 'p3-hmax', 'p3-land'],
+          },
+        ],
+      };
+    }
+
+    return {
+      ...baseMeta,
+      id: `cc-phys-proj-s4-${difficulty}`,
+      questionType: 'mcq',
+      statement:
+        'Two projectiles are fired from level ground with the same initial speed u. Projectile 1 is launched at θ₁ = 30°. Which launch angle θ₂ for Projectile 2 gives the exact same horizontal range R?',
+      options: [
+        'θ₂ = 60° (complementary angle 90° − θ₁)',
+        'θ₂ = 45° (maximum range angle)',
+        'θ₂ = 15° (half of θ₁)',
+        'θ₂ = 75°',
+      ],
+      correctIndex: 0,
+      explanation:
+        'Since sin(2(90° − θ)) = sin(180° − 2θ) = sin(2θ), complementary launch angles θ and (90° − θ) (such as 30° and 60°) yield identical horizontal range R.',
+      keyFormula: 'R(θ) = R(90° − θ) = (u² sin 2θ) / g',
+      misconceptions: [
+        {
+          id: 'phys-proj-max-angle-confusion',
+          distractorIndex: 1,
+          misconceptionSummary:
+            'Confusing the angle for maximum range (45°) with the complementary angle that matches R(30°).',
+          whyIncorrect:
+            'θ = 45° gives the maximum possible range u²/g, which is larger than R(30°) = (√3/2) u²/g.',
+          coreConceptFix:
+            'Subtract θ₁ from 90° to find the complementary angle with equal range: θ₂ = 90° − 30° = 60°.',
+          highlightElementIds: ['p4-arc60', 'p4-arc30', 'p4-sameR'],
+        },
+      ],
+    };
+  }
+
+  // 3. CHEMISTRY: VSEPR Theory, Steric Number, Lone Pair Repulsion & NH3 vs CH4 Bond Angles
+  if (subject === 'Chemistry') {
+    if (sceneNum === 1) {
+      return {
+        ...baseMeta,
+        id: `cc-chem-vsepr-s1-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          difficulty === 'reteach'
+            ? 'In Water (H₂O), central Oxygen has 6 valence electrons and forms 2 single O–H bonds. What is its Steric Number (SN) and breakdown of Bonding Pairs (BP) + Lone Pairs (LP)?'
+            : 'Using SN = ½(V + M − C + A), what is the Steric Number and electron-domain count around Nitrogen in Ammonia (NH₃, where V = 5, M = 3)?',
+        options:
+          difficulty === 'reteach'
+            ? [
+                'SN = 4 (2 Bonding Pairs + 2 Lone Pairs → sp³)',
+                'SN = 2 (2 Bonding Pairs + 0 Lone Pairs → sp)',
+                'SN = 3 (2 Bonding Pairs + 1 Lone Pair → sp²)',
+                'SN = 6 (4 Bonding Pairs + 2 Lone Pairs → sp³d²)',
+              ]
+            : [
+                'SN = 4 (3 Bonding Pairs + 1 Lone Pair → sp³ tetrahedral electron geometry)',
+                'SN = 3 (3 Bonding Pairs + 0 Lone Pairs → sp² trigonal planar)',
+                'SN = 5 (3 Bonding Pairs + 2 Lone Pairs → sp³d)',
+                'SN = 2 (2 Bonding Pairs + 0 Lone Pairs → sp)',
+              ],
+        correctIndex: 0,
+        explanation:
+          difficulty === 'reteach'
+            ? 'For H₂O, SN = ½(6 + 2) = 4 total electron domains: 2 O–H σ-bonding pairs and 2 non-bonding lone pairs (sp³).'
+            : 'For NH₃, SN = ½(5 + 3) = 4 total electron domains: 3 N–H σ-bonding pairs plus 1 non-bonding lone pair on Nitrogen (sp³).',
+        keyFormula: 'SN = ½ (V + M − C + A) = BP + LP',
+        misconceptions: [
+          {
+            id: 'chem-vsepr-ignore-lone-pair',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Counting only attached atoms (bonding pairs) and ignoring non-bonding lone pairs when finding Steric Number.',
+            whyIncorrect:
+              'Lone pairs occupy valence shell orbitals and repel strongly; omitting the lone pair falsely predicts sp² planar NH₃ or linear H₂O.',
+            coreConceptFix:
+              'Always add Lone Pairs (LP) to σ-Bonding Pairs (BP): SN = BP + LP = ½(V + M − C + A).',
+            highlightElementIds: ['c1-center', 'c1-d1', 'c1-d4'],
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 2) {
+      return {
+        ...baseMeta,
+        id: `cc-chem-vsepr-s2-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          'According to VSEPR theory, why do lone pairs compress the covalent bond angle between adjacent bonding pairs (such as reducing H–O–H in water to 104.5°)?',
+        options: [
+          'A lone pair is held by only one nucleus and occupies greater angular space, so LP–LP > LP–BP > BP–BP repulsion',
+          'Bonding pairs repel each other more strongly than lone pairs (BP–BP > LP–LP)',
+          'Lone pairs attract the attached hydrogen nuclei via ionic bonding',
+          'Lone pairs reside in core 1s orbitals rather than the valence shell',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Because a non-bonding lone pair is attracted by only the central nucleus (rather than shared between two nuclei), its electron cloud spreads out over a wider angle, exerting stronger repulsion: LP–LP > LP–BP > BP–BP.',
+        keyFormula: 'Repulsion Order: LP–LP > LP–BP > BP–BP',
+        misconceptions: [
+          {
+            id: 'chem-vsepr-repulsion-inverted',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Assuming bonding pairs repel more strongly than lone pairs (inverting the VSEPR repulsion order).',
+            whyIncorrect:
+              'Shared bonding electrons are localized tightly between two nuclei, whereas lone-pair clouds are diffuse and exert greater angular repulsion.',
+            coreConceptFix:
+              'Memorize VSEPR repulsion order: Lone Pair–Lone Pair (strongest) > Lone Pair–Bond Pair > Bond Pair–Bond Pair (weakest).',
+            highlightElementIds: defaultHighlights,
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 3) {
+      if (difficulty === 'reteach') {
+        return {
+          ...baseMeta,
+          id: `cc-chem-vsepr-s3-reteach`,
+          questionType: 'mcq',
+          statement:
+            'Both Methane (CH₄) and Ammonia (NH₃) have 4 electron domains (sp³ hybridization). Why is the H–N–H bond angle in NH₃ (107.0°) smaller than the H–C–H bond angle in CH₄ (109.5°)?',
+          options: [
+            'NH₃ has 1 lone pair (AX₃E₁) whose stronger LP–BP repulsion compresses the three N–H bonds from 109.5° to 107.0°',
+            'NH₃ and CH₄ actually have the exact same 109.5° bond angle because both have 4 electron domains',
+            'Nitrogen is sp² hybridized in NH₃ with a 120° bond angle',
+            'CH₄ has 2 lone pairs that expand its bond angle to 109.5°',
+          ],
+          correctIndex: 0,
+          explanation:
+            'While both CH₄ and NH₃ have 4 electron domains (tetrahedral electron-domain geometry), NH₃ replaces one bonding pair with a lone pair (AX₃E₁). Stronger LP–BP repulsion pushes the three N–H bonds closer together, reducing the angle from 109.5° to 107.0°.',
+          keyFormula: 'CH₄ (0 LP): 109.5°  >  NH₃ (1 LP): 107.0°  >  H₂O (2 LP): 104.5°',
+          misconceptions: [
+            {
+              id: 'chem-vsepr-nh3-ch4-identical-angles',
+              distractorIndex: 1,
+              misconceptionSummary:
+                'Assuming NH₃ and CH₄ have identical 109.5° bond angles because both have 4 electron domains (confusing electron-domain geometry with molecular geometry).',
+              whyIncorrect:
+                'Equal steric number (SN = 4) gives the same tetrahedral electron-domain arrangement, but a lone pair occupies more angular space than a bonding pair, compressing NH₃ to 107.0°.',
+              coreConceptFix:
+                'Distinguish Electron Geometry (tetrahedral for both) from Molecular Shape & Bond Angle: each lone pair compresses the sp³ angle by ~2.5° (CH₄ 109.5° → NH₃ 107.0° → H₂O 104.5°).',
+              highlightElementIds: ['c3-ch4', 'c3-nh3', 'c3-h2o', 'c3-caption'],
+            },
+          ],
+        };
+      }
+      return {
+        ...baseMeta,
+        id: `cc-chem-vsepr-s3-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          'A student claims: "Because both CH₄ and NH₃ have 4 electron domains (Steric Number = 4, sp³), they must have the exact same 109.5° bond angle." Which statement correctly evaluates this claim?',
+        options: [
+          'Incorrect — NH₃ has 1 lone pair (AX₃E₁) which repels bonding pairs more strongly, compressing its H–N–H angle to 107.0° (< 109.5° in CH₄)',
+          'Correct — any molecule with 4 electron domains (sp³) always has an exact 109.5° bond angle regardless of lone pairs',
+          'Incorrect — NH₃ has a larger 120° bond angle because it has only 3 N–H bonds',
+          'Incorrect — CH₄ has a smaller 104.5° bond angle than NH₃',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Having 4 electron domains fixes the electron-domain geometry as tetrahedral, but in NH₃ (AX₃E₁) the single lone pair exerts stronger LP–BP repulsion than BP–BP repulsion, compressing the H–N–H bond angle to 107.0° compared to 109.5° in symmetric CH₄ (AX₄).',
+        keyFormula: 'θ(CH₄: 109.5°) > θ(NH₃: 107.0°) > θ(H₂O: 104.5°)',
+        misconceptions: [
+          {
+            id: 'chem-vsepr-nh3-ch4-identical-angles',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Assuming NH₃ and CH₄ have identical bond angles because both have 4 electron domains (ignoring lone-pair compression).',
+            whyIncorrect:
+              '4 electron domains means sp³ hybridization for both, but NH₃ has 3 bonding pairs + 1 lone pair. Because LP–BP repulsion > BP–BP repulsion, the lone pair pushes the N–H bonds closer to 107.0°.',
+            coreConceptFix:
+              'Always check the lone-pair count after finding Steric Number: 0 LP (CH₄) = 109.5°, 1 LP (NH₃) = 107.0°, 2 LP (H₂O) = 104.5°.',
+            highlightElementIds: ['c3-ch4', 'c3-nh3', 'c3-h2o', 'c3-caption'],
+          },
+          {
+            id: 'chem-vsepr-nh3-trigonal-planar',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Treating NH₃ as 3-domain trigonal planar (120°) by forgetting the unshared lone pair on Nitrogen.',
+            whyIncorrect:
+              'Nitrogen has 5 valence electrons: 3 used in N–H bonds and 2 forming an apical lone pair, giving 4 domains (trigonal pyramidal, 107°), not planar 120°.',
+            coreConceptFix:
+              'Include the non-bonding lone pair in the steric number (SN = 3 + 1 = 4).',
+            highlightElementIds: ['c3-nh3', 'c3-caption'],
+          },
+        ],
+      };
+    }
+
+    // Scene 4: Dipole Moment & Polarity
+    return {
+      ...baseMeta,
+      id: `cc-chem-vsepr-s4-${difficulty}`,
+      questionType: 'mcq',
+      statement:
+        'Why does Water (H₂O) have a large net dipole moment (μ = 1.85 D, polar) whereas Carbon Dioxide (CO₂) and Methane (CH₄) have zero net dipole moment (μ = 0 D, non-polar)?',
+      options: [
+        'H₂O has a bent geometry (104.5°) so its two O–H bond dipoles add constructively, whereas symmetric linear CO₂ and tetrahedral CH₄ cancel out',
+        'C–O and C–H bonds have zero electronegativity difference',
+        'H₂O is linear (180°) so its bond dipoles reinforce along a straight line',
+        'Lone pairs always cancel out bond dipoles to make AX₂E₂ molecules non-polar',
+      ],
+      correctIndex: 0,
+      explanation:
+        'Because H₂O is bent (AX₂E₂, 104.5°), the two O–H bond dipole vectors do not oppose each other at 180°; their vertical components add constructively to give μ_net = 1.85 D.',
+      keyFormula: 'μ_net = |Σ μ_i|   (Bent H₂O: μ = 1.85 D ≠ 0)',
+      misconceptions: [
+        {
+          id: 'chem-vsepr-linear-water-dipole',
+          distractorIndex: 2,
+          misconceptionSummary:
+            'Assuming H₂O is linear (180°) like CO₂.',
+          whyIncorrect:
+            'If H₂O were linear, its two equal and opposite O–H bond dipoles would cancel to μ = 0 D. Its non-zero 1.85 D dipole proves its bent VSEPR geometry.',
+          coreConceptFix:
+            'Two lone pairs on Oxygen bend H₂O to 104.5°, preventing dipole cancellation.',
+          highlightElementIds: ['c4-o', 'c4-d1', 'c4-d2', 'c4-net'],
+        },
+      ],
+    };
+  }
+
+  // 4. MATHEMATICS: Conic Sections & Parabola y² = 4ax
+  if (
+    lower.includes('parabola') ||
+    lower.includes('conic') ||
+    lower.includes('latus rectum') ||
+    lower.includes('directrix') ||
+    lower.includes('quadratic')
+  ) {
+    if (sceneNum === 1) {
+      return {
+        ...baseMeta,
+        id: `cc-math-conic-s1-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          'For the standard parabola y² = 4ax (a > 0), what are the coordinates of the focus S, the equation of the directrix, and the eccentricity e?',
+        options: [
+          'Focus S(a, 0), Directrix x = −a, and Eccentricity e = 1',
+          'Focus S(0, a), Directrix y = −a, and Eccentricity e = 1',
+          'Focus S(4a, 0), Directrix x = −4a, and Eccentricity e = 1',
+          'Focus S(a, 0), Directrix x = a, and Eccentricity e = 0',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Every point P(x, y) on y² = 4ax is equidistant (e = PS/PM = 1) from focus S(a, 0) on the +x-axis and the vertical directrix line x = −a.',
+        keyFormula: 'PS = PM  ⇒  y² = 4ax,   S = (a, 0),   x = −a',
+        misconceptions: [
+          {
+            id: 'math-conic-axis-swap',
+            distractorIndex: 1,
+            misconceptionSummary:
+              'Placing the focus of y² = 4ax on the y-axis at (0, a) instead of the x-axis at (a, 0).',
+            whyIncorrect:
+              'y² = 4ax is symmetric about the x-axis (replacing y with −y leaves the equation unchanged), so its focus lies on the x-axis at S(a, 0).',
+            coreConceptFix:
+              'Look at the linear variable: in y² = 4ax, x is linear so the axis of symmetry is the x-axis and Focus is S(a, 0).',
+            highlightElementIds: ['m1-focus', 'm1-dir', 'm1-ps'],
+          },
+          {
+            id: 'math-conic-4a-focus',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Using the full coefficient 4a as the focus coordinate S(4a, 0) instead of dividing by 4 to get a.',
+            whyIncorrect:
+              'The standard equation is y² = 4ax, so the focal distance from the vertex is a = (coefficient of x) / 4.',
+            coreConceptFix:
+              'Always equate the coefficient of x to 4a first, then divide by 4 to find Focus S(a, 0).',
+            highlightElementIds: ['m1-focus', 'm1-dir'],
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 2) {
+      return {
+        ...baseMeta,
+        id: `cc-math-conic-s2-${difficulty}`,
+        questionType: 'numerical',
+        statement:
+          difficulty === 'reteach'
+            ? 'For the parabola y² = 16x, what is the total length of its latus rectum?'
+            : 'For the parabola y² = 12x, what is the total length of the latus rectum chord passing through the focus?',
+        numericalAnswer: difficulty === 'reteach' ? 16 : 12,
+        numericalTolerance: 0.1,
+        explanation:
+          difficulty === 'reteach'
+            ? 'Comparing y² = 16x with y² = 4ax gives 4a = 16 (so a = 4). The total length of the latus rectum is 4a = 16.'
+            : 'Comparing y² = 12x with y² = 4ax gives 4a = 12 (so a = 3). The total length of the latus rectum is 4a = 12.',
+        keyFormula: 'Length of Latus Rectum = 4a',
+        misconceptions: [
+          {
+            id: 'math-conic-latus-rectum-a-vs-4a',
+            wrongNumericalTarget: difficulty === 'reteach' ? 4 : 3,
+            wrongNumericalTolerance: 0.1,
+            misconceptionSummary:
+              'Giving the focal distance a instead of the full latus rectum length 4a.',
+            whyIncorrect:
+              'a is the distance from vertex (0,0) to focus S(a,0). The latus rectum extends from (a, −2a) to (a, +2a), so its total length is 4a.',
+            coreConceptFix:
+              'For y² = 4ax, the latus rectum length equals the entire coefficient 4a.',
+            highlightElementIds: defaultHighlights,
+          },
+        ],
+      };
+    }
+
+    if (sceneNum === 3) {
+      return {
+        ...baseMeta,
+        id: `cc-math-conic-s3-${difficulty}`,
+        questionType: 'mcq',
+        statement:
+          'At the parametric point P(at², 2at) on the parabola y² = 4ax, what are the slope of the tangent and the tangent line equation?',
+        options: [
+          'Slope m = 1/t  and  Tangent equation: t·y = x + a·t²',
+          'Slope m = t  and  Tangent equation: y = t·x + a·t²',
+          'Slope m = −t  and  Tangent equation: y + t·x = 2at + at³',
+          'Slope m = 2/t  and  Tangent equation: t·y = 2x + a·t²',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Differentiating y² = 4ax gives 2y(dy/dx) = 4a ⇒ dy/dx = 2a/y = 2a/(2at) = 1/t. Thus the tangent is y − 2at = (1/t)(x − at²) ⇔ ty = x + at².',
+        keyFormula: 'P(t) = (at², 2at),   Tangent: t·y = x + a·t²',
+        misconceptions: [
+          {
+            id: 'math-conic-normal-vs-tangent',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Confusing the normal line equation (slope −t) with the tangent line equation (slope 1/t).',
+            whyIncorrect:
+              'Slope −t is perpendicular to the tangent and gives the normal equation y + tx = 2at + at³.',
+            coreConceptFix:
+              'Tangent slope at P(t) is m = 1/t, giving ty = x + at².',
+            highlightElementIds: ['m3-pt', 'm3-tan', 'm3-xint'],
+          },
+        ],
+      };
+    }
+
+    return {
+      ...baseMeta,
+      id: `cc-math-conic-s4-${difficulty}`,
+      questionType: 'mcq',
+      statement:
+        'For a line y = mx + c (m ≠ 0) to be tangent to the parabola y² = 4ax, what condition must the y-intercept c satisfy?',
+      options: [
+        'c = a / m  (where discriminant Δ = 0, touching at (a/m², 2a/m))',
+        'c = a · m  (multiplying focal parameter a by slope m)',
+        'c = −a · m²',
+        'c = 4a / m',
+      ],
+      correctIndex: 0,
+      explanation:
+        'Substituting y = mx + c into y² = 4ax yields m²x² + (2mc − 4a)x + c² = 0. Setting discriminant Δ = (2mc − 4a)² − 4m²c² = 0 simplifies to mc = a ⇒ c = a/m.',
+      keyFormula: 'Δ = 0  ⇔  c = a / m',
+      misconceptions: [
+        {
+          id: 'math-conic-tangent-am',
+          distractorIndex: 1,
+          misconceptionSummary:
+            'Writing c = a·m instead of c = a/m for the slope-form tangent to y² = 4ax.',
+          whyIncorrect:
+            'As slope m increases (steeper line), the tangent touches closer to the vertex so the y-intercept c = a/m must decrease inversely with m.',
+          coreConceptFix:
+            'In slope form, the tangent to y² = 4ax is y = mx + a/m (so c = a/m).',
+          highlightElementIds: ['m4-parab', 'm4-tan'],
+        },
+      ],
+    };
+  }
+
+  // 5. DEFAULT MATHEMATICS: Conditional Probability, Total Probability & Bayes' Theorem
+  if (sceneNum === 1) {
+    return {
+      ...baseMeta,
+      id: `cc-math-prob-s1-${difficulty}`,
+      questionType: 'mcq',
+      statement:
+        difficulty === 'reteach'
+          ? 'If a diagnostic study partitions the population into E₁ (has condition, P(E₁) = 0.01) and E₂ (healthy), what must P(E₂) and P(E₁ ∩ E₂) equal?'
+          : 'To apply the Law of Total Probability and Bayes’ Theorem, what two conditions must the prior hypotheses E₁ and E₂ satisfy on sample space S?',
+      options:
+        difficulty === 'reteach'
+          ? [
+              'P(E₂) = 0.99 and P(E₁ ∩ E₂) = 0 (mutually exclusive & exhaustive)',
+              'P(E₂) = 0.01 and P(E₁ ∩ E₂) = 0.01',
+              'P(E₂) = 0.99 and P(E₁ ∩ E₂) = 0.01 × 0.99 (independent)',
+              'P(E₂) = 0.50 and P(E₁ ∩ E₂) = 0',
+            ]
+          : [
+              'They must be mutually exclusive (E₁ ∩ E₂ = ∅) and exhaustive (P(E₁) + P(E₂) = 1)',
+              'They must be statistically independent (P(E₁ ∩ E₂) = P(E₁)P(E₂)) and have equal probabilities',
+              'They must have P(E₁ | E₂) = 1',
+              'Their probabilities must multiply to 1 (P(E₁) · P(E₂) = 1)',
+            ],
+      correctIndex: 0,
+      explanation:
+        'A valid partition of sample space S requires mutually exclusive (disjoint, E₁ ∩ E₂ = ∅) and exhaustive events whose prior probabilities sum to 1: P(E₁) + P(E₂) = 1.',
+      keyFormula: 'P(E₁) + P(E₂) = 1,   E₁ ∩ E₂ = ∅',
+      misconceptions: [
+        {
+          id: 'math-prob-disjoint-vs-independent',
+          distractorIndex: 1,
+          misconceptionSummary:
+            'Confusing mutually exclusive (disjoint) partition events with statistically independent events.',
+          whyIncorrect:
+            'For non-empty partition events E₁ and E₂, if E₁ occurs then E₂ cannot occur, so P(E₁ ∩ E₂) = 0 ≠ P(E₁)P(E₂). Disjoint events with positive probability are never independent.',
+          coreConceptFix:
+            'Partition branches from the root of a probability tree are mutually exclusive (P(E₁ ∩ E₂) = 0) and sum to 1.',
+          highlightElementIds: ['b1-root', 'b1-br1', 'b1-br2'],
+        },
+      ],
+    };
+  }
+
+  if (sceneNum === 2) {
+    if (difficulty === 'reteach') {
+      return {
+        ...baseMeta,
+        id: `cc-math-prob-s2-reteach`,
+        questionType: 'mcq',
+        statement:
+          'Why is the conditional probability P(A | B) generally NOT equal to P(B | A)?',
+        options: [
+          'Because P(A | B) = P(A ∩ B) / P(B) conditions on event B (dividing by P(B)), whereas P(B | A) = P(A ∩ B) / P(A) conditions on event A (dividing by P(A))',
+          'Because the numerators P(A ∩ B) and P(B ∩ A) are different numbers',
+          'P(A | B) and P(B | A) are always equal for any two events A and B',
+          'Because P(A | B) = P(A) / P(B) without using the intersection',
+        ],
+        correctIndex: 0,
+        explanation:
+          'While both share the same intersection numerator P(A ∩ B), P(A | B) restricts the sample space to B (dividing by P(B)), whereas P(B | A) restricts the sample space to A (dividing by P(A)). They are equal only when P(A) = P(B) or P(A ∩ B) = 0.',
+        keyFormula: 'P(A | B) = P(A ∩ B) / P(B)  ≠  P(B | A) = P(A ∩ B) / P(A)',
+        misconceptions: [
+          {
+            id: 'math-prob-pab-vs-pba-inversion',
+            distractorIndex: 2,
+            misconceptionSummary:
+              'Confusing P(A | B) with P(B | A) and assuming conditional probability is symmetric.',
+            whyIncorrect:
+              'Conditioning changes the denominator (the restricted sample space). For example, P(Positive Test | Disease) = 0.99 is very different from P(Disease | Positive Test) = 1/6 ≈ 0.167.',
+            coreConceptFix:
+              'Always check which event is GIVEN (after the "|" bar): the given event goes in the denominator, P(Target | Given) = P(Target ∩ Given) / P(Given).',
+            highlightElementIds: ['b2-a1', 'b2-a2', 'b2-j1', 'b2-j2'],
+          },
+        ],
+      };
+    }
+    return {
+      ...baseMeta,
+      id: `cc-math-prob-s2-${difficulty}`,
+      questionType: 'mcq',
+      statement:
+        'Given P(E₁) = 0.01 and test sensitivity P(A | E₁) = 0.99, a student writes P(E₁ | A) = P(A | E₁) = 0.99 and divides P(A ∩ E₁) by P(E₁) when asked for P(E₁ | A). What conceptual error did the student make?',
+      options: [
+        'Confused P(E₁ | A) with P(A | E₁) — finding P(E₁ | A) requires dividing P(E₁ ∩ A) by P(A), not by P(E₁)',
+        'No error — P(A | B) is always equal to P(B | A) for conditional probabilities',
+        'Added P(E₁) + P(A | E₁) instead of multiplying along the branch',
+        'Used P(E₂) instead of P(E₁) in the numerator',
+      ],
+      correctIndex: 0,
+      explanation:
+        'P(A | E₁) = P(E₁ ∩ A) / P(E₁) = 0.99 conditions on having the disease E₁, whereas P(E₁ | A) = P(E₁ ∩ A) / P(A) conditions on observing a positive test A. Equating P(A | B) with P(B | A) is the classic inverse-probability misconception.',
+      keyFormula: 'P(A | B) = P(A ∩ B) / P(B)   vs   P(B | A) = P(A ∩ B) / P(A)',
+      misconceptions: [
+        {
+          id: 'math-prob-pab-vs-pba-confusion',
+          distractorIndex: 1,
+          misconceptionSummary:
+            'Confusing P(A | B) with P(B | A) (treating conditional probability as symmetric and dividing by the wrong marginal probability).',
+          whyIncorrect:
+            'P(A | B) measures the fraction of B outcomes where A occurs (denominator P(B)), while P(B | A) measures the fraction of A outcomes where B occurs (denominator P(A)).',
+          coreConceptFix:
+            'Identify the conditioning event after "|": P(E₁ | A) has denominator P(A), whereas P(A | E₁) has denominator P(E₁).',
+          highlightElementIds: ['b2-e1', 'b2-a1', 'b2-j1', 'b2-j2'],
+        },
+        {
+          id: 'math-prob-add-instead-of-multiply',
+          distractorIndex: 2,
+          misconceptionSummary:
+            'Adding prior and conditional likelihood instead of multiplying P(E₁) · P(A | E₁) for joint probability.',
+          whyIncorrect:
+            'Sequential stages along a single branch represent an intersection (E₁ ∩ A), which requires multiplication.',
+          coreConceptFix:
+            'Multiply along a branch for joint probability: P(E₁ ∩ A) = P(E₁) · P(A | E₁) = 0.01 × 0.99 = 0.0099.',
+          highlightElementIds: ['b2-e1', 'b2-a1', 'b2-j1'],
+        },
+      ],
+    };
+  }
+
+  if (sceneNum === 3) {
+    return {
+      ...baseMeta,
+      id: `cc-math-prob-s3-${difficulty}`,
+      questionType: 'numerical',
+      statement:
+        difficulty === 'reteach'
+          ? 'If branch 1 has joint probability P(E₁)P(A|E₁) = 0.02 and branch 2 has joint probability P(E₂)P(A|E₂) = 0.08, what is the total probability P(A)?'
+          : 'Given true-positive branch weight P(E₁)P(A|E₁) = 0.0099 and false-positive branch weight P(E₂)P(A|E₂) = 0.0495, compute the total marginal probability P(A).',
+      numericalAnswer: difficulty === 'reteach' ? 0.1 : 0.0594,
+      numericalTolerance: 0.001,
+      explanation:
+        difficulty === 'reteach'
+          ? 'By the Law of Total Probability, P(A) = P(E₁)P(A|E₁) + P(E₂)P(A|E₂) = 0.02 + 0.08 = 0.10.'
+          : 'By the Law of Total Probability, sum all disjoint pathways leading to A: P(A) = 0.0099 + 0.0495 = 0.0594.',
+      keyFormula: 'P(A) = P(E₁)P(A | E₁) + P(E₂)P(A | E₂)',
+      misconceptions: [
+        {
+          id: 'math-prob-omit-false-positives',
+          wrongNumericalTarget: difficulty === 'reteach' ? 0.02 : 0.0099,
+          wrongNumericalTolerance: 0.001,
+          misconceptionSummary:
+            'Using only the first branch P(E₁)P(A|E₁) as total probability P(A) and ignoring the complementary false-positive pathway P(E₂)P(A|E₂).',
+          whyIncorrect:
+            'Event A can occur via either E₁ (true positive) or E₂ (false positive). Omitting the E₂ branch underestimates the denominator P(A).',
+          coreConceptFix:
+            'Sum P(E_i)P(A | E_i) over ALL mutually exclusive hypotheses i = 1, 2.',
+          highlightElementIds: ['b3-j1', 'b3-j2', 'b3-tot'],
+        },
+      ],
+    };
+  }
+
+  // Scene 4: Bayes' Theorem Posterior Update
+  return {
+    ...baseMeta,
+    id: `cc-math-prob-s4-${difficulty}`,
+    questionType: 'mcq',
+    statement:
+      'With P(E₁) = 0.01, P(A | E₁) = 0.99 (true positive branch = 0.0099), and P(A | E₂) = 0.05 (false positive branch = 0.0495, total P(A) = 0.0594), what is the exact posterior probability P(E₁ | A)?',
+    options: [
+      'P(E₁ | A) = 0.0099 / 0.0594 = 1/6 ≈ 16.7%',
+      'P(E₁ | A) = P(A | E₁) = 99.0% (confusing P(E₁ | A) with P(A | E₁))',
+      'P(E₁ | A) = 1 − 0.05 = 95.0%',
+      'P(E₁ | A) = 0.0099 (0.99%)',
+    ],
+    correctIndex: 0,
+    explanation:
+      'By Bayes’ Theorem, P(E₁ | A) = P(E₁)P(A | E₁) / P(A) = 0.0099 / (0.0099 + 0.0495) = 0.0099 / 0.0594 = 1/6 ≈ 16.7%. Because the condition is rare (1%), false positives (4.95%) outnumber true positives (0.99%) by 5 to 1.',
+    keyFormula: 'P(E₁ | A) = [ P(E₁) · P(A | E₁) ] / [ P(E₁)P(A | E₁) + P(E₂)P(A | E₂) ] = 1/6',
+    misconceptions: [
+      {
+        id: 'math-prob-bayes-inverse-fallacy',
+        distractorIndex: 1,
+        misconceptionSummary:
+          'Confusing posterior P(E₁ | A) with likelihood P(A | E₁) = 99% (the Base-Rate / Inverse Probability Fallacy).',
+        whyIncorrect:
+          'P(A | E₁) = 99% is the probability of testing positive GIVEN disease E₁. To invert the condition to P(E₁ | A), you must weight by the rare prior P(E₁) = 0.01 and divide by total positive rate P(A) = 0.0594.',
+        coreConceptFix:
+          'Never equate P(Hypothesis | Evidence) with P(Evidence | Hypothesis); always normalize the target branch weight by total probability P(Evidence).',
+        highlightElementIds: ['b4-bar1', 'b4-bar2', 'b4-post', 'b4-arrow'],
+      },
+      {
+        id: 'math-prob-complement-false-pos',
+        distractorIndex: 2,
+        misconceptionSummary:
+          'Computing posterior probability as 1 − P(A | E₂) = 95% while ignoring the prior base rate P(E₁) = 1%.',
+        whyIncorrect:
+          '1 − P(A | E₂) is the test specificity P(A′ | E₂), not the posterior probability P(E₁ | A).',
+        coreConceptFix:
+          'Use Bayes’ ratio: Target Branch / (Target Branch + Competing Branches) = 0.0099 / 0.0594 = 1/6.',
+        highlightElementIds: ['b4-bar1', 'b4-bar2', 'b4-post'],
+      },
+    ],
+  };
+}
+
+/**
+ * Builds the deterministic Adaptive Visual Reteaching specification for a scene,
+ * reusing its StructuredDiagramSpec element IDs and attaching an equivalent follow-up question.
+ */
+export function buildDeterministicSceneReteaching(
+  scene: Pick<
+    AnimatedExplanationScene,
+    | 'sceneNumber'
+    | 'heading'
+    | 'teachingPoint'
+    | 'keyFormula'
+    | 'citedPages'
+    | 'isSupportedByMaterial'
+    | 'spec'
+  >,
+  options: {
+    topic: string;
+    subject?: EducationalSubject;
+    sourceDocumentTitle?: string;
+  }
+): SceneReteachingSpec {
+  const safeTopic = sanitizeBoundedString(options.topic || 'Core Study Concept', 120) || 'Core Study Concept';
+  const subject = options.subject || detectEducationalSubject(`${safeTopic} ${scene.heading}`);
+  const followUpQuestion = buildDeterministicSceneConceptCheck(scene, {
+    topic: safeTopic,
+    subject,
+    difficulty: 'reteach',
+    sourceDocumentTitle: options.sourceDocumentTitle,
+  });
+
+  const primaryCheck = buildDeterministicSceneConceptCheck(scene, {
+    topic: safeTopic,
+    subject,
+    difficulty: 'standard',
+    sourceDocumentTitle: options.sourceDocumentTitle,
+  });
+
+  const allElementIds = scene.spec?.elements?.map((el) => el.id) || [];
+  const ruleHighlights =
+    primaryCheck.misconceptions?.[0]?.highlightElementIds?.filter((id) =>
+      allElementIds.includes(id)
+    ) || [];
+  const highlightElementIds =
+    ruleHighlights.length > 0 ? ruleHighlights : allElementIds.slice(0, Math.min(4, allElementIds.length));
+
+  const primaryMisconception = primaryCheck.misconceptions?.[0];
+
+  return {
+    sceneNumber: scene.sceneNumber,
+    teachingPoint: scene.teachingPoint,
+    alternativeExplanation: primaryMisconception
+      ? `Let's look at why a common trap happens here: ${primaryMisconception.whyIncorrect} ${primaryMisconception.coreConceptFix}`
+      : `Focus on the core relationship in the diagram: ${scene.teachingPoint} Notice how each highlighted vector or branch directly feeds into ${scene.keyFormula}.`,
+    stepByStepBreakdown: [
+      `1. Inspect the highlighted diagram elements (${highlightElementIds.join(', ') || 'all active vectors'}) in the visual schematic.`,
+      `2. Core Principle: ${scene.teachingPoint}`,
+      `3. Governing Formula Breakdown: ${scene.keyFormula}`,
+      primaryMisconception
+        ? `4. Exam Fix: ${primaryMisconception.coreConceptFix}`
+        : `4. Verify units, conditioning direction, and boundary cases before selecting your answer.`,
+    ],
+    highlightElementIds,
+    keyFormula: scene.keyFormula,
+    followUpQuestion,
+  };
+}
+
+/**
+ * Produces a copy of a scene's StructuredDiagramSpec where the reteaching target elements
+ * are visually emphasized (thicker stroke / bright highlight ring) for Adaptive Visual Reteaching.
+ */
+export function getHighlightedDiagramSpecForReteaching(
+  spec: StructuredDiagramSpec,
+  highlightElementIds: string[]
+): StructuredDiagramSpec {
+  if (!Array.isArray(highlightElementIds) || highlightElementIds.length === 0) {
+    return spec;
+  }
+  const highlightSet = new Set(highlightElementIds);
+  const updatedElements: DiagramElement[] = spec.elements.map((el) => {
+    if (!highlightSet.has(el.id)) {
+      return el;
+    }
+    if (el.kind === 'arrow' || el.kind === 'line') {
+      return {
+        ...el,
+        strokeWidth: Math.max(4, (el.strokeWidth || 2.5) + 1.5),
+      };
+    }
+    if (el.kind === 'rect' || el.kind === 'circle') {
+      return {
+        ...el,
+        strokeWidth: 3.5,
+      };
+    }
+    return el;
+  });
+
+  return {
+    ...spec,
+    elements: updatedElements,
+  };
+}
+
+/**
+ * Validates and sanitizes an AI-generated or custom SceneConceptCheckQuestion.
+ * Rejects malformed/ambiguous questions, strips XSS, and enforces PDF citation grounding.
+ */
+export function validateAndSanitizeConceptCheck(
+  raw: unknown,
+  scene: Pick<
+    AnimatedExplanationScene,
+    | 'sceneNumber'
+    | 'heading'
+    | 'teachingPoint'
+    | 'keyFormula'
+    | 'citedPages'
+    | 'isSupportedByMaterial'
+    | 'spec'
+  >,
+  options: {
+    topic: string;
+    subject?: EducationalSubject;
+    difficulty?: ConceptCheckDifficulty;
+    contextText?: string;
+    citedPages?: number[];
+    validPageNumbers?: number[];
+    sourceDocumentTitle?: string;
+  }
+): {
+  valid: boolean;
+  isFallback: boolean;
+  question: SceneConceptCheckQuestion;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const safeTopic = sanitizeBoundedString(options.topic || 'Core Study Concept', 120) || 'Core Study Concept';
+  const subject = options.subject || detectEducationalSubject(`${safeTopic} ${scene.heading}`);
+  const difficulty: ConceptCheckDifficulty = options.difficulty || 'standard';
+
+  const citationInfo = resolveSupportedCitedPages(
+    `${safeTopic} ${scene.heading}`,
+    options.contextText || '',
+    options.citedPages ?? scene.citedPages,
+    options.validPageNumbers
+  );
+
+  const buildFallback = (reason: string) => {
+    warnings.push(reason);
+    const q = buildDeterministicSceneConceptCheck(
+      {
+        ...scene,
+        citedPages: citationInfo.citedPages,
+        isSupportedByMaterial: citationInfo.isSupported,
+      },
+      {
+        topic: safeTopic,
+        subject,
+        difficulty,
+        sourceDocumentTitle: options.sourceDocumentTitle,
+      }
+    );
+    return {
+      valid: false,
+      isFallback: true,
+      question: q,
+      warnings,
+    };
+  };
+
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      const cleaned = raw
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return buildFallback('Concept check JSON could not be parsed; using verified fallback question.');
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return buildFallback('Concept check payload was empty or non-object; using verified fallback question.');
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const rawType = String(obj.questionType || 'mcq').toLowerCase();
+  if (rawType !== 'mcq' && rawType !== 'numerical') {
+    return buildFallback(`Unsupported questionType "${rawType}"; using verified fallback question.`);
+  }
+
+  const statement = sanitizeBoundedString(obj.statement || obj.question, 360);
+  if (!statement || statement.length < 12) {
+    return buildFallback('Question statement was missing or too short; using verified fallback question.');
+  }
+
+  const explanation = sanitizeBoundedString(obj.explanation, 420);
+  if (!explanation || explanation.length < 10) {
+    return buildFallback('Question explanation was missing or too short; using verified fallback question.');
+  }
+
+  const keyFormula =
+    sanitizeBoundedString(obj.keyFormula, 160) || sanitizeBoundedString(scene.keyFormula, 160);
+
+  // Sanitize misconceptions
+  const fallbackTemplate = buildDeterministicSceneConceptCheck(
+    {
+      ...scene,
+      citedPages: citationInfo.citedPages,
+      isSupportedByMaterial: citationInfo.isSupported,
+    },
+    {
+      topic: safeTopic,
+      subject,
+      difficulty,
+      sourceDocumentTitle: options.sourceDocumentTitle,
+    }
+  );
+
+  const sanitizedMisconceptions: ConceptMisconceptionRule[] = [];
+  if (Array.isArray(obj.misconceptions)) {
+    for (let i = 0; i < Math.min(4, obj.misconceptions.length); i++) {
+      const m = obj.misconceptions[i];
+      if (!m || typeof m !== 'object') continue;
+      const rec = m as Record<string, unknown>;
+      const summary = sanitizeBoundedString(rec.misconceptionSummary || rec.summary, 220);
+      const whyIncorrect = sanitizeBoundedString(rec.whyIncorrect, 260);
+      const coreConceptFix = sanitizeBoundedString(rec.coreConceptFix, 260);
+      if (!summary || !whyIncorrect) continue;
+      sanitizedMisconceptions.push({
+        id: sanitizeBoundedString(rec.id, 60) || `ai-misconception-${i + 1}`,
+        distractorIndex:
+          typeof rec.distractorIndex === 'number' &&
+          Number.isInteger(rec.distractorIndex) &&
+          rec.distractorIndex >= 0 &&
+          rec.distractorIndex <= 3
+            ? rec.distractorIndex
+            : undefined,
+        wrongNumericalTarget:
+          typeof rec.wrongNumericalTarget === 'number' && Number.isFinite(rec.wrongNumericalTarget)
+            ? rec.wrongNumericalTarget
+            : undefined,
+        wrongNumericalTolerance:
+          typeof rec.wrongNumericalTolerance === 'number' &&
+          Number.isFinite(rec.wrongNumericalTolerance) &&
+          rec.wrongNumericalTolerance > 0
+            ? rec.wrongNumericalTolerance
+            : undefined,
+        misconceptionSummary: summary,
+        whyIncorrect,
+        coreConceptFix: coreConceptFix || fallbackTemplate.teachingPoint,
+        highlightElementIds: Array.isArray(rec.highlightElementIds)
+          ? rec.highlightElementIds
+              .map((id) => sanitizeBoundedString(id, 40))
+              .filter(Boolean)
+              .slice(0, 5)
+          : fallbackTemplate.misconceptions[0]?.highlightElementIds,
+      });
+    }
+  }
+
+  const finalMisconceptions =
+    sanitizedMisconceptions.length > 0 ? sanitizedMisconceptions : fallbackTemplate.misconceptions;
+
+  if (rawType === 'mcq') {
+    if (!Array.isArray(obj.options) || obj.options.length !== 4) {
+      return buildFallback('MCQ must provide exactly 4 options; using verified fallback question.');
+    }
+    const cleanOptions = obj.options.map((opt) => sanitizeBoundedString(opt, 180));
+    if (cleanOptions.some((opt) => !opt || opt.length < 1)) {
+      return buildFallback('One or more MCQ options were empty after sanitization.');
+    }
+    const uniqueNormalized = new Set(cleanOptions.map((opt) => opt.toLowerCase()));
+    if (uniqueNormalized.size < 4) {
+      return buildFallback('MCQ options contained duplicate choices (ambiguous question).');
+    }
+
+    const correctIndex = Number(obj.correctIndex);
+    if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex > 3) {
+      return buildFallback('MCQ correctIndex was missing or out of bounds (0..3).');
+    }
+
+    return {
+      valid: true,
+      isFallback: false,
+      warnings,
+      question: {
+        id:
+          sanitizeBoundedString(obj.id, 80) ||
+          `cc-ai-s${scene.sceneNumber}-${difficulty}`,
+        sceneNumber: scene.sceneNumber,
+        topic: safeTopic,
+        subject,
+        teachingPoint: sanitizeBoundedString(obj.teachingPoint, 240) || scene.teachingPoint,
+        questionType: 'mcq',
+        difficulty,
+        statement,
+        options: cleanOptions as [string, string, string, string],
+        correctIndex,
+        explanation,
+        keyFormula,
+        misconceptions: finalMisconceptions,
+        citedPages: citationInfo.citedPages,
+        isSupportedByMaterial: citationInfo.isSupported,
+        sourceDocumentTitle: options.sourceDocumentTitle,
+        provenance: 'ai_grounded',
+      },
+    };
+  }
+
+  // Numerical question validation
+  const numericalAnswer = Number(obj.numericalAnswer);
+  if (!Number.isFinite(numericalAnswer)) {
+    return buildFallback('Numerical question lacked a finite numericalAnswer.');
+  }
+  const numericalTolerance = clampNumber(
+    obj.numericalTolerance,
+    0.0001,
+    Math.max(10, Math.abs(numericalAnswer) * 0.25),
+    Math.max(0.05, Math.abs(numericalAnswer) * 0.02)
+  );
+  const acceptedUnits = Array.isArray(obj.acceptedUnits)
+    ? obj.acceptedUnits
+        .map((u) => sanitizeBoundedString(u, 20))
+        .filter(Boolean)
+        .slice(0, 6)
+    : undefined;
+  const unitHint = sanitizeBoundedString(obj.unitHint, 24) || acceptedUnits?.[0] || undefined;
+
+  return {
+    valid: true,
+    isFallback: false,
+    warnings,
+    question: {
+      id:
+        sanitizeBoundedString(obj.id, 80) ||
+        `cc-ai-num-s${scene.sceneNumber}-${difficulty}`,
+      sceneNumber: scene.sceneNumber,
+      topic: safeTopic,
+      subject,
+      teachingPoint: sanitizeBoundedString(obj.teachingPoint, 240) || scene.teachingPoint,
+      questionType: 'numerical',
+      difficulty,
+      statement,
+      numericalAnswer,
+      numericalTolerance,
+      acceptedUnits,
+      unitHint,
+      explanation,
+      keyFormula,
+      misconceptions: finalMisconceptions,
+      citedPages: citationInfo.citedPages,
+      isSupportedByMaterial: citationInfo.isSupported,
+      sourceDocumentTitle: options.sourceDocumentTitle,
+      provenance: 'ai_grounded',
+    },
+  };
+}
+
+/**
+ * Creates the initial per-scene mastery state map for a multi-scene lesson.
+ */
+export function createInitialSceneMasteryMap(
+  scenes: AnimatedExplanationScene[]
+): Record<number, SceneConceptMasteryState> {
+  const map: Record<number, SceneConceptMasteryState> = {};
+  for (const sc of scenes) {
+    map[sc.sceneNumber] = {
+      sceneNumber: sc.sceneNumber,
+      status: 'unseen',
+      attemptsCount: 0,
+      wrongAttemptsCount: 0,
+      correctAttemptsCount: 0,
+      skippedCount: 0,
+      activeVariant: 'standard',
+      reteachingUnlocked: false,
+      reteachingCompleted: false,
+      lastAttempt: null,
+    };
+  }
+  return map;
+}
+
+/**
+ * Evaluates a student's MCQ or numerical submission on a scene's Concept Check,
+ * detects specific conceptual misconceptions, updates SceneConceptMasteryState,
+ * and determines whether to trigger explanation + replay (1st wrong) or Adaptive Visual Reteaching (>=2 wrong).
+ */
+export function evaluateConceptCheckSubmission(params: {
+  question: SceneConceptCheckQuestion;
+  selectedOptionIndex?: number;
+  enteredNumericalText?: string;
+  previousSceneState?: SceneConceptMasteryState;
+  studentUid?: string;
+  documentId?: string;
+  documentTitle?: string;
+  timestamp?: string;
+}): {
+  validSubmission: boolean;
+  validationError?: string;
+  attemptRecord?: ConceptCheckAttemptRecord;
+  nextSceneState: SceneConceptMasteryState;
+  feedbackAction:
+    | 'positive_advance_or_challenge'
+    | 'targeted_explanation_and_replay'
+    | 'open_adaptive_visual_reteaching';
+} {
+  const { question } = params;
+  const prevState: SceneConceptMasteryState = params.previousSceneState || {
+    sceneNumber: question.sceneNumber,
+    status: 'unseen',
+    attemptsCount: 0,
+    wrongAttemptsCount: 0,
+    correctAttemptsCount: 0,
+    skippedCount: 0,
+    activeVariant: question.difficulty || 'standard',
+    reteachingUnlocked: false,
+    reteachingCompleted: false,
+    lastAttempt: null,
+  };
+
+  let isCorrect = false;
+  let selectedOptionText: string | undefined;
+  let normalizedNumericalValue: number | null = null;
+  let correctAnswerDisplay = '';
+  let detectedMisconception: ConceptCheckAttemptRecord['detectedMisconception'] = null;
+
+  if (question.questionType === 'mcq') {
+    const idx = params.selectedOptionIndex;
+    const options = question.options || ['', '', '', ''];
+    if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0 || idx > 3) {
+      return {
+        validSubmission: false,
+        validationError: 'Please select one of the four options before submitting.',
+        nextSceneState: prevState,
+        feedbackAction: 'targeted_explanation_and_replay',
+      };
+    }
+    selectedOptionText = options[idx];
+    const correctIdx = typeof question.correctIndex === 'number' ? question.correctIndex : 0;
+    correctAnswerDisplay = options[correctIdx] || `Option ${correctIdx + 1}`;
+    isCorrect = idx === correctIdx;
+
+    if (!isCorrect) {
+      const matchedRule =
+        question.misconceptions.find((m) => m.distractorIndex === idx) ||
+        question.misconceptions[0];
+      if (matchedRule) {
+        detectedMisconception = {
+          id: matchedRule.id,
+          summary: matchedRule.misconceptionSummary,
+          whyIncorrect: matchedRule.whyIncorrect,
+          coreConceptFix: matchedRule.coreConceptFix,
+          highlightElementIds: matchedRule.highlightElementIds,
+        };
+      } else {
+        detectedMisconception = {
+          id: `cautious-mcq-s${question.sceneNumber}`,
+          summary: `This answer may indicate confusion between "${selectedOptionText}" and the governing rule (${question.keyFormula}).`,
+          whyIncorrect: question.explanation,
+          coreConceptFix: question.teachingPoint,
+        };
+      }
+    }
+  } else {
+    // Numerical question
+    const expected = typeof question.numericalAnswer === 'number' ? question.numericalAnswer : 0;
+    const grade = normalizeAndGradeNumericalAnswer(
+      params.enteredNumericalText,
+      expected,
+      question.numericalTolerance,
+      question.acceptedUnits
+    );
+    if (!grade.validInput || grade.normalizedValue === null) {
+      return {
+        validSubmission: false,
+        validationError:
+          grade.errorReason || 'Please enter a valid number or fraction (e.g., 10, 0.0594, or 1/6).',
+        nextSceneState: prevState,
+        feedbackAction: 'targeted_explanation_and_replay',
+      };
+    }
+    normalizedNumericalValue = grade.normalizedValue;
+    isCorrect = grade.isCorrect;
+    correctAnswerDisplay = `${expected}${question.unitHint ? ` ${question.unitHint}` : ''}`;
+
+    if (!isCorrect) {
+      const enteredVal = grade.normalizedValue;
+      const matchedNumericRule = question.misconceptions.find((m) => {
+        if (typeof m.wrongNumericalTarget !== 'number') return false;
+        const tol = m.wrongNumericalTolerance ?? Math.max(0.1, Math.abs(m.wrongNumericalTarget) * 0.05);
+        return Math.abs(enteredVal - m.wrongNumericalTarget) <= tol;
+      });
+      if (matchedNumericRule) {
+        detectedMisconception = {
+          id: matchedNumericRule.id,
+          summary: matchedNumericRule.misconceptionSummary,
+          whyIncorrect: matchedNumericRule.whyIncorrect,
+          coreConceptFix: matchedNumericRule.coreConceptFix,
+          highlightElementIds: matchedNumericRule.highlightElementIds,
+        };
+      } else {
+        const fallbackRule = question.misconceptions[0];
+        detectedMisconception = {
+          id: fallbackRule?.id || `cautious-num-s${question.sceneNumber}`,
+          summary:
+            fallbackRule?.misconceptionSummary ||
+            `This answer (${enteredVal}) may indicate confusion when applying ${question.keyFormula}.`,
+          whyIncorrect: fallbackRule?.whyIncorrect || question.explanation,
+          coreConceptFix: fallbackRule?.coreConceptFix || question.teachingPoint,
+          highlightElementIds: fallbackRule?.highlightElementIds,
+        };
+      }
+    }
+  }
+
+  const nextAttemptsCount = prevState.attemptsCount + 1;
+  const nextWrongCount = isCorrect ? prevState.wrongAttemptsCount : prevState.wrongAttemptsCount + 1;
+  const nextCorrectCount = isCorrect
+    ? prevState.correctAttemptsCount + 1
+    : prevState.correctAttemptsCount;
+
+  // Repeated error (>= 2 wrong attempts on this scene) triggers Adaptive Visual Reteaching
+  const triggeredReteaching = !isCorrect && nextWrongCount >= 2;
+  const reteachingUnlocked = prevState.reteachingUnlocked || triggeredReteaching;
+  const completedReteaching =
+    prevState.reteachingCompleted || (isCorrect && reteachingUnlocked);
+
+  let nextStatus: SceneMasteryStatus;
+  let feedbackAction:
+    | 'positive_advance_or_challenge'
+    | 'targeted_explanation_and_replay'
+    | 'open_adaptive_visual_reteaching';
+
+  if (isCorrect) {
+    nextStatus = prevState.wrongAttemptsCount === 0 ? 'correct_first_try' : 'correct_after_retry';
+    feedbackAction = 'positive_advance_or_challenge';
+  } else if (nextWrongCount >= 2) {
+    nextStatus = 'needs_reteaching';
+    feedbackAction = 'open_adaptive_visual_reteaching';
+  } else {
+    nextStatus = 'in_progress';
+    feedbackAction = 'targeted_explanation_and_replay';
+  }
+
+  const attemptRecord: ConceptCheckAttemptRecord = {
+    attemptId: `cc-att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    studentUid: params.studentUid || 'anonymous-local',
+    documentId: params.documentId || 'default-doc',
+    documentTitle: params.documentTitle || question.sourceDocumentTitle || 'Study Material',
+    topic: question.topic,
+    subject: question.subject,
+    sceneNumber: question.sceneNumber,
+    teachingPoint: question.teachingPoint,
+    questionId: question.id,
+    questionType: question.questionType,
+    provenance: question.provenance,
+    selectedOptionIndex: params.selectedOptionIndex,
+    selectedOptionText,
+    enteredNumericalText: params.enteredNumericalText,
+    normalizedNumericalValue,
+    correctAnswerDisplay,
+    isCorrect,
+    skipped: false,
+    attemptNumberForScene: nextAttemptsCount,
+    detectedMisconception,
+    triggeredReteaching,
+    completedReteaching,
+    citedPages: question.citedPages,
+    isSupportedByMaterial: question.isSupportedByMaterial,
+    timestamp: params.timestamp || new Date().toISOString(),
+  };
+
+  const nextSceneState: SceneConceptMasteryState = {
+    sceneNumber: question.sceneNumber,
+    status: nextStatus,
+    attemptsCount: nextAttemptsCount,
+    wrongAttemptsCount: nextWrongCount,
+    correctAttemptsCount: nextCorrectCount,
+    skippedCount: prevState.skippedCount,
+    activeVariant: triggeredReteaching ? 'reteach' : question.difficulty,
+    reteachingUnlocked,
+    reteachingCompleted: completedReteaching,
+    lastAttempt: attemptRecord,
+  };
+
+  return {
+    validSubmission: true,
+    attemptRecord,
+    nextSceneState,
+    feedbackAction,
+  };
+}
+
+/**
+ * Records that a student skipped a scene's concept check without fabricating a correct attempt
+ * or overwriting previously verified mastery.
+ */
+export function skipSceneConceptCheck(
+  prevState: SceneConceptMasteryState | undefined,
+  sceneNumber: number
+): SceneConceptMasteryState {
+  const base: SceneConceptMasteryState = prevState || {
+    sceneNumber,
+    status: 'unseen',
+    attemptsCount: 0,
+    wrongAttemptsCount: 0,
+    correctAttemptsCount: 0,
+    skippedCount: 0,
+    activeVariant: 'standard',
+    reteachingUnlocked: false,
+    reteachingCompleted: false,
+    lastAttempt: null,
+  };
+
+  // Never downgrade an already-verified correct status or erase ongoing error counts
+  const nextStatus: SceneMasteryStatus =
+    base.status === 'correct_first_try' ||
+    base.status === 'correct_after_retry' ||
+    base.status === 'needs_reteaching' ||
+    base.status === 'in_progress'
+      ? base.status
+      : 'skipped';
+
+  return {
+    ...base,
+    status: nextStatus,
+    skippedCount: base.skippedCount + 1,
+  };
+}
+
+/**
+ * Connects Interactive Concept Check attempts with LearnMate's existing Mistake DNA
+ * (`MistakeInsight[]`), Revision Plan (`RevisionTask[]`), and `weakAreas` without
+ * modifying official JEE Main mock-test (`jee_simulator`) records.
+ *
+ * Evidence rules:
+ * - Skipped or unseen question -> no mastery evidence; no Mistake DNA changes.
+ * - 1st wrong answer -> limited evidence (`limited_single_error`); does not permanently mark weak yet.
+ * - Repeated wrong answers (>= 2 wrong on the scene/concept) -> confirmed misconception (`repeated_misconception`);
+ *   upserts a grounded `MistakeInsight`, a high-priority `RevisionTask`, and adds the topic to `weakAreas`.
+ * - Correct answer after reteaching -> (`recovered_after_reteaching`); downgrades high-priority RevisionTask to medium.
+ */
+export function integrateConceptCheckWithMistakeDna(params: {
+  documentId: string;
+  attempt: ConceptCheckAttemptRecord;
+  sceneState: SceneConceptMasteryState;
+  existingMistakes: MistakeInsight[];
+  existingRevisionPlan: RevisionTask[];
+  existingWeakAreas?: string[];
+}): {
+  evidenceLevel:
+    | 'no_evidence_skipped'
+    | 'positive_mastery'
+    | 'recovered_after_reteaching'
+    | 'limited_single_error'
+    | 'repeated_misconception';
+  updatedMistakes: MistakeInsight[];
+  updatedRevisionPlan: RevisionTask[];
+  updatedWeakAreas: string[];
+  mistakeDnaUpdated: boolean;
+} {
+  const { documentId, attempt, sceneState } = params;
+  const updatedMistakes = [...params.existingMistakes];
+  const updatedRevisionPlan = [...params.existingRevisionPlan];
+  const weakAreasSet = new Set(params.existingWeakAreas || []);
+
+  if (attempt.skipped) {
+    return {
+      evidenceLevel: 'no_evidence_skipped',
+      updatedMistakes,
+      updatedRevisionPlan,
+      updatedWeakAreas: Array.from(weakAreasSet),
+      mistakeDnaUpdated: false,
+    };
+  }
+
+  const mistakeIdKey = `concept-check-${documentId}-s${attempt.sceneNumber}-${attempt.topic
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')}`;
+  const revisionTaskId = `rev-cc-${documentId}-s${attempt.sceneNumber}`;
+
+  if (attempt.isCorrect) {
+    if (sceneState.wrongAttemptsCount >= 2 || attempt.completedReteaching) {
+      // Student recovered after repeated errors / visual reteaching
+      const revIdx = updatedRevisionPlan.findIndex((t) => t.id === revisionTaskId);
+      if (revIdx >= 0) {
+        updatedRevisionPlan[revIdx] = {
+          ...updatedRevisionPlan[revIdx],
+          priority: 'medium',
+          reason: `Recovered in Scene ${attempt.sceneNumber} after Adaptive Visual Reteaching (${attempt.teachingPoint}). Do 1 spaced-repetition check tomorrow.`,
+          updatedAt: attempt.timestamp,
+        };
+      }
+      return {
+        evidenceLevel: 'recovered_after_reteaching',
+        updatedMistakes,
+        updatedRevisionPlan,
+        updatedWeakAreas: Array.from(weakAreasSet),
+        mistakeDnaUpdated: revIdx >= 0,
+      };
+    }
+
+    return {
+      evidenceLevel: 'positive_mastery',
+      updatedMistakes,
+      updatedRevisionPlan,
+      updatedWeakAreas: Array.from(weakAreasSet),
+      mistakeDnaUpdated: false,
+    };
+  }
+
+  // Incorrect attempt: check whether it is a single error (limited evidence) vs repeated misconception (>= 2 wrong)
+  if (sceneState.wrongAttemptsCount < 2) {
+    return {
+      evidenceLevel: 'limited_single_error',
+      updatedMistakes,
+      updatedRevisionPlan,
+      updatedWeakAreas: Array.from(weakAreasSet),
+      mistakeDnaUpdated: false,
+    };
+  }
+
+  // Repeated wrong answers (>= 2) -> Record in Mistake DNA, Revision Plan, and Weak Areas
+  const verifiedPage =
+    attempt.isSupportedByMaterial && attempt.citedPages.length > 0 ? attempt.citedPages[0] : 1;
+  const sourceQuote =
+    attempt.isSupportedByMaterial && attempt.citedPages.length > 0
+      ? `Cited from Page ${attempt.citedPages.join(', ')} of "${attempt.documentTitle}" — ${attempt.teachingPoint}`
+      : `Standard JEE Syllabus (Not in uploaded pages) — Scene ${attempt.sceneNumber}: ${attempt.teachingPoint}`;
+
+  const selectedAnswerLabel =
+    attempt.selectedOptionText ||
+    (attempt.enteredNumericalText ? String(attempt.enteredNumericalText) : 'Incorrect response');
+
+  const newMistake: MistakeInsight = {
+    questionId: mistakeIdKey,
+    topic: attempt.topic,
+    question: `[Scene ${attempt.sceneNumber} Concept Check] ${attempt.teachingPoint}`,
+    selectedOption: selectedAnswerLabel,
+    correctOption: attempt.correctAnswerDisplay,
+    likelyMisconception:
+      attempt.detectedMisconception?.summary ||
+      `Repeated confusion on Scene ${attempt.sceneNumber} (${attempt.teachingPoint}).`,
+    coreConceptFix:
+      attempt.detectedMisconception?.coreConceptFix ||
+      attempt.detectedMisconception?.whyIncorrect ||
+      attempt.teachingPoint,
+    sourcePage: verifiedPage,
+    sourceQuote,
+  };
+
+  const existingMistakeIdx = updatedMistakes.findIndex(
+    (m) => m.questionId === mistakeIdKey || (m.topic === attempt.topic && m.question === newMistake.question)
+  );
+  if (existingMistakeIdx >= 0) {
+    updatedMistakes[existingMistakeIdx] = newMistake;
+  } else {
+    updatedMistakes.unshift(newMistake);
+  }
+
+  const newRevisionTask: RevisionTask = {
+    id: revisionTaskId,
+    documentId,
+    topic: attempt.topic,
+    priority: 'high',
+    reason: `Repeated misconception (${sceneState.wrongAttemptsCount} attempts) in Animated Explanation Scene ${attempt.sceneNumber}: ${
+      attempt.detectedMisconception?.summary || attempt.teachingPoint
+    }`,
+    recommendedAction: `Complete Adaptive Visual Reteaching for Scene ${attempt.sceneNumber}, then solve a targeted Adaptive Practice set on "${attempt.topic}".`,
+    conceptSummary: attempt.detectedMisconception?.coreConceptFix || attempt.teachingPoint,
+    sourcePage: verifiedPage,
+    completed: false,
+    updatedAt: attempt.timestamp,
+  };
+
+  const existingRevIdx = updatedRevisionPlan.findIndex((t) => t.id === revisionTaskId);
+  if (existingRevIdx >= 0) {
+    updatedRevisionPlan[existingRevIdx] = newRevisionTask;
+  } else {
+    updatedRevisionPlan.unshift(newRevisionTask);
+  }
+
+  weakAreasSet.add(attempt.topic);
+
+  return {
+    evidenceLevel: 'repeated_misconception',
+    updatedMistakes,
+    updatedRevisionPlan,
+    updatedWeakAreas: Array.from(weakAreasSet),
+    mistakeDnaUpdated: true,
+  };
+}
+
+/**
+ * Computes the documented, evidence-based LessonMasterySummary and Smart Next-Action Recommendation
+ * across all scenes in the animated explanation.
+ *
+ * Documented Evidence Formula:
+ * - Each scene solved on the first try contributes 1.00 scene-mastery unit.
+ * - Each scene solved after retry/reteaching contributes 0.75 scene-mastery units.
+ * - Unattempted, skipped, or unresolved scenes contribute 0.00 units.
+ * - `evidenceScorePct = Math.round(((firstTryCorrect * 1.0 + retryCorrect * 0.75) / totalScenes) * 100)`.
+ */
+export function computeLessonMasteryAndRecommendation(
+  scenes: AnimatedExplanationScene[],
+  masteryByScene: Record<number, SceneConceptMasteryState>
+): LessonMasterySummary {
+  const totalScenes = Math.max(1, scenes.length);
+  let attemptedScenes = 0;
+  let verifiedScenes = 0;
+  let firstTryCorrectScenes = 0;
+  let retryCorrectScenes = 0;
+  const strugglingScenes: number[] = [];
+  const skippedScenes: number[] = [];
+  const uncompletedScenes: number[] = [];
+  let singleErrorScenes: number[] = [];
+
+  for (const sc of scenes) {
+    const st = masteryByScene[sc.sceneNumber];
+    if (!st || st.status === 'unseen') {
+      uncompletedScenes.push(sc.sceneNumber);
+      continue;
+    }
+    if (st.status === 'skipped' && st.attemptsCount === 0) {
+      skippedScenes.push(sc.sceneNumber);
+      uncompletedScenes.push(sc.sceneNumber);
+      continue;
+    }
+    if (st.attemptsCount > 0) {
+      attemptedScenes++;
+    }
+    if (st.status === 'correct_first_try') {
+      verifiedScenes++;
+      firstTryCorrectScenes++;
+    } else if (st.status === 'correct_after_retry') {
+      verifiedScenes++;
+      retryCorrectScenes++;
+      if (st.wrongAttemptsCount >= 2) {
+        strugglingScenes.push(sc.sceneNumber);
+      }
+    } else if (st.status === 'needs_reteaching' || st.wrongAttemptsCount >= 2) {
+      strugglingScenes.push(sc.sceneNumber);
+      uncompletedScenes.push(sc.sceneNumber);
+    } else if (st.status === 'in_progress' || st.wrongAttemptsCount === 1) {
+      singleErrorScenes.push(sc.sceneNumber);
+      uncompletedScenes.push(sc.sceneNumber);
+    } else {
+      uncompletedScenes.push(sc.sceneNumber);
+    }
+  }
+
+  const checkpointCompletionPct = Math.min(100, Math.round((verifiedScenes / totalScenes) * 100));
+  const weightedUnits = firstTryCorrectScenes * 1.0 + retryCorrectScenes * 0.75;
+  const evidenceScorePct =
+    attemptedScenes === 0 ? 0 : Math.min(100, Math.round((weightedUnits / totalScenes) * 100));
+
+  // 1. Repeated misunderstanding takes highest priority for adaptive remediation
+  const unresolvedStrugglingScene = scenes.find((sc) => {
+    const st = masteryByScene[sc.sceneNumber];
+    return st && st.wrongAttemptsCount >= 2 && st.correctAttemptsCount === 0;
+  });
+
+  if (unresolvedStrugglingScene) {
+    return {
+      totalScenes,
+      attemptedScenes,
+      verifiedScenes,
+      firstTryCorrectScenes,
+      retryCorrectScenes,
+      strugglingScenes,
+      skippedScenes,
+      uncompletedScenes,
+      checkpointCompletionPct,
+      evidenceScorePct,
+      estimatedConceptReadinessLabel: 'Needs Targeted Remediation (Repeated Misconception)',
+      overallStatus: 'repeated_misunderstanding',
+      headline: `Repeated Misconception Detected in Scene ${unresolvedStrugglingScene.sceneNumber}`,
+      rationale: `You had multiple incorrect attempts on Scene ${unresolvedStrugglingScene.sceneNumber} (${unresolvedStrugglingScene.heading}). This concept has been synced to your Mistake DNA & Revision Plan.`,
+      recommendedAction: {
+        kind: 'open_visual_reteaching',
+        label: `Complete Visual Reteaching (Scene ${unresolvedStrugglingScene.sceneNumber})`,
+        targetSceneNumber: unresolvedStrugglingScene.sceneNumber,
+      },
+      secondaryAction: {
+        kind: 'adaptive_practice',
+        label: 'Practice Weak Topic in Adaptive Practice',
+        targetTab: 'practice',
+      },
+    };
+  }
+
+  // 2. Unresolved single error -> Review missed teaching point and retry
+  if (singleErrorScenes.length > 0) {
+    const targetScene = singleErrorScenes[0];
+    return {
+      totalScenes,
+      attemptedScenes,
+      verifiedScenes,
+      firstTryCorrectScenes,
+      retryCorrectScenes,
+      strugglingScenes,
+      skippedScenes,
+      uncompletedScenes,
+      checkpointCompletionPct,
+      evidenceScorePct,
+      estimatedConceptReadinessLabel: 'Developing (Review & Retry Missed Checkpoint)',
+      overallStatus: 'some_errors',
+      headline: `Review Teaching Point in Scene ${targetScene} & Retry`,
+      rationale: `You missed the first check on Scene ${targetScene}. Replay the 3-step visual breakdown and retry with an equivalent concept question.`,
+      recommendedAction: {
+        kind: 'review_and_retry_scene',
+        label: `Review & Retry Scene ${targetScene} Check`,
+        targetSceneNumber: targetScene,
+      },
+      secondaryAction: {
+        kind: 'quick_revise',
+        label: 'Open Quick Revise Formula Sheet',
+        targetTab: 'revision',
+      },
+    };
+  }
+
+  // 3. All scenes verified!
+  if (verifiedScenes >= totalScenes) {
+    if (strugglingScenes.length > 0) {
+      return {
+        totalScenes,
+        attemptedScenes,
+        verifiedScenes,
+        firstTryCorrectScenes,
+        retryCorrectScenes,
+        strugglingScenes,
+        skippedScenes,
+        uncompletedScenes,
+        checkpointCompletionPct,
+        evidenceScorePct,
+        estimatedConceptReadinessLabel: 'Recovered After Reteaching (Verify in Timed Practice)',
+        overallStatus: 'repeated_misunderstanding',
+        headline: `All ${totalScenes} Checkpoints Completed (${evidenceScorePct}% Observed Score — Recovered After Reteaching)`,
+        rationale: `You resolved your earlier misconception in Scene ${strugglingScenes.join(', ')}. Reinforce this topic now with a short Adaptive Practice quiz or Quick Revise flashcards.`,
+        recommendedAction: {
+          kind: 'adaptive_practice',
+          label: 'Reinforce Weak Topic in Adaptive Practice',
+          targetTab: 'practice',
+        },
+        secondaryAction: {
+          kind: 'quick_revise',
+          label: 'Review in Quick Revise',
+          targetTab: 'revision',
+        },
+      };
+    }
+
+    if (firstTryCorrectScenes === totalScenes) {
+      return {
+        totalScenes,
+        attemptedScenes,
+        verifiedScenes,
+        firstTryCorrectScenes,
+        retryCorrectScenes,
+        strugglingScenes,
+        skippedScenes,
+        uncompletedScenes,
+        checkpointCompletionPct,
+        evidenceScorePct,
+        estimatedConceptReadinessLabel: 'Strong Checkpoint Evidence (Confirm in JEE Practice)',
+        overallStatus: 'strong',
+        headline: `Strong Checkpoint Evidence (${verifiedScenes}/${totalScenes} First-Try Verified · ${evidenceScorePct}% Observed Score)`,
+        rationale: `You verified every scene's teaching point on the first attempt. Try a harder JEE numerical challenge or test yourself in Practice.`,
+        recommendedAction: {
+          kind: 'try_challenge',
+          label: 'Try Harder Challenge Question',
+          targetSceneNumber: scenes[scenes.length - 1].sceneNumber,
+        },
+        secondaryAction: {
+          kind: 'adaptive_practice',
+          label: 'Open Chapter Practice Quiz',
+          targetTab: 'practice',
+        },
+      };
+    }
+
+    return {
+      totalScenes,
+      attemptedScenes,
+      verifiedScenes,
+      firstTryCorrectScenes,
+      retryCorrectScenes,
+      strugglingScenes,
+      skippedScenes,
+      uncompletedScenes,
+      checkpointCompletionPct,
+      evidenceScorePct,
+      estimatedConceptReadinessLabel: 'Checkpoints Verified With Retry (Practice Recommended)',
+      overallStatus: 'some_errors',
+      headline: `Lesson Checkpoints Completed (${verifiedScenes}/${totalScenes} Scenes Verified · ${evidenceScorePct}% Observed Score)`,
+      rationale: `You completed all scene checks with ${retryCorrectScenes} retry recovery. Solidify your speed with a practice set.`,
+      recommendedAction: {
+        kind: 'adaptive_practice',
+        label: 'Start Targeted Practice Quiz',
+        targetTab: 'practice',
+      },
+      secondaryAction: {
+        kind: 'quick_revise',
+        label: 'Open Quick Revise',
+        targetTab: 'revision',
+      },
+    };
+  }
+
+  // 4. Incomplete lesson (some or zero scenes verified so far)
+  const nextSceneToComplete = uncompletedScenes[0] || 1;
+  if (attemptedScenes === 0) {
+    return {
+      totalScenes,
+      attemptedScenes,
+      verifiedScenes,
+      firstTryCorrectScenes,
+      retryCorrectScenes,
+      strugglingScenes,
+      skippedScenes,
+      uncompletedScenes,
+      checkpointCompletionPct: 0,
+      evidenceScorePct: 0,
+      estimatedConceptReadinessLabel: 'No Checkpoint Evidence Yet (0 Attempted)',
+      overallStatus: 'unstarted',
+      headline: `0 of ${totalScenes} Scene Checks Completed`,
+      rationale:
+        skippedScenes.length > 0
+          ? `You skipped ${skippedScenes.length} scene check(s) (skipped checks record 0% mastery evidence). Click "Check Understanding" on Scene ${nextSceneToComplete} to verify your grasp.`
+          : `Click "Check Understanding" after studying Scene ${nextSceneToComplete} to verify the teaching point.`,
+      recommendedAction: {
+        kind: 'resume_scene',
+        label: `Check Understanding on Scene ${nextSceneToComplete}`,
+        targetSceneNumber: nextSceneToComplete,
+      },
+    };
+  }
+
+  return {
+    totalScenes,
+    attemptedScenes,
+    verifiedScenes,
+    firstTryCorrectScenes,
+    retryCorrectScenes,
+    strugglingScenes,
+    skippedScenes,
+    uncompletedScenes,
+    checkpointCompletionPct,
+    evidenceScorePct,
+    estimatedConceptReadinessLabel: `Partial Checkpoint Evidence (${verifiedScenes}/${totalScenes} Verified)`,
+    overallStatus: 'incomplete',
+    headline: `In Progress: ${verifiedScenes} of ${totalScenes} Scene Checks Verified (${evidenceScorePct}% Observed Score)`,
+    rationale: `Continue to Scene ${nextSceneToComplete} and complete its interactive concept check to finish this lesson.`,
+    recommendedAction: {
+      kind: 'continue_next_scene',
+      label: `Continue to Scene ${nextSceneToComplete}`,
+      targetSceneNumber: nextSceneToComplete,
+    },
+    secondaryAction: {
+      kind: 'try_challenge',
+      label: 'Try Harder Question on Current Scene',
+    },
+  };
+}
+
+/**
+ * Deterministically merges local and cloud ConceptCheckAttemptRecord arrays:
+ * - Enforces account ownership if `ownerUid` is provided (migrating anonymous 'local-student' records to `ownerUid` and rejecting foreign UIDs).
+ * - Deduplicates by `attemptId` (keeping the newer timestamp if both exist) and by composite event signature.
+ * - Orders newest-first by `timestamp`.
+ */
+export function mergeConceptCheckAttempts(
+  localAttempts: ConceptCheckAttemptRecord[],
+  cloudAttempts: ConceptCheckAttemptRecord[],
+  ownerUid?: string
+): ConceptCheckAttemptRecord[] {
+  const map = new Map<string, ConceptCheckAttemptRecord>();
+  const signatureSet = new Set<string>();
+
+  const processList = (items: ConceptCheckAttemptRecord[]) => {
+    if (!Array.isArray(items)) return;
+    for (const raw of items) {
+      if (!raw || typeof raw !== 'object' || !raw.attemptId || !raw.documentId) continue;
+      if (
+        ownerUid &&
+        raw.studentUid &&
+        raw.studentUid !== 'local-student' &&
+        raw.studentUid !== ownerUid
+      ) {
+        // Never allow another student's attempt record to merge into this student's state
+        continue;
+      }
+      const normalized: ConceptCheckAttemptRecord = {
+        ...raw,
+        studentUid: ownerUid || raw.studentUid || 'local-student',
+      };
+      const sig = `${normalized.documentId}::${normalized.topic}::s${normalized.sceneNumber}::${normalized.questionId}::${normalized.timestamp}`;
+      const existing = map.get(normalized.attemptId);
+      if (existing) {
+        const existingTs = Date.parse(existing.timestamp) || 0;
+        const incomingTs = Date.parse(normalized.timestamp) || 0;
+        if (incomingTs >= existingTs) {
+          map.set(normalized.attemptId, normalized);
+        }
+      } else if (!signatureSet.has(sig)) {
+        signatureSet.add(sig);
+        map.set(normalized.attemptId, normalized);
+      }
+    }
+  };
+
+  processList(cloudAttempts);
+  processList(localAttempts);
+
+  return Array.from(map.values())
+    .sort((a, b) => (Date.parse(b.timestamp) || 0) - (Date.parse(a.timestamp) || 0))
+    .slice(0, 500);
+}
+
+function getMasteryStatusPriority(status: SceneMasteryStatus): number {
+  switch (status) {
+    case 'correct_first_try':
+      return 6;
+    case 'correct_after_retry':
+      return 5;
+    case 'needs_reteaching':
+    case 'struggling':
+      return 4;
+    case 'in_progress':
+      return 3;
+    case 'skipped':
+      return 2;
+    case 'unseen':
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Deterministically merges local and cloud per-scene mastery maps without losing verified progress
+ * or misconception evidence.
+ */
+export function mergeSceneMasteryState(
+  localState: Record<number, SceneConceptMasteryState> | null | undefined,
+  cloudState: Record<number, SceneConceptMasteryState> | null | undefined
+): Record<number, SceneConceptMasteryState> {
+  const result: Record<number, SceneConceptMasteryState> = {};
+  const keys = new Set<number>([
+    ...Object.keys(localState || {}).map(Number),
+    ...Object.keys(cloudState || {}).map(Number),
+  ]);
+
+  for (const sceneNum of keys) {
+    if (!Number.isFinite(sceneNum)) continue;
+    const loc = localState?.[sceneNum];
+    const cld = cloudState?.[sceneNum];
+    if (loc && !cld) {
+      result[sceneNum] = { ...loc };
+      continue;
+    }
+    if (cld && !loc) {
+      result[sceneNum] = { ...cld };
+      continue;
+    }
+    if (!loc || !cld) continue;
+
+    const locTs = loc.lastAttempt?.timestamp ? Date.parse(loc.lastAttempt.timestamp) || 0 : 0;
+    const cldTs = cld.lastAttempt?.timestamp ? Date.parse(cld.lastAttempt.timestamp) || 0 : 0;
+    const newer = locTs >= cldTs ? loc : cld;
+
+    const wrongAttemptsCount = Math.max(loc.wrongAttemptsCount || 0, cld.wrongAttemptsCount || 0);
+    const correctAttemptsCount = Math.max(
+      loc.correctAttemptsCount || 0,
+      cld.correctAttemptsCount || 0
+    );
+    const attemptsCount = Math.max(
+      loc.attemptsCount || 0,
+      cld.attemptsCount || 0,
+      wrongAttemptsCount + correctAttemptsCount
+    );
+    const skippedCount = Math.max(loc.skippedCount || 0, cld.skippedCount || 0);
+    const reteachingUnlocked = Boolean(loc.reteachingUnlocked || cld.reteachingUnlocked);
+    const reteachingCompleted = Boolean(loc.reteachingCompleted || cld.reteachingCompleted);
+
+    let mergedStatus: SceneMasteryStatus =
+      getMasteryStatusPriority(loc.status) >= getMasteryStatusPriority(cld.status)
+        ? loc.status
+        : cld.status;
+
+    if (correctAttemptsCount > 0) {
+      mergedStatus = wrongAttemptsCount === 0 ? 'correct_first_try' : 'correct_after_retry';
+    } else if (wrongAttemptsCount >= 2) {
+      mergedStatus = 'needs_reteaching';
+    } else if (wrongAttemptsCount === 1) {
+      mergedStatus = 'in_progress';
+    }
+
+    result[sceneNum] = {
+      sceneNumber: sceneNum,
+      status: mergedStatus,
+      attemptsCount,
+      wrongAttemptsCount,
+      correctAttemptsCount,
+      skippedCount,
+      activeVariant: newer.activeVariant || 'standard',
+      reteachingUnlocked,
+      reteachingCompleted,
+      lastAttempt: newer.lastAttempt || loc.lastAttempt || cld.lastAttempt || null,
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Merges a document's topic-keyed mastery map (`Record<topicSlug, Record<sceneNumber, SceneConceptMasteryState>>`)
+ * between local and cloud snapshots.
+ */
+export function mergeTopicMasteryMaps(
+  localMap: Record<string, Record<number, SceneConceptMasteryState>> | null | undefined,
+  cloudMap: Record<string, Record<number, SceneConceptMasteryState>> | null | undefined
+): Record<string, Record<number, SceneConceptMasteryState>> {
+  const out: Record<string, Record<number, SceneConceptMasteryState>> = {};
+  const topics = new Set<string>([
+    ...Object.keys(localMap || {}),
+    ...Object.keys(cloudMap || {}),
+  ]);
+  for (const slug of topics) {
+    if (!slug) continue;
+    out[slug] = mergeSceneMasteryState(localMap?.[slug], cloudMap?.[slug]);
+  }
+  return out;
+}
+
+
 

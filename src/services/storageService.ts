@@ -43,8 +43,63 @@ import {
   normalizeStudentProfile,
   profileNeedsMigration,
 } from '../utils/studentProfile';
+import {
+  integrateConceptCheckWithMistakeDna,
+  mergeConceptCheckAttempts,
+  mergeTopicMasteryMaps,
+  type ConceptCheckAttemptRecord,
+  type SceneConceptMasteryState,
+} from '../utils/educationalSpecsEngine';
+import {
+  computeUtf8ByteSize,
+  truncateStringToUtf8Bytes,
+  type HandwrittenNoteDocument,
+} from '../utils/phase6Engine';
+import { indexedDbStorage } from './indexedDbStorage';
 
 export { DEFAULT_STUDENT_PROFILE } from '../utils/studentProfile';
+
+export interface StudentDataExportArchive {
+  schemaVersion: string;
+  exportedAt: string;
+  ownerUid: string | null;
+  studentProfile: StudentAcademicProfile;
+  documents: StudyDocument[];
+  quizAttempts: QuizAttempt[];
+  conceptCheckAttempts: ConceptCheckAttemptRecord[];
+  handwrittenNotes: HandwrittenNoteDocument[];
+  creativeAssets: CreativeAsset[];
+  notebookEntries: NotebookEntry[];
+  studyPlannerTasks: StudyPlannerTask[];
+  focusSessions: FocusSessionRecord[];
+  perDocumentState: Record<
+    string,
+    {
+      tutorMessages: TutorMessage[];
+      voiceTutorMessages: VoiceTurn[];
+      mistakes: MistakeInsight[];
+      revisionPlan: RevisionTask[];
+      quickRevise: QuickReviseBundle | null;
+      pdfAnnotations: PdfAnnotationItem[];
+    }
+  >;
+}
+
+export interface AccountDeletionResult {
+  deletedLocalKeysCount: number;
+  deletedIndexedDbRecordsCount: number;
+  deletedCloudDocumentsCount: number;
+  completedAt: string;
+}
+
+export type CloudSyncState = 'local_only' | 'synced' | 'pending_offline' | 'sync_failed';
+
+export interface CloudSyncStatus {
+  state: CloudSyncState;
+  pendingDocumentIds: string[];
+  lastSyncedAt: string | null;
+  lastError: string | null;
+}
 
 /**
  * Storage repository interface supporting both local browser persistence
@@ -121,15 +176,59 @@ export interface IStudyStorageRepository {
   getStudentProfile(): StudentAcademicProfile;
   saveStudentProfile(profile: StudentAcademicProfile): StudentAcademicProfile;
 
+  getConceptCheckAttempts(documentId?: string, topic?: string): ConceptCheckAttemptRecord[];
+  saveConceptCheckAttempt(
+    attempt: ConceptCheckAttemptRecord,
+    sceneState: SceneConceptMasteryState
+  ): {
+    evidenceLevel:
+      | 'no_evidence_skipped'
+      | 'positive_mastery'
+      | 'recovered_after_reteaching'
+      | 'limited_single_error'
+      | 'repeated_misconception';
+    mistakeDnaUpdated: boolean;
+  };
+  getLessonMasteryState(
+    documentId: string,
+    topic: string
+  ): Record<number, SceneConceptMasteryState> | null;
+  saveLessonMasteryState(
+    documentId: string,
+    topic: string,
+    state: Record<number, SceneConceptMasteryState>
+  ): void;
+
   /** Saves a student's report about an AI answer to their private area for review. */
   submitAiReport(report: AiContentReport): Promise<void>;
+
+  /** Phase 6 Section 8 — Handwritten Notes Library */
+  getHandwrittenNotes(documentId?: string): HandwrittenNoteDocument[];
+  saveHandwrittenNote(noteDoc: HandwrittenNoteDocument): void;
+  deleteHandwrittenNote(id: string): void;
+
+  /** Phase 6 Section 10 — Student Data Control (Export & Self-Serve Account Deletion) */
+  exportStudentDataArchive(): StudentDataExportArchive;
+  deleteStudentAccountAndData(): Promise<AccountDeletionResult>;
+
+  /** Returns honest cloud synchronization status and any queued offline documents. */
+  getCloudSyncStatus(): CloudSyncStatus;
+  /** Retries any pending offline/failed per-document studyState cloud writes. */
+  retryPendingCloudSync(): Promise<void>;
+  /** Non-destructively archives current account session and switches active local namespace to `uid`. */
+  switchLocalAccountSession(uid: string | null): void;
 
   clearAllProgress(): void;
   syncWithCloudUser(user: User | null): Promise<void>;
   subscribe(listener: () => void): () => void;
 }
 
-export type AiReportKind = 'tutor_answer' | 'practice_question';
+export type AiReportKind =
+  | 'tutor_answer'
+  | 'practice_question'
+  | 'diagram'
+  | 'animated_explanation'
+  | 'concept_check';
 export type AiReportReason = 'wrong' | 'unclear' | 'inappropriate' | 'other';
 
 export interface AiContentReport {
@@ -159,10 +258,15 @@ const KEYS = {
   NOTIFICATIONS: 'learnmate_notifications_v2',
   NOTEBOOK: 'learnmate_notebook_v2',
   CREATIVE_ASSETS: 'learnmate_creative_assets_v2',
+  HANDWRITTEN_NOTES: 'learnmate_handwritten_notes_v1',
   STUDY_PLANNER: 'learnmate_study_planner_v2',
   ACCESSIBILITY: 'learnmate_accessibility_v2',
   PDF_ANNOTATIONS_PREFIX: 'learnmate_pdf_annotations_v1_',
   STUDENT_PROFILE: 'learnmate_student_profile_v1',
+  CONCEPT_ATTEMPTS: 'learnmate_concept_attempts_v1',
+  CONCEPT_MASTERY_PREFIX: 'learnmate_concept_mastery_v1_',
+  PENDING_SYNC_DOCS: 'learnmate_pending_sync_docs_v1',
+  ACCOUNT_ARCHIVE_PREFIX: 'learnmate_account_archive_v1_',
   // UID of the signed-in account that owns the private data currently in localStorage.
   OWNER_UID: 'learnmate_owner_uid_v1',
 };
@@ -187,6 +291,20 @@ const DEFAULT_ACCESSIBILITY: AccessibilitySettings = {
   highContrast: false,
   reducedMotion: false,
 };
+
+if (typeof globalThis.localStorage === 'undefined') {
+  const memoryStore = new Map<string, string>();
+  globalThis.localStorage = {
+    getItem: (key: string) => memoryStore.get(key) ?? null,
+    setItem: (key: string, value: string) => memoryStore.set(key, String(value)),
+    removeItem: (key: string) => memoryStore.delete(key),
+    clear: () => memoryStore.clear(),
+    key: (index: number) => Array.from(memoryStore.keys())[index] ?? null,
+    get length() {
+      return memoryStore.size;
+    },
+  } as Storage;
+}
 
 function safeReadJson<T>(key: string, fallback: T): T {
   try {
@@ -227,9 +345,20 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   private previousUid: string | null = null;
   private cloudUnsubscribers: Array<() => void> = [];
   private listeners = new Set<() => void>();
+  private cloudSyncState: CloudSyncState = 'local_only';
+  private lastSyncedAt: string | null = null;
+  private lastSyncError: string | null = null;
 
   constructor() {
     this.ensureSeeded();
+    if (typeof window !== 'undefined') {
+      void indexedDbStorage.initializeAndMigrateFromLocalStorage(readOwnerUid() || 'guest');
+      if (typeof window.addEventListener === 'function') {
+        window.addEventListener('online', () => {
+          void this.retryPendingCloudSync();
+        });
+      }
+    }
   }
 
   subscribe(listener: () => void): () => void {
@@ -262,14 +391,120 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     }
   }
 
+  private getPendingSyncDocIds(): string[] {
+    return safeReadJson<string[]>(KEYS.PENDING_SYNC_DOCS, []);
+  }
+
+  private markDocumentPendingSync(documentId: string, errorMessage?: string): void {
+    if (!documentId) return;
+    const pending = new Set(this.getPendingSyncDocIds());
+    pending.add(documentId);
+    safeWriteJson(KEYS.PENDING_SYNC_DOCS, Array.from(pending));
+    const isOffline =
+      typeof navigator !== 'undefined' && navigator.onLine === false;
+    this.cloudSyncState = isOffline ? 'pending_offline' : 'sync_failed';
+    if (errorMessage) {
+      this.lastSyncError = errorMessage;
+    }
+  }
+
+  private clearDocumentPendingSync(documentId: string): void {
+    const pending = this.getPendingSyncDocIds().filter((id) => id !== documentId);
+    safeWriteJson(KEYS.PENDING_SYNC_DOCS, pending);
+    if (pending.length === 0 && this.currentUser) {
+      this.cloudSyncState = 'synced';
+      this.lastSyncedAt = new Date().toISOString();
+      this.lastSyncError = null;
+    }
+  }
+
+  getCloudSyncStatus(): CloudSyncStatus {
+    const pendingDocumentIds = this.getPendingSyncDocIds();
+    let state: CloudSyncState = this.cloudSyncState;
+    if (!this.currentUser) {
+      state = pendingDocumentIds.length > 0 ? 'pending_offline' : 'local_only';
+    } else if (pendingDocumentIds.length > 0 && state === 'synced') {
+      state = 'pending_offline';
+    }
+    return {
+      state,
+      pendingDocumentIds,
+      lastSyncedAt: this.lastSyncedAt,
+      lastError: this.lastSyncError,
+    };
+  }
+
+  async retryPendingCloudSync(): Promise<void> {
+    if (!this.currentUser) return;
+    const pending = this.getPendingSyncDocIds();
+    for (const docId of pending) {
+      await this.persistStudyStateToCloud(docId);
+    }
+  }
+
+  /**
+   * Archives all private `learnmate_*` keys belonging to `uid` into a per-account local snapshot
+   * so signing out or switching accounts never destructively loses unsynced local work.
+   */
+  private archivePrivateUserCachesForUid(uid: string): void {
+    if (!uid) return;
+    try {
+      const preservedKeys = new Set<string>([
+        KEYS.THEME,
+        KEYS.ACCESSIBILITY,
+        KEYS.SOURCE_CONTROL_MODE,
+        KEYS.OWNER_UID,
+      ]);
+      const archive: Record<string, string> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (preservedKeys.has(key)) continue;
+        if (key.startsWith(KEYS.ACCOUNT_ARCHIVE_PREFIX)) continue;
+        if (key.startsWith('learnmate_')) {
+          const val = localStorage.getItem(key);
+          if (val !== null) {
+            archive[key] = val;
+          }
+        }
+      }
+      safeWriteJson(`${KEYS.ACCOUNT_ARCHIVE_PREFIX}${uid}`, archive);
+    } catch {
+      // ignore in restricted storage
+    }
+  }
+
+  /**
+   * Restores a previously archived per-account local snapshot for `uid` into active storage.
+   */
+  private restorePrivateUserCachesForUid(uid: string): void {
+    if (!uid) return;
+    try {
+      const archive = safeReadJson<Record<string, string> | null>(
+        `${KEYS.ACCOUNT_ARCHIVE_PREFIX}${uid}`,
+        null
+      );
+      if (!archive || typeof archive !== 'object') return;
+      for (const [k, v] of Object.entries(archive)) {
+        if (
+          k.startsWith('learnmate_') &&
+          !k.startsWith(KEYS.ACCOUNT_ARCHIVE_PREFIX) &&
+          typeof v === 'string'
+        ) {
+          localStorage.setItem(k, v);
+        }
+      }
+    } catch {
+      // ignore in restricted storage
+    }
+  }
+
   /**
    * Clears private user study data, attempts, tutor history, and caches on sign-out or account
-   * switch, while preserving only device preferences such as themeMode.
+   * switch, while preserving device preferences and per-UID encrypted/isolated archives.
    */
   private clearPrivateUserCaches(): void {
     try {
-      // Device preferences survive; everything else under the learnmate_ prefix is private
-      // (documents, attempts, chats, profile, annotations, notebook, saved resources, caches).
       const preservedKeys = new Set<string>([
         KEYS.THEME,
         KEYS.ACCESSIBILITY,
@@ -280,6 +515,7 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
         const key = localStorage.key(i);
         if (!key) continue;
         if (preservedKeys.has(key)) continue;
+        if (key.startsWith(KEYS.ACCOUNT_ARCHIVE_PREFIX)) continue;
         if (key.startsWith('learnmate_')) {
           keysToRemove.push(key);
         }
@@ -293,10 +529,44 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     }
   }
 
+  /**
+   * Non-destructively archives the previous student's local session and switches the active
+   * local namespace to `uid` (or signed-out guest when `uid === null`).
+   */
+  switchLocalAccountSession(uid: string | null): void {
+    const activeOwnerUid = this.previousUid || readOwnerUid();
+    if (activeOwnerUid && activeOwnerUid !== uid) {
+      this.archivePrivateUserCachesForUid(activeOwnerUid);
+      this.clearPrivateUserCaches();
+    } else if (!uid && activeOwnerUid) {
+      this.archivePrivateUserCachesForUid(activeOwnerUid);
+      this.clearPrivateUserCaches();
+    }
+
+    if (!uid) {
+      this.currentUser = null;
+      this.previousUid = null;
+      this.cloudSyncState = 'local_only';
+      this.ensureSeeded();
+      this.notifyListeners();
+      return;
+    }
+
+    if (activeOwnerUid !== uid) {
+      // If switching from guest or another account, clear unowned workspace before restoring target UID
+      if (!activeOwnerUid) {
+        this.clearPrivateUserCaches();
+      }
+      this.restorePrivateUserCachesForUid(uid);
+    }
+    this.previousUid = uid;
+    writeOwnerUid(uid);
+    this.ensureSeeded();
+    this.notifyListeners();
+  }
+
   private ensureSeeded(): void {
     try {
-      // New accounts start empty. The guest sample chapter is added only when the student
-      // taps "Add to my account", so no invented material appears in their library.
       const existingDocs = safeReadJson<StudyDocument[] | null>(KEYS.DOCUMENTS, null);
       if (existingDocs === null) {
         safeWriteJson(KEYS.DOCUMENTS, []);
@@ -320,8 +590,49 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     }
   }
 
+  private getAllLessonMasteryForDocument(
+    documentId: string
+  ): Record<string, Record<number, SceneConceptMasteryState>> {
+    const map: Record<string, Record<number, SceneConceptMasteryState>> = {};
+    if (!documentId) return map;
+    const prefix = `${KEYS.CONCEPT_MASTERY_PREFIX}${documentId}__`;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(prefix)) {
+          const slug = key.slice(prefix.length);
+          const state = safeReadJson<Record<number, SceneConceptMasteryState> | null>(key, null);
+          if (slug && state && typeof state === 'object') {
+            map[slug] = state;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return map;
+  }
+
+  private saveAllLessonMasteryForDocument(
+    documentId: string,
+    topicMap: Record<string, Record<number, SceneConceptMasteryState>>
+  ): void {
+    if (!documentId || !topicMap || typeof topicMap !== 'object') return;
+    for (const [slug, state] of Object.entries(topicMap)) {
+      if (!slug || !state || typeof state !== 'object') continue;
+      safeWriteJson(`${KEYS.CONCEPT_MASTERY_PREFIX}${documentId}__${slug}`, state);
+    }
+  }
+
   private async persistStudyStateToCloud(documentId: string): Promise<void> {
-    if (!this.currentUser) return;
+    if (!documentId) return;
+    if (!this.currentUser) {
+      return;
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this.markDocumentPendingSync(documentId, 'Device is currently offline; changes queued for sync.');
+      return;
+    }
     const uid = this.currentUser.uid;
     const statePath = `users/${uid}/studyState/${documentId}`;
     try {
@@ -330,20 +641,29 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
       const revisionPlan = this.getRevisionPlan(documentId);
       const cachedQuiz = this.getCachedQuiz(documentId, 'diagnostic');
       const quickRevise = this.getQuickReviseBundle(documentId);
+      const conceptAttempts = this.getConceptCheckAttempts(documentId);
+      const conceptMastery = this.getAllLessonMasteryForDocument(documentId);
+      const creativeAssets = this.getCreativeAssets(documentId);
 
       await setDoc(doc(db, 'users', uid, 'studyState', documentId), {
         documentId,
         uid,
-        tutorMessagesJson: JSON.stringify(tutorMessages).slice(0, 580000),
-        mistakesJson: JSON.stringify(mistakes).slice(0, 280000),
-        revisionPlanJson: JSON.stringify(revisionPlan).slice(0, 280000),
-        cachedQuizJson: JSON.stringify(cachedQuiz || []).slice(0, 280000),
+        tutorMessagesJson: truncateStringToUtf8Bytes(JSON.stringify(tutorMessages), 145000),
+        mistakesJson: truncateStringToUtf8Bytes(JSON.stringify(mistakes), 95000),
+        revisionPlanJson: truncateStringToUtf8Bytes(JSON.stringify(revisionPlan), 95000),
+        cachedQuizJson: truncateStringToUtf8Bytes(JSON.stringify(cachedQuiz || []), 95000),
         quickReviseJson: quickRevise
-          ? JSON.stringify(quickRevise).slice(0, 480000)
+          ? truncateStringToUtf8Bytes(JSON.stringify(quickRevise), 145000)
           : '',
+        conceptAttemptsJson: truncateStringToUtf8Bytes(JSON.stringify(conceptAttempts), 115000),
+        conceptMasteryJson: truncateStringToUtf8Bytes(JSON.stringify(conceptMastery), 75000),
+        creativeAssetsJson: truncateStringToUtf8Bytes(JSON.stringify(creativeAssets), 145000),
         updatedAt: new Date().toISOString(),
       });
+      this.clearDocumentPendingSync(documentId);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Cloud write failed';
+      this.markDocumentPendingSync(documentId, msg);
       handleFirestoreError(err, OperationType.WRITE, statePath);
     }
   }
@@ -357,7 +677,7 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
         doc(db, 'users', uid),
         {
           uid,
-          profileJson: JSON.stringify(profile).slice(0, 19_500),
+          profileJson: truncateStringToUtf8Bytes(JSON.stringify(profile), 19_500),
           displayName: this.currentUser.displayName || profile.fullName || 'LearnMate Student',
           updatedAt: new Date().toISOString(),
         },
@@ -373,15 +693,25 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     const uid = this.currentUser.uid;
     const docPath = `users/${uid}/documents/${studyDoc.id}`;
     try {
+      // Ensure serialized pagesJson fits strictly within 680,000 UTF-8 bytes so total Firestore doc < 880 KB
+      let serializedPages = JSON.stringify(studyDoc.pages);
+      if (computeUtf8ByteSize(serializedPages) > 680_000) {
+        const compactPages = studyDoc.pages.map((p) => ({
+          ...p,
+          content: truncateStringToUtf8Bytes(p.content, Math.floor(620_000 / Math.max(1, studyDoc.pages.length))),
+        }));
+        serializedPages = truncateStringToUtf8Bytes(JSON.stringify(compactPages), 680_000);
+      }
+
       const payload: Record<string, unknown> = {
         id: studyDoc.id,
         uid,
-        title: studyDoc.title.slice(0, 280),
+        title: truncateStringToUtf8Bytes(studyDoc.title, 280),
         sourceType: studyDoc.sourceType,
-        pageCount: Math.max(1, Math.min(50, studyDoc.pageCount)),
-        pagesJson: JSON.stringify(studyDoc.pages).slice(0, 880000),
-        topicsJson: JSON.stringify(studyDoc.topics).slice(0, 180000),
-        overview: (studyDoc.overview || '').slice(0, 9500),
+        pageCount: Math.max(1, Math.min(120, studyDoc.pageCount)),
+        pagesJson: serializedPages,
+        topicsJson: truncateStringToUtf8Bytes(JSON.stringify(studyDoc.topics), 140_000),
+        overview: truncateStringToUtf8Bytes(studyDoc.overview || '', 9500),
         createdAt: studyDoc.createdAt,
         lastStudiedAt: studyDoc.lastStudiedAt,
       };
@@ -419,9 +749,144 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     }
   }
 
+  private mergeDocumentStudyStateSnapshot(
+    docId: string,
+    sData: Record<string, unknown>,
+    uid: string
+  ): boolean {
+    let changed = false;
+    try {
+      const localTutor = this.getTutorMessages(docId);
+      if (localTutor.length === 0 && typeof sData.tutorMessagesJson === 'string' && sData.tutorMessagesJson) {
+        const cloudTutor = JSON.parse(sData.tutorMessagesJson);
+        if (Array.isArray(cloudTutor) && cloudTutor.length > 0) {
+          safeWriteJson(`${KEYS.TUTOR_PREFIX}${docId}`, cloudTutor);
+          changed = true;
+        }
+      }
+
+      if (typeof sData.mistakesJson === 'string' && sData.mistakesJson) {
+        const cloudMistakes = JSON.parse(sData.mistakesJson) as MistakeInsight[];
+        if (Array.isArray(cloudMistakes) && cloudMistakes.length > 0) {
+          const localMistakes = this.getMistakeInsights(docId);
+          const mistakeMap = new Map<string, MistakeInsight>();
+          for (const m of cloudMistakes) {
+            if (m && m.questionId) mistakeMap.set(m.questionId, m);
+          }
+          for (const m of localMistakes) {
+            if (m && m.questionId) mistakeMap.set(m.questionId, m);
+          }
+          if (mistakeMap.size !== localMistakes.length) {
+            safeWriteJson(`${KEYS.MISTAKES_PREFIX}${docId}`, Array.from(mistakeMap.values()));
+            changed = true;
+          }
+        }
+      }
+
+      if (typeof sData.revisionPlanJson === 'string' && sData.revisionPlanJson) {
+        const cloudPlan = JSON.parse(sData.revisionPlanJson) as RevisionTask[];
+        if (Array.isArray(cloudPlan) && cloudPlan.length > 0) {
+          const localPlan = this.getRevisionPlan(docId);
+          const planMap = new Map<string, RevisionTask>();
+          for (const t of cloudPlan) {
+            if (t && t.id) planMap.set(t.id, t);
+          }
+          for (const t of localPlan) {
+            if (t && t.id) {
+              const existing = planMap.get(t.id);
+              const existingTs = existing ? Date.parse(existing.updatedAt) || 0 : 0;
+              const localTs = Date.parse(t.updatedAt) || 0;
+              if (!existing || localTs >= existingTs) {
+                planMap.set(t.id, t);
+              }
+            }
+          }
+          if (planMap.size !== localPlan.length) {
+            safeWriteJson(`${KEYS.REVISION_PREFIX}${docId}`, Array.from(planMap.values()));
+            changed = true;
+          }
+        }
+      }
+
+      const localQuick = this.getQuickReviseBundle(docId);
+      if (!localQuick && typeof sData.quickReviseJson === 'string' && sData.quickReviseJson) {
+        const cloudQuick = JSON.parse(sData.quickReviseJson);
+        if (cloudQuick && cloudQuick.documentId) {
+          safeWriteJson(`${KEYS.QUICK_REVISE_PREFIX}${docId}`, cloudQuick);
+          changed = true;
+        }
+      }
+
+      if (typeof sData.conceptAttemptsJson === 'string' && sData.conceptAttemptsJson) {
+        const cloudConceptAttempts = JSON.parse(sData.conceptAttemptsJson) as ConceptCheckAttemptRecord[];
+        if (Array.isArray(cloudConceptAttempts) && cloudConceptAttempts.length > 0) {
+          const allLocal = safeReadJson<ConceptCheckAttemptRecord[]>(KEYS.CONCEPT_ATTEMPTS, []);
+          const otherDocsLocal = allLocal.filter((a) => a.documentId !== docId);
+          const thisDocLocal = allLocal.filter((a) => a.documentId === docId);
+          const mergedDocAttempts = mergeConceptCheckAttempts(
+            thisDocLocal,
+            cloudConceptAttempts,
+            uid
+          );
+          if (mergedDocAttempts.length !== thisDocLocal.length) {
+            const combined = [...mergedDocAttempts, ...otherDocsLocal]
+              .sort((a, b) => (Date.parse(b.timestamp) || 0) - (Date.parse(a.timestamp) || 0))
+              .slice(0, 500);
+            safeWriteJson(KEYS.CONCEPT_ATTEMPTS, combined);
+            changed = true;
+          }
+        }
+      }
+
+      if (typeof sData.conceptMasteryJson === 'string' && sData.conceptMasteryJson) {
+        const cloudMastery = JSON.parse(sData.conceptMasteryJson) as Record<
+          string,
+          Record<number, SceneConceptMasteryState>
+        >;
+        if (cloudMastery && typeof cloudMastery === 'object') {
+          const localMastery = this.getAllLessonMasteryForDocument(docId);
+          const mergedMastery = mergeTopicMasteryMaps(localMastery, cloudMastery);
+          this.saveAllLessonMasteryForDocument(docId, mergedMastery);
+          changed = true;
+        }
+      }
+
+      if (typeof sData.creativeAssetsJson === 'string' && sData.creativeAssetsJson) {
+        const cloudAssets = JSON.parse(sData.creativeAssetsJson) as CreativeAsset[];
+        if (Array.isArray(cloudAssets) && cloudAssets.length > 0) {
+          const allLocalAssets = safeReadJson<CreativeAsset[]>(KEYS.CREATIVE_ASSETS, []);
+          const assetMap = new Map<string, CreativeAsset>();
+          for (const a of allLocalAssets) {
+            if (a && a.id) assetMap.set(a.id, a);
+          }
+          for (const ca of cloudAssets) {
+            if (ca && ca.id) {
+              const existing = assetMap.get(ca.id);
+              const existingTs = existing ? Date.parse(existing.createdAt) || 0 : 0;
+              const cloudTs = Date.parse(ca.createdAt) || 0;
+              if (!existing || cloudTs > existingTs) {
+                assetMap.set(ca.id, ca);
+                changed = true;
+              }
+            }
+          }
+          if (changed) {
+            const sortedAssets = Array.from(assetMap.values()).sort(
+              (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)
+            );
+            safeWriteJson(KEYS.CREATIVE_ASSETS, sortedAssets);
+          }
+        }
+      }
+    } catch {
+      // ignore malformed cloud studyState JSON
+    }
+    return changed;
+  }
+
   /**
    * Synchronizes local browser progress and documents with Cloud Firestore for the authenticated user.
-   * Properly cleans up listeners and isolates private data on sign-out or account switch.
+   * Properly cleans up listeners and non-destructively isolates private data on sign-out or account switch.
    */
   async syncWithCloudUser(user: User | null): Promise<void> {
     this.unsubscribeCloudListeners();
@@ -429,27 +894,29 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     const storedOwnerUid = readOwnerUid();
 
     if (!user) {
-      // Local data that belongs to an account must not stay visible to whoever uses the
-      // browser next (shared family laptops, coaching-lab PCs). The owner UID survives
-      // page reloads, unlike previousUid.
-      const wasSignedIn = this.previousUid !== null || storedOwnerUid !== null;
-      this.currentUser = null;
-      this.previousUid = null;
-      if (wasSignedIn) {
+      const activeUid = this.previousUid || storedOwnerUid;
+      if (activeUid) {
+        this.archivePrivateUserCachesForUid(activeUid);
         this.clearPrivateUserCaches();
       } else {
         this.ensureSeeded();
       }
+      this.currentUser = null;
+      this.previousUid = null;
+      this.cloudSyncState = 'local_only';
       this.notifyListeners();
       return;
     }
 
-    // Never merge (and upload) another account's local data into this account.
-    const belongsToAnotherAccount =
-      (this.previousUid !== null && this.previousUid !== user.uid) ||
-      (storedOwnerUid !== null && storedOwnerUid !== user.uid);
-    if (belongsToAnotherAccount) {
+    // Never merge (and upload) another account's local data into this account;
+    // archive the previous account first, then restore this account's local snapshot if any.
+    const previousOwnerUid = this.previousUid || storedOwnerUid;
+    if (previousOwnerUid && previousOwnerUid !== user.uid) {
+      this.archivePrivateUserCachesForUid(previousOwnerUid);
       this.clearPrivateUserCaches();
+      this.restorePrivateUserCachesForUid(user.uid);
+    } else if (!previousOwnerUid) {
+      this.restorePrivateUserCachesForUid(user.uid);
     }
 
     this.currentUser = user;
@@ -458,9 +925,7 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
 
     const uid = user.uid;
     try {
-      // 1. Merge the private academic profile. The newest saved copy wins, but an account
-      // that was already set up always beats an empty local profile (for example after the
-      // student signs in on a new device).
+      // 1. Merge the private academic profile
       const userRef = doc(db, 'users', uid);
       const userSnap = await getDoc(userRef);
       const cloudData = userSnap.exists() ? userSnap.data() : null;
@@ -611,7 +1076,7 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
         }
       }
 
-      // 4. Sync per-document studyState (tutor history, mistakes, revision plans, quick revise)
+      // 4. Sync per-document studyState (tutor history, mistakes, revision plans, quick revise, concept checks, mastery, creative assets)
       for (const mDoc of mergedDocs) {
         const stateRef = doc(db, 'users', uid, 'studyState', mDoc.id);
         const stateSnap = await getDoc(stateRef);
@@ -619,46 +1084,36 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
         const localMistakes = this.getMistakeInsights(mDoc.id);
         const localPlan = this.getRevisionPlan(mDoc.id);
         const localQuick = this.getQuickReviseBundle(mDoc.id);
+        const localConceptAttempts = this.getConceptCheckAttempts(mDoc.id);
+        const localConceptMastery = this.getAllLessonMasteryForDocument(mDoc.id);
+        const localCreativeAssets = this.getCreativeAssets(mDoc.id);
 
         if (stateSnap.exists()) {
           const sData = stateSnap.data();
-          try {
-            if (localTutor.length === 0 && sData.tutorMessagesJson) {
-              const cloudTutor = JSON.parse(sData.tutorMessagesJson);
-              if (Array.isArray(cloudTutor) && cloudTutor.length > 0) {
-                safeWriteJson(`${KEYS.TUTOR_PREFIX}${mDoc.id}`, cloudTutor);
-              }
-            }
-            if (localMistakes.length === 0 && sData.mistakesJson) {
-              const cloudMistakes = JSON.parse(sData.mistakesJson);
-              if (Array.isArray(cloudMistakes) && cloudMistakes.length > 0) {
-                safeWriteJson(`${KEYS.MISTAKES_PREFIX}${mDoc.id}`, cloudMistakes);
-              }
-            }
-            if (localPlan.length === 0 && sData.revisionPlanJson) {
-              const cloudPlan = JSON.parse(sData.revisionPlanJson);
-              if (Array.isArray(cloudPlan) && cloudPlan.length > 0) {
-                safeWriteJson(`${KEYS.REVISION_PREFIX}${mDoc.id}`, cloudPlan);
-              }
-            }
-            if (!localQuick && sData.quickReviseJson) {
-              const cloudQuick = JSON.parse(sData.quickReviseJson);
-              if (cloudQuick && cloudQuick.documentId) {
-                safeWriteJson(`${KEYS.QUICK_REVISE_PREFIX}${mDoc.id}`, cloudQuick);
-              }
-            }
-          } catch {
-            // ignore
+          this.mergeDocumentStudyStateSnapshot(mDoc.id, sData, uid);
+          // Push back merged state if local had newer concept attempts, mastery, or creative assets
+          if (
+            localConceptAttempts.length > 0 ||
+            Object.keys(localConceptMastery).length > 0 ||
+            localCreativeAssets.length > 0
+          ) {
+            await this.persistStudyStateToCloud(mDoc.id);
           }
         } else if (
           localTutor.length > 0 ||
           localMistakes.length > 0 ||
           localPlan.length > 0 ||
-          localQuick
+          localQuick ||
+          localConceptAttempts.length > 0 ||
+          Object.keys(localConceptMastery).length > 0 ||
+          localCreativeAssets.length > 0
         ) {
           await this.persistStudyStateToCloud(mDoc.id);
         }
       }
+
+      // Flush any queued offline document syncs
+      await this.retryPendingCloudSync();
 
       // 5. Subscribe to real-time Cloud updates for this user and clean up on sign-out
       const docsUnsub = onSnapshot(
@@ -752,16 +1207,52 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
         }
       );
 
-      this.cloudUnsubscribers.push(docsUnsub, attemptsUnsub);
+      const studyStateUnsub = onSnapshot(
+        collection(db, 'users', uid, 'studyState'),
+        (snap) => {
+          if (!this.currentUser || this.currentUser.uid !== uid) return;
+          let anyChanged = false;
+          snap.forEach((stateSnap) => {
+            const sData = stateSnap.data();
+            const docId = typeof sData.documentId === 'string' ? sData.documentId : stateSnap.id;
+            if (this.mergeDocumentStudyStateSnapshot(docId, sData, uid)) {
+              anyChanged = true;
+            }
+          });
+          if (anyChanged) {
+            this.notifyListeners();
+          }
+        },
+        () => {
+          // ignore snapshot permission error during sign-out transition
+        }
+      );
+
+      this.cloudUnsubscribers.push(docsUnsub, attemptsUnsub, studyStateUnsub);
+      this.cloudSyncState = this.getPendingSyncDocIds().length > 0 ? 'pending_offline' : 'synced';
+      this.lastSyncedAt = new Date().toISOString();
       this.notifyListeners();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Cloud sync failed';
+      this.cloudSyncState = 'sync_failed';
+      this.lastSyncError = msg;
       handleFirestoreError(err, OperationType.GET, `users/${uid}`);
     }
   }
 
   getDocuments(): StudyDocument[] {
     const docs = safeReadJson<StudyDocument[]>(KEYS.DOCUMENTS, []);
-    return [...docs].sort(
+    const hydrated = docs.map((d) => {
+      if (!d || !d.id) return d;
+      const idbPdf = indexedDbStorage.getPdfBinarySync(d.id);
+      const idbPages = indexedDbStorage.getDocumentPagesSync(d.id);
+      return {
+        ...d,
+        pdfDataUrl: d.pdfDataUrl || idbPdf,
+        pages: idbPages && idbPages.length >= (d.pages?.length || 0) ? idbPages : d.pages,
+      };
+    });
+    return [...hydrated].sort(
       (a, b) => new Date(b.lastStudiedAt).getTime() - new Date(a.lastStudiedAt).getTime()
     );
   }
@@ -772,16 +1263,34 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   }
 
   saveDocument(studyDoc: StudyDocument): void {
+    const ownerUid = this.currentUser?.uid || this.previousUid || readOwnerUid() || 'guest';
     const enriched: StudyDocument = {
       ...studyDoc,
       contentVersion: studyDoc.contentVersion || computeContentVersion(studyDoc),
     };
-    const docs = this.getDocuments();
+
+    // Persist large PDF binaries and 60-page sets into IndexedDB + memory cache
+    if (enriched.pdfDataUrl) {
+      void indexedDbStorage.savePdfBinary(enriched.id, enriched.pdfDataUrl, ownerUid);
+    }
+    if (Array.isArray(enriched.pages) && enriched.pages.length > 0) {
+      void indexedDbStorage.saveDocumentPages(enriched.id, enriched.pages, ownerUid);
+    }
+
+    const docs = safeReadJson<StudyDocument[]>(KEYS.DOCUMENTS, []);
+    // Strip multi-megabyte pdfDataUrl (>150KB) from the localStorage JSON copy if IndexedDB is supported
+    const localStorageCopy: StudyDocument =
+      enriched.pdfDataUrl &&
+      enriched.pdfDataUrl.length > 150_000 &&
+      typeof globalThis.indexedDB !== 'undefined'
+        ? { ...enriched, pdfDataUrl: undefined }
+        : enriched;
+
     const index = docs.findIndex((d) => d.id === enriched.id);
     if (index >= 0) {
-      docs[index] = enriched;
+      docs[index] = localStorageCopy;
     } else {
-      docs.unshift(enriched);
+      docs.unshift(localStorageCopy);
     }
     safeWriteJson(KEYS.DOCUMENTS, docs);
     void this.persistDocumentToCloud(enriched);
@@ -809,6 +1318,7 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
   deleteDocument(id: string): void {
     const docs = this.getDocuments().filter((d) => d.id !== id);
     safeWriteJson(KEYS.DOCUMENTS, docs);
+    void indexedDbStorage.deleteDocumentAssets(id);
     try {
       localStorage.removeItem(`${KEYS.PDF_ANNOTATIONS_PREFIX}${id}`);
     } catch {
@@ -1114,14 +1624,20 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
       list.unshift(asset);
     }
     safeWriteJson(KEYS.CREATIVE_ASSETS, list);
+    if (asset.documentId) {
+      void this.persistStudyStateToCloud(asset.documentId);
+    }
     this.notifyListeners();
   }
 
   deleteCreativeAsset(id: string): void {
-    const list = safeReadJson<CreativeAsset[]>(KEYS.CREATIVE_ASSETS, []).filter(
-      (a) => a.id !== id
-    );
+    const existing = safeReadJson<CreativeAsset[]>(KEYS.CREATIVE_ASSETS, []);
+    const target = existing.find((a) => a.id === id);
+    const list = existing.filter((a) => a.id !== id);
     safeWriteJson(KEYS.CREATIVE_ASSETS, list);
+    if (target?.documentId) {
+      void this.persistStudyStateToCloud(target.documentId);
+    }
     this.notifyListeners();
   }
 
@@ -1202,12 +1718,262 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
     });
   }
 
+  getConceptCheckAttempts(documentId?: string, topic?: string): ConceptCheckAttemptRecord[] {
+    const all = safeReadJson<ConceptCheckAttemptRecord[]>(KEYS.CONCEPT_ATTEMPTS, []);
+    const activeUid = this.currentUser?.uid || this.previousUid || readOwnerUid();
+    const normalizedTopic = topic ? topic.trim().toLowerCase() : '';
+    const filtered = all.filter((item) => {
+      if (
+        activeUid &&
+        item.studentUid &&
+        item.studentUid !== 'local-student' &&
+        item.studentUid !== activeUid
+      ) {
+        return false;
+      }
+      if (documentId && item.documentId !== documentId) return false;
+      if (normalizedTopic && item.topic.trim().toLowerCase() !== normalizedTopic) return false;
+      return true;
+    });
+    return [...filtered].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
+
+  saveConceptCheckAttempt(
+    attempt: ConceptCheckAttemptRecord,
+    sceneState: SceneConceptMasteryState
+  ): {
+    evidenceLevel:
+      | 'no_evidence_skipped'
+      | 'positive_mastery'
+      | 'recovered_after_reteaching'
+      | 'limited_single_error'
+      | 'repeated_misconception';
+    mistakeDnaUpdated: boolean;
+  } {
+    const activeUid = this.currentUser?.uid || this.previousUid || readOwnerUid();
+    const enrichedAttempt: ConceptCheckAttemptRecord = {
+      ...attempt,
+      studentUid: activeUid || attempt.studentUid || 'local-student',
+    };
+    const all = safeReadJson<ConceptCheckAttemptRecord[]>(KEYS.CONCEPT_ATTEMPTS, []);
+    const merged = mergeConceptCheckAttempts([enrichedAttempt], all, activeUid || undefined);
+    safeWriteJson(KEYS.CONCEPT_ATTEMPTS, merged.slice(0, 500));
+
+    // Update Mistake DNA, Revision Plan, and student weakAreas when evidence warrants it
+    const existingMistakes = this.getMistakeInsights(enrichedAttempt.documentId);
+    const existingPlan = this.getRevisionPlan(enrichedAttempt.documentId);
+    const currentProfile = this.getStudentProfile();
+
+    const dnaResult = integrateConceptCheckWithMistakeDna({
+      documentId: enrichedAttempt.documentId,
+      attempt: enrichedAttempt,
+      sceneState,
+      existingMistakes,
+      existingRevisionPlan: existingPlan,
+      existingWeakAreas: currentProfile.weakAreas,
+    });
+
+    if (dnaResult.mistakeDnaUpdated) {
+      this.saveMistakeInsights(enrichedAttempt.documentId, dnaResult.updatedMistakes);
+      this.saveRevisionPlan(enrichedAttempt.documentId, dnaResult.updatedRevisionPlan);
+      if (dnaResult.updatedWeakAreas.length !== currentProfile.weakAreas.length) {
+        this.saveStudentProfile({
+          ...currentProfile,
+          weakAreas: dnaResult.updatedWeakAreas,
+        });
+      }
+    } else {
+      void this.persistStudyStateToCloud(enrichedAttempt.documentId);
+      this.notifyListeners();
+    }
+
+    return {
+      evidenceLevel: dnaResult.evidenceLevel,
+      mistakeDnaUpdated: dnaResult.mistakeDnaUpdated,
+    };
+  }
+
+  private makeLessonMasteryKey(documentId: string, topic: string): string {
+    const slug = (topic || 'default')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .slice(0, 80);
+    return `${KEYS.CONCEPT_MASTERY_PREFIX}${documentId}__${slug}`;
+  }
+
+  getLessonMasteryState(
+    documentId: string,
+    topic: string
+  ): Record<number, SceneConceptMasteryState> | null {
+    return safeReadJson<Record<number, SceneConceptMasteryState> | null>(
+      this.makeLessonMasteryKey(documentId, topic),
+      null
+    );
+  }
+
+  saveLessonMasteryState(
+    documentId: string,
+    topic: string,
+    state: Record<number, SceneConceptMasteryState>
+  ): void {
+    safeWriteJson(this.makeLessonMasteryKey(documentId, topic), state);
+    if (documentId) {
+      void this.persistStudyStateToCloud(documentId);
+    }
+    this.notifyListeners();
+  }
+
+  getHandwrittenNotes(documentId?: string): HandwrittenNoteDocument[] {
+    const list = safeReadJson<HandwrittenNoteDocument[]>(KEYS.HANDWRITTEN_NOTES, []);
+    const filtered = documentId ? list.filter((n) => n.documentId === documentId) : list;
+    return [...filtered].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }
+
+  saveHandwrittenNote(noteDoc: HandwrittenNoteDocument): void {
+    const list = safeReadJson<HandwrittenNoteDocument[]>(KEYS.HANDWRITTEN_NOTES, []);
+    const idx = list.findIndex((n) => n.id === noteDoc.id);
+    if (idx >= 0) {
+      list[idx] = noteDoc;
+    } else {
+      list.unshift(noteDoc);
+    }
+    safeWriteJson(KEYS.HANDWRITTEN_NOTES, list);
+    this.notifyListeners();
+  }
+
+  deleteHandwrittenNote(id: string): void {
+    const list = safeReadJson<HandwrittenNoteDocument[]>(KEYS.HANDWRITTEN_NOTES, []).filter(
+      (n) => n.id !== id
+    );
+    safeWriteJson(KEYS.HANDWRITTEN_NOTES, list);
+    this.notifyListeners();
+  }
+
+  exportStudentDataArchive(): StudentDataExportArchive {
+    const ownerUid = this.currentUser?.uid || this.previousUid || readOwnerUid();
+    const docs = this.getDocuments();
+    const perDocumentState: StudentDataExportArchive['perDocumentState'] = {};
+    for (const d of docs) {
+      perDocumentState[d.id] = {
+        tutorMessages: this.getTutorMessages(d.id),
+        voiceTutorMessages: this.getVoiceTutorMessages(d.id),
+        mistakes: this.getMistakeInsights(d.id),
+        revisionPlan: this.getRevisionPlan(d.id),
+        quickRevise: this.getQuickReviseBundle(d.id),
+        pdfAnnotations: this.getPdfAnnotations(d.id),
+      };
+    }
+
+    return {
+      schemaVersion: 'learnmate-student-archive-v6.0',
+      exportedAt: new Date().toISOString(),
+      ownerUid,
+      studentProfile: this.getStudentProfile(),
+      documents: docs.map((d) => ({
+        ...d,
+        // Omit multi-MB raw pdfDataUrl binary from JSON metadata export if huge
+        pdfDataUrl: d.pdfDataUrl && d.pdfDataUrl.length > 250_000 ? '[Stored in IndexedDB]' : d.pdfDataUrl,
+      })),
+      quizAttempts: this.getQuizAttempts(),
+      conceptCheckAttempts: this.getConceptCheckAttempts(),
+      handwrittenNotes: this.getHandwrittenNotes(),
+      creativeAssets: this.getCreativeAssets(),
+      notebookEntries: this.getNotebookEntries(),
+      studyPlannerTasks: this.getStudyPlannerTasks(),
+      focusSessions: this.getFocusSessions(),
+      perDocumentState,
+    };
+  }
+
+  async deleteStudentAccountAndData(): Promise<AccountDeletionResult> {
+    const uid = this.currentUser?.uid || this.previousUid || readOwnerUid();
+    const docs = this.getDocuments();
+    const attempts = this.getQuizAttempts();
+    let deletedCloudDocumentsCount = 0;
+
+    // 1. Delete Cloud Firestore records if signed in
+    if (this.currentUser && uid) {
+      try {
+        for (const d of docs) {
+          await deleteDoc(doc(db, 'users', uid, 'documents', d.id)).catch(() => {});
+          await deleteDoc(doc(db, 'users', uid, 'studyState', d.id)).catch(() => {});
+          deletedCloudDocumentsCount += 2;
+        }
+        for (const att of attempts) {
+          await deleteDoc(doc(db, 'users', uid, 'attempts', att.id)).catch(() => {});
+          deletedCloudDocumentsCount += 1;
+        }
+        await deleteDoc(doc(db, 'users', uid)).catch(() => {});
+        deletedCloudDocumentsCount += 1;
+      } catch {
+        // Continue with local cleanup even if offline
+      }
+    }
+
+    // 2. Delete IndexedDB binaries and page sets for this account
+    const deletedIndexedDbRecordsCount = await indexedDbStorage.clearAllForOwner(uid);
+
+    // 3. Delete all localStorage keys belonging to this account (including archived snapshots)
+    let deletedLocalKeysCount = 0;
+    try {
+      const keysToDelete: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (
+          k.startsWith('learnmate_') &&
+          k !== KEYS.THEME &&
+          k !== KEYS.ACCESSIBILITY &&
+          (!uid || !k.startsWith(KEYS.ACCOUNT_ARCHIVE_PREFIX) || k === `${KEYS.ACCOUNT_ARCHIVE_PREFIX}${uid}`)
+        ) {
+          keysToDelete.push(k);
+        }
+      }
+      for (const k of keysToDelete) {
+        localStorage.removeItem(k);
+        deletedLocalKeysCount += 1;
+      }
+    } catch {
+      // ignore
+    }
+
+    this.unsubscribeCloudListeners();
+    this.currentUser = null;
+    this.previousUid = null;
+    this.cloudSyncState = 'local_only';
+    this.ensureSeeded();
+    this.notifyListeners();
+
+    return {
+      deletedLocalKeysCount,
+      deletedIndexedDbRecordsCount,
+      deletedCloudDocumentsCount,
+      completedAt: new Date().toISOString(),
+    };
+  }
+
   clearAllProgress(): void {
     try {
       const docs = this.getDocuments();
       const attempts = this.getQuizAttempts();
       localStorage.removeItem(KEYS.ATTEMPTS);
+      localStorage.removeItem(KEYS.CONCEPT_ATTEMPTS);
       localStorage.removeItem(KEYS.FOCUS_SESSIONS);
+      const toRemoveMastery: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(KEYS.CONCEPT_MASTERY_PREFIX)) {
+          toRemoveMastery.push(k);
+        }
+      }
+      for (const k of toRemoveMastery) {
+        localStorage.removeItem(k);
+      }
       for (const d of docs) {
         localStorage.removeItem(`${KEYS.MISTAKES_PREFIX}${d.id}`);
         localStorage.removeItem(`${KEYS.REVISION_PREFIX}${d.id}`);

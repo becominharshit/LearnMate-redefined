@@ -4,7 +4,7 @@
 import type { UsageCategory } from './usageLimits.ts';
 
 /** API paths that need no student login. Admin diagnostics are protected by ADMIN_TOKEN instead. */
-const PUBLIC_API_PATHS = new Set(['/api/health']);
+const PUBLIC_API_PATHS = new Set(['/api/health', '/api/readiness']);
 const ADMIN_API_PREFIXES = ['/api/usage', '/api/capabilities', '/api/vertex'];
 
 export function isPublicApiPath(path: string): boolean {
@@ -23,6 +23,7 @@ const ROUTE_CATEGORIES: Record<string, UsageCategory> = {
   '/api/study/analyze': 'upload',
   '/api/study/scan-notes': 'upload',
   '/api/study/youtube-analyze': 'upload',
+  '/api/study/youtube-lecture/start': 'upload',
   '/api/study/transcribe-audio': 'upload',
   '/api/create/visualize': 'create',
   '/api/create/video-lesson': 'create',

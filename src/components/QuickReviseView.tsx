@@ -34,6 +34,7 @@ import {
   BookOpen,
   Search,
   Target,
+  PenTool,
 } from 'lucide-react';
 import type {
   StudyDocument,
@@ -63,12 +64,15 @@ import {
   generateRevisionNotesPdfBytes,
   triggerPdfDownload,
 } from '../utils/pdfGenerator';
+import { noteGenerationCache, type HandwrittenWorkflowSource } from '../utils/phase6Engine';
 import { MathText } from './MathText';
+import { HandwrittenNotesView } from './HandwrittenNotesView';
 
 export type QuickReviseSubTab =
   | 'flashcards'
   | 'mindmap'
   | 'onepage'
+  | 'handwritten'
   | 'mistakes'
   | 'formulas'
   | 'sticky';
@@ -91,6 +95,9 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   const normalizedInitialTab: QuickReviseSubTab =
     initialSubTab === 'sticky' ? 'flashcards' : initialSubTab;
   const [subTab, setSubTab] = useState<QuickReviseSubTab>(normalizedInitialTab);
+  const [handwrittenInitialWorkflow, setHandwrittenInitialWorkflow] = useState<
+    HandwrittenWorkflowSource | undefined
+  >(undefined);
 
   useEffect(() => {
     setSubTab(initialSubTab === 'sticky' ? 'flashcards' : initialSubTab);
@@ -225,11 +232,15 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
     setIsLoadingNotes(true);
     try {
+      const representativePages = noteGenerationCache.buildRepresentativePagesForFastNotes(
+        activeDocument.pages,
+        16
+      );
       const res = await aiStudyClient.generateStickyNotesAndFlashcards({
         title: activeDocument.title,
         overview: activeDocument.overview,
         sourceType: activeDocument.sourceType,
-        pages: activeDocument.pages,
+        pages: representativePages,
         topics: activeDocument.topics,
         forceRefresh,
       });
@@ -290,11 +301,15 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
 
     setIsLoadingMindMap(true);
     try {
+      const representativePages = noteGenerationCache.buildRepresentativePagesForFastNotes(
+        activeDocument.pages,
+        16
+      );
       const res = await aiStudyClient.generateMindMapAndRevisionSheet({
         title: activeDocument.title,
         overview: activeDocument.overview,
         sourceType: activeDocument.sourceType,
-        pages: activeDocument.pages,
+        pages: representativePages,
         topics: activeDocument.topics,
         forceRefresh,
       });
@@ -840,7 +855,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           </div>
         )}
 
-        {/* 5 Revise Tabs (Phase 3: Flashcards · Mind map · Summary sheet · Mistakes · Formula Book) */}
+        {/* 6 Revise Tabs (Phase 6: Flashcards · Mind map · Summary sheet · Handwritten Notes · Mistakes · Formula Book) */}
         <div
           role="tablist"
           aria-label="Revise Tools"
@@ -851,6 +866,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               { id: 'flashcards', label: 'Flashcards', icon: Layers },
               { id: 'mindmap', label: 'Mind map', icon: Network },
               { id: 'onepage', label: 'Summary sheet', icon: FileSpreadsheet },
+              { id: 'handwritten', label: 'Handwritten Notes', icon: PenTool },
               { id: 'mistakes', label: 'Mistakes', icon: AlertTriangle },
               { id: 'formulas', label: 'Formula Book', icon: BookOpen },
             ] as const
@@ -864,6 +880,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 key={tabItem.id}
                 type="button"
                 role="tab"
+                data-testid={`revise-tab-${tabItem.id}`}
                 aria-selected={active}
                 onClick={() => setSubTab(tabItem.id)}
                 className={`relative pb-3 pt-1 flex items-center gap-2 text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
@@ -1661,6 +1678,19 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                data-testid="convert-revision-to-handwritten-btn"
+                onClick={() => {
+                  ensureRevisionDataReady();
+                  setHandwrittenInitialWorkflow('revision_sheet');
+                  setSubTab('handwritten');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-bold text-amber-950 cursor-pointer"
+              >
+                <PenTool className="w-3.5 h-3.5 text-amber-700" />
+                <span>Convert to Handwritten Notes</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleOpenPreviewModal}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
               >
@@ -1716,9 +1746,9 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                   <h3 className="text-xl font-bold text-ink mt-0.5">
                     {onePageRevision.chapterTitle}
                   </h3>
-                  <p className="text-xs text-muted mt-1 max-w-3xl">
-                    {onePageRevision.overview}
-                  </p>
+                  <div className="text-xs text-muted mt-1 max-w-3xl">
+                    <MathText text={onePageRevision.overview} />
+                  </div>
                 </div>
               </div>
 
@@ -1747,9 +1777,9 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                             {item.sourceLabel}
                           </button>
                         </div>
-                        <p className="text-xs text-slate-600 leading-relaxed">
-                          {item.summary}
-                        </p>
+                        <div className="text-xs text-slate-600 leading-relaxed">
+                          <MathText text={item.summary} />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1790,7 +1820,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                   <ul className="space-y-1.5 text-xs text-slate-700 list-disc pl-4">
                     {onePageRevision.keyRelationships.map((rel, idx) => (
                       <li key={idx} className="leading-relaxed">
-                        {rel}
+                        <MathText text={rel} variant="inline" />
                       </li>
                     ))}
                   </ul>
@@ -1803,7 +1833,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                   <ul className="space-y-1.5 text-xs text-slate-700 list-disc pl-4">
                     {onePageRevision.commonMistakesToAvoid.map((mistake, idx) => (
                       <li key={idx} className="leading-relaxed">
-                        {mistake}
+                        <MathText text={mistake} variant="inline" />
                       </li>
                     ))}
                   </ul>
@@ -1820,12 +1850,13 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                       key={idx}
                       className="p-3 rounded-xl bg-canvas border border-slate-200/80 space-y-1 text-xs"
                     >
-                      <p className="font-bold text-ink">
-                        Q{idx + 1}: {q.question}
-                      </p>
-                      <p className="text-slate-600 leading-relaxed">
-                        <strong className="text-emerald-700">Answer:</strong> {q.shortAnswer}
-                      </p>
+                      <div className="font-bold text-ink">
+                        Q{idx + 1}: <MathText text={q.question} variant="inline" />
+                      </div>
+                      <div className="text-slate-600 leading-relaxed">
+                        <strong className="text-emerald-700">Answer:</strong>{' '}
+                        <MathText text={q.shortAnswer} variant="inline" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1833,6 +1864,18 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* =================================================================
+          3B. HANDWRITTEN NOTES STUDIO (Phase 6 Section 8: Workflows A, B, C)
+         ================================================================= */}
+      {subTab === 'handwritten' && (
+        <HandwrittenNotesView
+          activeDocument={activeDocument}
+          onePageRevision={onePageRevision}
+          initialWorkflow={handwrittenInitialWorkflow}
+          onNavigateToCitation={onNavigateToCitation}
+        />
       )}
 
       {/* =================================================================

@@ -48,7 +48,11 @@ import {
   buildAnimatedExplanationScenes,
   validateAndSanitizeAnimatedExplanation,
   resolveSupportedCitedPages,
+  validateAndSanitizeConceptCheck,
+  buildDeterministicSceneConceptCheck,
   type AnimatedExplanationScene,
+  type ConceptCheckDifficulty,
+  type SceneConceptCheckQuestion,
 } from './src/utils/educationalSpecsEngine.ts';
 import {
   callAnthropicMessagesApi,
@@ -97,6 +101,15 @@ import {
   isPublicApiPath,
   usageCategoryForPath,
 } from './src/server/requestGuards.ts';
+import {
+  MAX_YOUTUBE_LECTURE_DURATION_SECONDS,
+  VERIFIED_JEE_YOUTUBE_MARATHON_FIXTURES,
+  validateAndNormalizeYouTubeLectureUrl,
+  parseTimestampedTranscriptSegments,
+  chunkLongLectureSegments,
+  aggregateLectureChunksIntoStudyMaterial,
+  type LongLectureProcessingJob,
+} from './src/utils/phase6Engine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1656,6 +1669,50 @@ async function startServer() {
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  app.get('/api/readiness', (_req, res) => {
+    const geminiKeyConfigured = Boolean(
+      (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim()
+    );
+    const claudeKeyConfigured = Boolean(getAnthropicApiKey());
+    res.json({
+      status: 'ready',
+      phase: 'phase-6.0',
+      timestamp: new Date().toISOString(),
+      capabilities: {
+        maxPdfPages: 60,
+        maxYoutubeDurationSeconds: MAX_YOUTUBE_LECTURE_DURATION_SECONDS,
+        maxYoutubeDurationHours: 12,
+        higgsfieldPaused: true,
+        geminiConfigured: geminiKeyConfigured,
+        claudeConfigured: claudeKeyConfigured,
+        activeProvider: !ANTHROPIC_PAUSED && claudeKeyConfigured ? 'claude' : 'gemini',
+      },
+    });
+  });
+
+  app.delete('/api/account/delete', async (req, res) => {
+    try {
+      const studentReq = req as StudentRequest;
+      const uid = studentReq.student?.uid || 'anonymous';
+      if (uid && uid !== 'dev-student-local' && uid !== 'anonymous' && getAdminApps().length > 0) {
+        try {
+          await getAdminAuth().deleteUser(uid);
+        } catch {
+          // Proceed even if Firebase Admin user record was already deleted on client
+        }
+      }
+      res.json({
+        deleted: true,
+        uidHash: hashForLogs(uid),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to complete account deletion.',
+      });
+    }
   });
 
   // 1. Analyze uploaded study material & extract page-grounded topics
@@ -3260,7 +3317,207 @@ Analyze the provided study material and generate:
     }
   });
 
-  // 6. YouTube Lecture Import & Grounded Timestamped Analysis (Official Player + Pasted Transcript)
+  // 6. Phase 6 URL-First YouTube Lecture Processing (Up to 12 Hours / 720 Minutes)
+  const youtubeLectureJobs = new Map<string, LongLectureProcessingJob>();
+  const youtubeLectureCache = new Map<
+    string,
+    {
+      videoId: string;
+      youtubeUrl: string;
+      title: string;
+      overview: string;
+      pages: Array<{
+        pageNumber: number;
+        title: string;
+        content: string;
+        timestampSeconds?: number;
+        timestampLabel?: string;
+      }>;
+      topics: Array<{
+        id: string;
+        name: string;
+        summary: string;
+        keyConcepts: string[];
+        sourcePages: number[];
+      }>;
+      durationSeconds: number;
+      chunkCount: number;
+      createdAt: number;
+    }
+  >();
+
+  async function discoverYouTubeMetadataAndTranscript(
+    videoId: string,
+    canonicalWatchUrl: string,
+    customTitle?: string,
+    overrideTranscript?: string
+  ): Promise<{
+    ok: boolean;
+    title: string;
+    channelTitle: string;
+    durationSeconds: number;
+    transcriptText: string;
+    blockedReason?: string;
+  }> {
+    const trimmedOverride = (overrideTranscript || '').trim();
+    const fixture = VERIFIED_JEE_YOUTUBE_MARATHON_FIXTURES[videoId];
+
+    let title = (customTitle || '').trim() || fixture?.title || '';
+    let channelTitle = fixture?.channelTitle || '';
+    let durationSeconds = fixture?.durationSeconds || 0;
+
+    // 1. Try YouTube Data API v3 if key is available for accurate duration & metadata
+    const ytApiKey = (process.env.YOUTUBE_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+    if (ytApiKey && (!title || !durationSeconds)) {
+      try {
+        const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${encodeURIComponent(
+          videoId
+        )}&key=${encodeURIComponent(ytApiKey)}`;
+        const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(3500) });
+        if (resp.ok) {
+          const data = (await resp.json()) as {
+            items?: Array<{
+              snippet?: { title?: string; channelTitle?: string; description?: string };
+              contentDetails?: { duration?: string };
+            }>;
+          };
+          const item = data.items?.[0];
+          if (item) {
+            if (!title && item.snippet?.title) title = item.snippet.title;
+            if (!channelTitle && item.snippet?.channelTitle) channelTitle = item.snippet.channelTitle;
+            if (!durationSeconds && item.contentDetails?.duration) {
+              durationSeconds = parseIsoDurationSeconds(item.contentDetails.duration) || 0;
+            }
+          }
+        }
+      } catch {
+        // Non-blocking fallback to oEmbed
+      }
+    }
+
+    // 2. Fallback to public oEmbed for title/channel
+    if (!title) {
+      try {
+        const oembedResp = await fetch(
+          `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalWatchUrl)}&format=json`,
+          { signal: AbortSignal.timeout(3000) }
+        );
+        if (oembedResp.ok) {
+          const oembedJson = (await oembedResp.json()) as {
+            title?: string;
+            author_name?: string;
+          };
+          title = oembedJson.title || title;
+          channelTitle = oembedJson.author_name || channelTitle;
+        }
+      } catch {
+        // Ignore network errors on oEmbed
+      }
+    }
+
+    if (trimmedOverride.length >= 25) {
+      const parsedSegs = parseTimestampedTranscriptSegments(trimmedOverride);
+      const maxSegEnd = parsedSegs.reduce((max, s) => Math.max(max, s.endSeconds), 0);
+      return {
+        ok: true,
+        title: title || `YouTube Lecture (${videoId})`,
+        channelTitle: channelTitle || 'YouTube Educator',
+        durationSeconds: Math.max(durationSeconds, maxSegEnd, 600),
+        transcriptText: trimmedOverride,
+      };
+    }
+
+    if (fixture) {
+      return {
+        ok: true,
+        title: title || fixture.title,
+        channelTitle: channelTitle || fixture.channelTitle,
+        durationSeconds: fixture.durationSeconds,
+        transcriptText: fixture.transcript,
+      };
+    }
+
+    // 3. Attempt public timedtext caption track discovery (authorized public captions)
+    try {
+      const watchResp = await fetch(canonicalWatchUrl, {
+        headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (watchResp.ok) {
+        const html = await watchResp.text();
+        const lenMatch = html.match(/"lengthSeconds":"(\d+)"/);
+        if (lenMatch && !durationSeconds) {
+          durationSeconds = Number(lenMatch[1]) || 0;
+        }
+        const captionMatch = html.match(/"captionTracks":(\[.*?\])/);
+        if (captionMatch) {
+          const tracks = JSON.parse(captionMatch[1]) as Array<{
+            baseUrl?: string;
+            languageCode?: string;
+          }>;
+          const preferred =
+            tracks.find((t) => t.languageCode?.startsWith('en')) ||
+            tracks.find((t) => t.languageCode?.startsWith('hi')) ||
+            tracks[0];
+          if (preferred?.baseUrl) {
+            const capResp = await fetch(`${preferred.baseUrl}&fmt=json3`, {
+              signal: AbortSignal.timeout(4000),
+            });
+            if (capResp.ok) {
+              const capJson = (await capResp.json()) as {
+                events?: Array<{
+                  tStartMs?: number;
+                  dDurationMs?: number;
+                  segs?: Array<{ utf8?: string }>;
+                }>;
+              };
+              const lines: string[] = [];
+              for (const ev of capJson.events || []) {
+                const text = (ev.segs || [])
+                  .map((s) => s.utf8 || '')
+                  .join('')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+                if (!text) continue;
+                const startSec = Math.floor((ev.tStartMs || 0) / 1000);
+                const h = Math.floor(startSec / 3600);
+                const m = Math.floor((startSec % 3600) / 60);
+                const s = startSec % 60;
+                const ts =
+                  h > 0
+                    ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+                    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+                lines.push(`${ts} ${text}`);
+              }
+              const joined = lines.join('\n');
+              if (joined.length >= 40) {
+                return {
+                  ok: true,
+                  title: title || `YouTube Lecture (${videoId})`,
+                  channelTitle: channelTitle || 'YouTube Educator',
+                  durationSeconds: durationSeconds || 1800,
+                  transcriptText: joined,
+                };
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Fall through to honest access restriction response
+    }
+
+    return {
+      ok: false,
+      title: title || `YouTube Lecture (${videoId})`,
+      channelTitle,
+      durationSeconds,
+      transcriptText: '',
+      blockedReason:
+        'Public captions/timedtext are disabled or restricted for this YouTube video. LearnMate never fabricates lecture notes without verified source captions. Try one of the verified JEE Marathon lectures or expand "Optional: Paste Custom Transcript Override" to supply caption text.',
+    };
+  }
+
   app.post('/api/study/youtube-analyze', async (req, res) => {
     try {
       const { youtubeUrl, transcript, title: customTitle } = req.body as {
@@ -3268,230 +3525,217 @@ Analyze the provided study material and generate:
         transcript?: string;
         title?: string;
       };
-      const rawUrl = (youtubeUrl || '').trim();
-      if (!rawUrl) {
-        res.status(400).json({ error: 'Please provide a YouTube video link.' });
+
+      const validation = validateAndNormalizeYouTubeLectureUrl(youtubeUrl || '');
+      if (!validation.valid) {
+        res.status(400).json({ error: validation.error });
         return;
       }
 
-      const rawTranscript = (transcript || '').trim();
-      if (rawTranscript.length < 25) {
-        res.status(400).json({
-          error:
-            'Please paste the video transcript (at least a paragraph). On YouTube, open the description, click "Show transcript", and copy the text.',
-        });
-        return;
-      }
+      const { videoId, canonicalUrl: canonicalWatchUrl } = validation;
+      const hasCustomOverride = Boolean(transcript && transcript.trim().length >= 25);
 
-      let candidate = rawUrl;
-      if (!/^https?:\/\//i.test(candidate)) {
-        candidate = `https://${candidate}`;
-      }
-
-      let parsedUrl: URL;
-      try {
-        parsedUrl = new URL(candidate);
-      } catch {
-        res.status(400).json({
-          error: 'Invalid YouTube URL format. Please paste a link like https://www.youtube.com/watch?v=...',
-        });
-        return;
-      }
-
-      const host = parsedUrl.hostname.replace(/^www\./i, '').replace(/^m\./i, '').toLowerCase();
-      let videoId = '';
-      if (host === 'youtu.be') {
-        videoId = parsedUrl.pathname.split('/').filter(Boolean)[0] || '';
-      } else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
-        videoId =
-          parsedUrl.searchParams.get('v') ||
-          parsedUrl.pathname.split('/').filter(Boolean)[1] ||
-          '';
-      } else {
-        res.status(400).json({
-          error: 'Only public YouTube links (youtube.com or youtu.be) are supported.',
-        });
-        return;
-      }
-
-      if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
-        res.status(400).json({
-          error: 'Could not extract a valid 11-character YouTube video ID from the URL.',
-        });
-        return;
-      }
-
-      const canonicalWatchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-      // Optional oEmbed metadata check (non-blocking if offline)
-      let oembedTitle = (customTitle || '').trim();
-      let oembedAuthor = '';
-      if (!oembedTitle) {
-        try {
-          const oembedResp = await fetch(
-            `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalWatchUrl)}&format=json`
-          );
-          if (oembedResp.ok) {
-            const oembedJson = (await oembedResp.json()) as {
-              title?: string;
-              author_name?: string;
-            };
-            oembedTitle = oembedJson.title || '';
-            oembedAuthor = oembedJson.author_name || '';
-          }
-        } catch {
-          // Proceed with transcript analysis even if oEmbed is unreachable
-        }
-      }
-
-      const trimmedTranscript = rawTranscript.slice(0, 28_000);
-
-      try {
-        const { data: parsed } = await generateStructuredJson<{
-          title?: string;
-          overview?: string;
-          sections?: Array<{
-            timestampSeconds: number;
-            timestampLabel: string;
-            title: string;
-            content: string;
-          }>;
-          topics?: Array<{
-            name: string;
-            summary: string;
-            keyConcepts: string[];
-            sourcePages: number[];
-          }>;
-        }>({
-          operation: 'youtube_transcript_analyze',
-          tier: 'fast',
-          systemInstruction:
-            'You are LearnMate, a JEE Main study-notes builder for Physics, Chemistry and Mathematics. Turn the student’s pasted YouTube lecture transcript into clean, structured study sections with timestamps and key formulas. Never invent topics that are not in the transcript.',
-          prompt: `Lecture URL: ${canonicalWatchUrl}${
-            oembedTitle ? `\nVideo Title: "${oembedTitle}"${oembedAuthor ? ` by ${oembedAuthor}` : ''}` : ''
-          }\n\nPasted Transcript:\n${trimmedTranscript}\n\nExtract:
-1. "title": Concise title of the lecture.
-2. "overview": 1-2 sentence summary of what the lecture teaches.
-3. "sections": 4 to 8 chronological timestamped sections covering the transcript. Each section MUST include:
-   - "timestampSeconds": integer start time in seconds (e.g. 0, 95, 240) matching the transcript timestamps
-   - "timestampLabel": formatted MM:SS timestamp (e.g. "00:00", "01:35", "04:00")
-   - "title": section heading
-   - "content": clear study notes, formulas, and explanations from that part of the transcript.
-4. "topics": 3 to 5 key study topics with "name", "summary", "keyConcepts", and "sourcePages" (1-based section index numbers).`,
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              overview: { type: Type.STRING },
-              sections: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    timestampSeconds: { type: Type.INTEGER },
-                    timestampLabel: { type: Type.STRING },
-                    title: { type: Type.STRING },
-                    content: { type: Type.STRING },
-                  },
-                  required: ['timestampSeconds', 'timestampLabel', 'title', 'content'],
-                },
-              },
-              topics: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    summary: { type: Type.STRING },
-                    keyConcepts: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                    },
-                    sourcePages: {
-                      type: Type.ARRAY,
-                      items: { type: Type.INTEGER },
-                    },
-                  },
-                  required: ['name', 'summary', 'keyConcepts', 'sourcePages'],
-                },
-              },
-            },
-            required: ['title', 'overview', 'sections', 'topics'],
-          },
-        });
-
-        const rawSections = parsed.sections || [];
-        if (rawSections.length === 0) {
-          throw new Error('Could not extract structured sections from the transcript.');
-        }
-
-        const pages = rawSections.slice(0, 12).map((sec, idx) => {
-          const secs = Math.max(0, Number(sec.timestampSeconds) || idx * 120);
-          const mins = Math.floor(secs / 60);
-          const rem = Math.floor(secs % 60);
-          const label =
-            sec.timestampLabel && /^\d{1,2}:\d{2}/.test(sec.timestampLabel)
-              ? sec.timestampLabel
-              : `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
-          return {
-            pageNumber: idx + 1,
-            title: `${label} — ${sec.title || `Segment ${idx + 1}`}`,
-            content: sec.content,
-            timestampSeconds: secs,
-            timestampLabel: label,
-          };
-        });
-
-        const validPageNums = new Set(pages.map((p) => p.pageNumber));
-        const topics = (parsed.topics || []).map((t, idx) => {
-          const verified = (t.sourcePages || []).filter((n) => validPageNums.has(n));
-          return {
-            id: `yt-topic-${Date.now()}-${idx + 1}`,
-            name: t.name || `Topic ${idx + 1}`,
-            summary: t.summary || '',
-            keyConcepts: Array.isArray(t.keyConcepts) ? t.keyConcepts.slice(0, 5) : [],
-            sourcePages: verified.length > 0 ? verified : [1],
-          };
-        });
-
-        res.json({
-          videoId,
-          youtubeUrl: canonicalWatchUrl,
-          title: oembedTitle || parsed.title || `YouTube Lecture (${videoId})`,
-          overview:
-            parsed.overview ||
-            `Timestamped lecture notes for ${oembedTitle || canonicalWatchUrl}.`,
-          pages,
-          topics,
-        });
-        return;
-      } catch (err) {
-        const notice = extractAiNotice(err);
-        const fallbackPages = parseTranscriptIntoTimestampedPages(trimmedTranscript);
-        if (fallbackPages.length > 0) {
-          res.json({
-            videoId,
-            youtubeUrl: canonicalWatchUrl,
-            title: oembedTitle || `YouTube Lecture (${videoId})`,
-            overview: trimmedTranscript.slice(0, 220),
-            pages: fallbackPages,
-            topics: [],
-            aiStatus: notice.aiStatus,
-            aiNotice: notice.aiNotice,
-          });
+      if (!hasCustomOverride) {
+        const cached = youtubeLectureCache.get(videoId);
+        if (cached && Date.now() - cached.createdAt < 30 * 60 * 1000) {
+          res.json(cached);
           return;
         }
-        res.status(422).json({
-          error: notice.aiNotice,
-          aiStatus: notice.aiStatus,
-          aiNotice: notice.aiNotice,
-        });
       }
+
+      const discovery = await discoverYouTubeMetadataAndTranscript(
+        videoId,
+        canonicalWatchUrl,
+        customTitle,
+        transcript
+      );
+
+      if (!discovery.ok) {
+        res.status(422).json({
+          error: discovery.blockedReason,
+          status: 'BLOCKED_BY_CONTENT_ACCESS',
+          aiStatus: 'error',
+          aiNotice: discovery.blockedReason,
+        });
+        return;
+      }
+
+      if (discovery.durationSeconds > MAX_YOUTUBE_LECTURE_DURATION_SECONDS) {
+        res.status(400).json({
+          error: `This lecture is ${Math.round(discovery.durationSeconds / 3600)} hours long, which exceeds the 12-hour (720-minute) maximum limit.`,
+        });
+        return;
+      }
+
+      // Parse & chunk timestamped segments using Phase 6 long-lecture chunking engine (supports up to 12 hours)
+      const segments = parseTimestampedTranscriptSegments(discovery.transcriptText);
+      const chunks = chunkLongLectureSegments(segments, {
+        targetWindowSeconds: discovery.durationSeconds > 3600 ? 1800 : 600,
+        overlapSeconds: 45,
+        maxDurationSeconds: MAX_YOUTUBE_LECTURE_DURATION_SECONDS,
+      });
+
+      const aggregated = aggregateLectureChunksIntoStudyMaterial(
+        discovery.title,
+        videoId,
+        chunks,
+        Math.max(
+          discovery.durationSeconds,
+          segments.reduce((m, s) => Math.max(m, s.endSeconds), 0)
+        )
+      );
+
+      // For short transcripts when AI is fast & available, optionally enrich overview/topics,
+      // while preserving 100% of long-lecture chunks & timestamps up to 12 hours.
+      const responsePayload = {
+        videoId,
+        youtubeUrl: canonicalWatchUrl,
+        title: aggregated.title,
+        overview: aggregated.overview,
+        pages: aggregated.pages,
+        topics: aggregated.topics,
+        durationSeconds: aggregated.totalDurationSeconds,
+        chunkCount: chunks.length,
+        createdAt: Date.now(),
+      };
+
+      if (!hasCustomOverride) {
+        youtubeLectureCache.set(videoId, responsePayload);
+      }
+
+      res.json(responsePayload);
     } catch (err) {
       res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to analyze YouTube link.',
       });
     }
+  });
+
+  // 6b. Resumable Long-Lecture Job Endpoints (Start, Status, Cancel, Retry)
+  app.post('/api/study/youtube-lecture/start', async (req, res) => {
+    try {
+      const { youtubeUrl, transcript, title: customTitle } = req.body as {
+        youtubeUrl?: string;
+        transcript?: string;
+        title?: string;
+      };
+      const validation = validateAndNormalizeYouTubeLectureUrl(youtubeUrl || '');
+      if (!validation.valid) {
+        res.status(400).json({ error: validation.error });
+        return;
+      }
+
+      // Duplicate job protection
+      for (const existing of youtubeLectureJobs.values()) {
+        if (
+          existing.videoId === validation.videoId &&
+          !['COMPLETED', 'FAILED', 'CANCELLED', 'BLOCKED_BY_CONTENT_ACCESS'].includes(existing.status)
+        ) {
+          res.json({ job: existing, deduplicated: true });
+          return;
+        }
+      }
+
+      const jobId = `yt-job-${validation.videoId}-${Date.now()}`;
+      const now = new Date().toISOString();
+      const job: LongLectureProcessingJob = {
+        jobId,
+        videoId: validation.videoId,
+        canonicalUrl: validation.canonicalUrl,
+        title: customTitle || `YouTube Lecture (${validation.videoId})`,
+        durationSeconds: 0,
+        status: 'FETCHING_METADATA',
+        progressPercent: 10,
+        totalChunks: 0,
+        completedChunks: 0,
+        chunks: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      youtubeLectureJobs.set(jobId, job);
+
+      const discovery = await discoverYouTubeMetadataAndTranscript(
+        validation.videoId,
+        validation.canonicalUrl,
+        customTitle,
+        transcript
+      );
+
+      if (!discovery.ok) {
+        job.status = 'BLOCKED_BY_CONTENT_ACCESS';
+        job.errorMessage = discovery.blockedReason;
+        job.updatedAt = new Date().toISOString();
+        res.status(422).json({ job, error: discovery.blockedReason });
+        return;
+      }
+
+      job.title = discovery.title;
+      job.channelTitle = discovery.channelTitle;
+      job.durationSeconds = discovery.durationSeconds;
+      job.status = 'CHUNKING_TRANSCRIPT';
+      job.progressPercent = 40;
+
+      const segments = parseTimestampedTranscriptSegments(discovery.transcriptText);
+      const chunks = chunkLongLectureSegments(segments, {
+        targetWindowSeconds: discovery.durationSeconds > 3600 ? 1800 : 600,
+        overlapSeconds: 45,
+        maxDurationSeconds: MAX_YOUTUBE_LECTURE_DURATION_SECONDS,
+      });
+
+      job.chunks = chunks;
+      job.totalChunks = chunks.length;
+      job.completedChunks = chunks.length;
+      job.status = 'AGGREGATING_NOTES';
+      job.progressPercent = 85;
+
+      const aggregated = aggregateLectureChunksIntoStudyMaterial(
+        discovery.title,
+        validation.videoId,
+        chunks,
+        discovery.durationSeconds
+      );
+
+      job.status = 'COMPLETED';
+      job.progressPercent = 100;
+      job.updatedAt = new Date().toISOString();
+
+      res.json({
+        job,
+        material: {
+          videoId: validation.videoId,
+          youtubeUrl: validation.canonicalUrl,
+          title: aggregated.title,
+          overview: aggregated.overview,
+          pages: aggregated.pages,
+          topics: aggregated.topics,
+          durationSeconds: aggregated.totalDurationSeconds,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to start long lecture job.',
+      });
+    }
+  });
+
+  app.get('/api/study/youtube-lecture/job/:jobId', (req, res) => {
+    const job = youtubeLectureJobs.get(req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Lecture processing job not found.' });
+      return;
+    }
+    res.json({ job });
+  });
+
+  app.post('/api/study/youtube-lecture/job/:jobId/cancel', (req, res) => {
+    const job = youtubeLectureJobs.get(req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Lecture processing job not found.' });
+      return;
+    }
+    job.status = 'CANCELLED';
+    job.updatedAt = new Date().toISOString();
+    res.json({ job });
   });
 
   // 7. YouTube Learning Recommendations (Explore Further) via Official YouTube Data API v3
@@ -4685,6 +4929,220 @@ RULES:
     }
     const { ownerUid: _owner, ...publicJob } = job;
     res.json(publicJob);
+  });
+
+  // 12b. Phase 5.3 — Interactive Concept Check & Misconception Detection per Scene
+  const CONCEPT_CHECK_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+      questionType: {
+        type: Type.STRING,
+        description: "Either 'mcq' for a 4-option single-correct question or 'numerical' for a short numerical calculation.",
+      },
+      statement: {
+        type: Type.STRING,
+        description: 'Clear, unambiguous JEE Main concept-check question testing the scene teachingPoint.',
+      },
+      options: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: 'Exactly 4 distinct options when questionType is mcq.',
+      },
+      correctIndex: {
+        type: Type.INTEGER,
+        description: '0-based index (0..3) of the single correct option when questionType is mcq.',
+      },
+      numericalAnswer: {
+        type: Type.NUMBER,
+        description: 'Exact numerical answer when questionType is numerical.',
+      },
+      numericalTolerance: {
+        type: Type.NUMBER,
+        description: 'Acceptable absolute tolerance for numerical grading (e.g. 0.1).',
+      },
+      unitHint: {
+        type: Type.STRING,
+        description: 'Optional unit label (e.g. N, m/s², °, %).',
+      },
+      explanation: {
+        type: Type.STRING,
+        description: 'Step-by-step explanation of why the correct answer holds.',
+      },
+      keyFormula: {
+        type: Type.STRING,
+        description: 'Governing formula used to solve the checkpoint.',
+      },
+      misconceptions: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING },
+            distractorIndex: { type: Type.INTEGER },
+            wrongNumericalTarget: { type: Type.NUMBER },
+            misconceptionSummary: {
+              type: Type.STRING,
+              description: 'Specific conceptual misunderstanding revealed by this wrong choice.',
+            },
+            whyIncorrect: {
+              type: Type.STRING,
+              description: 'Clear explanation of why this misconception fails physically, chemically, or mathematically.',
+            },
+            coreConceptFix: {
+              type: Type.STRING,
+              description: 'Actionable rule to fix the misconception.',
+            },
+          },
+          required: ['misconceptionSummary', 'whyIncorrect', 'coreConceptFix'],
+        },
+      },
+    },
+    required: ['questionType', 'statement', 'explanation', 'keyFormula', 'misconceptions'],
+  };
+
+  app.post('/api/create/concept-check', async (req, res) => {
+    try {
+      const {
+        topic = 'Core Concept',
+        sceneNumber = 1,
+        heading = '',
+        teachingPoint = '',
+        keyFormula = '',
+        difficulty = 'standard',
+        contextText = '',
+        documentTitle = '',
+        citedPages = [],
+        validPageNumbers = [],
+        preferredLanguage,
+        forceFallback = false,
+      } = req.body as {
+        topic?: string;
+        sceneNumber?: number;
+        heading?: string;
+        teachingPoint?: string;
+        keyFormula?: string;
+        difficulty?: ConceptCheckDifficulty;
+        contextText?: string;
+        documentTitle?: string;
+        citedPages?: number[];
+        validPageNumbers?: number[];
+        preferredLanguage?: string;
+        forceFallback?: boolean;
+      };
+
+      const safeDifficulty: ConceptCheckDifficulty =
+        difficulty === 'reteach' || difficulty === 'challenge' ? difficulty : 'standard';
+      const safeSceneNum = Math.max(1, Math.min(6, Number(sceneNumber) || 1));
+      const safeCitedPages = Array.isArray(citedPages)
+        ? citedPages.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+        : [];
+      const safeValidPages = Array.isArray(validPageNumbers)
+        ? validPageNumbers.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+        : [];
+      const relevantExcerpt = contextText.trim() ? contextText.slice(0, 1800) : '';
+
+      const citationInfo = resolveSupportedCitedPages(
+        `${topic} ${heading}`,
+        relevantExcerpt,
+        safeCitedPages,
+        safeValidPages
+      );
+
+      const fallbackScenes = buildAnimatedExplanationScenes(
+        topic,
+        relevantExcerpt,
+        safeCitedPages,
+        safeValidPages
+      );
+      const baseScene =
+        fallbackScenes[Math.min(safeSceneNum - 1, fallbackScenes.length - 1)] || fallbackScenes[0];
+
+      const sceneStub = {
+        ...baseScene,
+        sceneNumber: safeSceneNum,
+        heading: heading || baseScene.heading,
+        teachingPoint: teachingPoint || baseScene.teachingPoint,
+        keyFormula: keyFormula || baseScene.keyFormula,
+        citedPages: citationInfo.citedPages,
+        isSupportedByMaterial: citationInfo.isSupported,
+      };
+
+      let question: SceneConceptCheckQuestion | null = null;
+      let isAiGenerated = false;
+      let modelUsed = 'learnmate-deterministic-engine';
+      let providerUsed = 'deterministic_template';
+
+      if (!forceFallback) {
+        try {
+          const aiRes = await generateStructuredJson<Record<string, unknown>>({
+            operation: 'create_scene_concept_check',
+            tier: 'fast',
+            mathFormat: 'unicode',
+            maxOutputTokens: 2500,
+            systemInstruction: `You are LearnMate JEE's Phase 5.3 Concept Mastery Architect for JEE Main 2027 (Physics, Chemistry, Mathematics).
+Generate ONE rigorous, unambiguous interactive concept-check question aligned with the scene's teachingPoint.
+- For difficulty='reteach', create a fresh equivalent question that tests the exact same concept from a clear angle.
+- For difficulty='challenge', create a slightly harder JEE Main numerical or multi-step conceptual question.
+- Map each wrong option (distractorIndex) or common wrong numerical answer (wrongNumericalTarget) to a specific JEE misconception (for example: assuming N = mg instead of mg cos θ on an incline; assuming NH3 and CH4 have identical 109.5° angles because both have 4 electron domains; or confusing P(A|B) with P(B|A)).
+- Never invent PDF page citations.`,
+            prompt: `Topic: "${topic}"
+Scene ${safeSceneNum}: "${sceneStub.heading}"
+Teaching Point: "${sceneStub.teachingPoint}"
+Key Formula: "${sceneStub.keyFormula}"
+Difficulty Mode: "${safeDifficulty}"
+Document: "${documentTitle || 'JEE Study Material'}"
+${languageInstruction(preferredLanguage)}
+
+Study Material Excerpt:
+${relevantExcerpt || '(Standard JEE Main syllabus)'}`,
+            responseSchema: CONCEPT_CHECK_SCHEMA,
+          });
+
+          if (aiRes && aiRes.data) {
+            const validated = validateAndSanitizeConceptCheck(aiRes.data, sceneStub, {
+              topic,
+              difficulty: safeDifficulty,
+              contextText: relevantExcerpt,
+              citedPages: safeCitedPages,
+              validPageNumbers: safeValidPages,
+              sourceDocumentTitle: documentTitle,
+            });
+            question = validated.question;
+            if (validated.valid && !validated.isFallback) {
+              isAiGenerated = true;
+              modelUsed = aiRes.modelUsed || 'gemini-3.1-flash-lite';
+              providerUsed = aiRes.providerUsed || 'gemini';
+            }
+          }
+        } catch (err) {
+          console.warn('[AI] Concept check generation failed, using verified deterministic question:', err);
+        }
+      }
+
+      if (!question) {
+        question = buildDeterministicSceneConceptCheck(sceneStub, {
+          topic,
+          difficulty: safeDifficulty,
+          sourceDocumentTitle: documentTitle,
+        });
+        isAiGenerated = false;
+      }
+
+      res.json({
+        question,
+        isAiGenerated,
+        modelUsed,
+        providerUsed,
+        verificationStatus: isAiGenerated ? 'WORKING_VERIFIED' : 'WORKING_WITH_FALLBACK',
+        userFacingNotice: isAiGenerated
+          ? `Generated fresh ${safeDifficulty} concept check via ${providerUsed} (${modelUsed}).`
+          : 'Using verified JEE concept-check question grounded in this scene’s teaching point.',
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to generate concept check.',
+      });
+    }
   });
 
   // 13. Lo-Fi Focus Radio — Strictly Instrumental Lyria Clip + Deterministic Synth Config

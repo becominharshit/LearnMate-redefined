@@ -24,7 +24,11 @@ import type {
   Custom3DSceneSpec,
 } from '../types/study';
 import type { StructuredDiagramSpec } from '../types/diagram';
-import type { AnimatedExplanationScene } from '../utils/educationalSpecsEngine';
+import type {
+  AnimatedExplanationScene,
+  ConceptCheckDifficulty,
+  SceneConceptCheckQuestion,
+} from '../utils/educationalSpecsEngine';
 import { apiFetch } from './apiFetch';
 
 export interface AiStatusMetadata {
@@ -134,6 +138,15 @@ export interface VideoLessonResponse {
   citedPages?: number[];
   isSupportedByMaterial?: boolean;
   scenes: AnimatedExplanationScene[];
+}
+
+export interface GenerateConceptCheckResponse {
+  question: SceneConceptCheckQuestion;
+  isAiGenerated: boolean;
+  modelUsed?: string;
+  providerUsed?: string;
+  verificationStatus: 'WORKING_VERIFIED' | 'WORKING_WITH_FALLBACK';
+  userFacingNotice?: string;
 }
 
 // Client-side in-flight deduplication to prevent duplicate submissions from rapid button clicks
@@ -430,6 +443,23 @@ export const aiStudyClient = {
     preferredLanguage?: string;
   }): Promise<VideoLessonResponse> {
     return postJson<VideoLessonResponse>('/api/create/video-lesson', params);
+  },
+
+  async generateConceptCheck(params: {
+    topic: string;
+    sceneNumber: number;
+    heading: string;
+    teachingPoint: string;
+    keyFormula: string;
+    difficulty?: ConceptCheckDifficulty;
+    contextText?: string;
+    documentTitle?: string;
+    citedPages?: number[];
+    validPageNumbers?: number[];
+    preferredLanguage?: string;
+    forceFallback?: boolean;
+  }): Promise<GenerateConceptCheckResponse> {
+    return postJson<GenerateConceptCheckResponse>('/api/create/concept-check', params);
   },
 
   /** Status of a background video job (Higgsfield generations take minutes). */

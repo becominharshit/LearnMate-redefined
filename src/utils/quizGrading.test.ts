@@ -38,15 +38,25 @@ test('validateMaterialInput enforces PDF page count and file type limits', () =>
   });
   assert.equal(validPdf.valid, true);
 
+  const sixtyPagePdf = validateMaterialInput({
+    sourceType: 'pdf',
+    fileName: 'chapter60.pdf',
+    mimeType: 'application/pdf',
+    fileSize: 1024 * 1024 * 15,
+    pageCount: 60,
+    textContent: 'This is a valid 60-page JEE study PDF with plenty of extracted text on page 1.',
+  });
+  assert.equal(sixtyPagePdf.valid, true);
+
   const tooManyPages = validateMaterialInput({
     sourceType: 'pdf',
     fileName: 'textbook.pdf',
     mimeType: 'application/pdf',
-    pageCount: 25,
+    pageCount: 65,
     textContent: 'Valid text content here for testing.',
   });
   assert.equal(tooManyPages.valid, false);
-  assert.match(tooManyPages.error || '', /up to 20 pages/);
+  assert.match(tooManyPages.error || '', /up to 60 pages/);
 
   const wrongType = validateMaterialInput({
     sourceType: 'pdf',

@@ -24,7 +24,7 @@ const CHOICES: Array<{
   {
     mode: 'pdf',
     label: 'PDF',
-    detail: 'Drop or pick a chapter PDF',
+    detail: 'Up to 60 pages per PDF',
     icon: FileText,
   },
   {
@@ -36,7 +36,7 @@ const CHOICES: Array<{
   {
     mode: 'youtube',
     label: 'YouTube link',
-    detail: 'Player + pasted transcript',
+    detail: 'Paste URL (up to 12-hr lectures)',
     icon: Youtube,
   },
   {
