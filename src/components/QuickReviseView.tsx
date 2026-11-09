@@ -1100,7 +1100,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                       onClick={() => handleMarkFlashcard('review_again')}
                       className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
                         activeFlashcard.status === 'review_again'
-                          ? 'bg-warning text-ink'
+                          ? 'bg-warning text-slate-950'
                           : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200'
                       }`}
                     >
@@ -1333,12 +1333,12 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                   </button>
                                 </div>
 
-                                <p className="lm-sticky-font text-[16px] leading-relaxed text-[#1F2937]">
+                                <p className="lm-sticky-font text-[16px] leading-relaxed text-inherit">
                                   {note.content}
                                 </p>
 
                                 {note.formula && (
-                                  <div className="px-3 py-1.5 rounded-lg bg-white/60 border border-black/10 text-sm font-serif-editorial italic text-ink">
+                                  <div className="px-3 py-1.5 rounded-lg bg-white/60 dark:bg-black/30 border border-black/10 dark:border-white/15 text-sm font-serif-editorial italic text-ink">
                                     <MathText text={note.formula} />
                                   </div>
                                 )}
@@ -1517,12 +1517,22 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     });
                   });
 
-                  const colorPalette = {
-                    blue: { stroke: '#4285F4', fill: '#E8F0FE', text: '#172033' },
-                    red: { stroke: '#EA4335', fill: '#FCE8E6', text: '#172033' },
-                    yellow: { stroke: '#D97706', fill: '#FEF7E0', text: '#172033' },
-                    green: { stroke: '#34A853', fill: '#E6F4EA', text: '#172033' },
-                  };
+                  const isDark =
+                    typeof document !== 'undefined' &&
+                    document.documentElement.classList.contains('dark');
+                  const colorPalette = isDark
+                    ? {
+                        blue: { stroke: '#60A5FA', fill: '#172554', text: '#EFF6FF' },
+                        red: { stroke: '#F87171', fill: '#450A0A', text: '#FEF2F2' },
+                        yellow: { stroke: '#FBBF24', fill: '#451A03', text: '#FFFBEB' },
+                        green: { stroke: '#34D399', fill: '#064E3B', text: '#ECFDF5' },
+                      }
+                    : {
+                        blue: { stroke: '#4285F4', fill: '#E8F0FE', text: '#172033' },
+                        red: { stroke: '#EA4335', fill: '#FCE8E6', text: '#172033' },
+                        yellow: { stroke: '#D97706', fill: '#FEF7E0', text: '#172033' },
+                        green: { stroke: '#34A853', fill: '#E6F4EA', text: '#172033' },
+                      };
 
                   return (
                     <svg
@@ -1580,8 +1590,14 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                 width={boxWidth}
                                 height={boxHeight}
                                 rx={12}
-                                fill={node.level === 'central' ? '#1A73E8' : theme.fill}
-                                stroke={isSelected ? '#172033' : theme.stroke}
+                                fill={node.level === 'central' ? '#4F46E5' : theme.fill}
+                                stroke={
+                                  isSelected
+                                    ? isDark
+                                      ? '#F8FAFC'
+                                      : '#172033'
+                                    : theme.stroke
+                                }
                                 strokeWidth={isSelected ? 2.8 : 1.8}
                               />
                               <text

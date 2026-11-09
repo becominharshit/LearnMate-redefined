@@ -67,13 +67,80 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
     return 'arrow-default';
   };
 
+  const adaptStrokeOrText = (
+    raw: string | undefined,
+    lightFallback: string,
+    darkFallback: string
+  ): string => {
+    if (!raw) return isDarkTheme ? darkFallback : lightFallback;
+    if (!isDarkTheme) return raw;
+    const normalized = raw.trim().toLowerCase();
+    const darkToLightMap: Record<string, string> = {
+      '#000': '#F8FAFC',
+      '#000000': '#F8FAFC',
+      'black': '#F8FAFC',
+      '#0f172a': '#F8FAFC',
+      '#111827': '#F8FAFC',
+      '#1e293b': '#E2E8F0',
+      '#334155': '#CBD5E1',
+      '#475569': '#94A3B8',
+      '#1e1b4b': '#C7D2FE',
+      '#312e81': '#A5B4FC',
+      '#3730a3': '#A5B4FC',
+      '#4338ca': '#818CF8',
+      '#4f46e5': '#818CF8',
+      '#1e3a8a': '#93C5FD',
+      '#1d4ed8': '#60A5FA',
+      '#2563eb': '#60A5FA',
+      '#064e3b': '#6EE7B7',
+      '#065f46': '#34D399',
+      '#047857': '#34D399',
+      '#059669': '#34D399',
+      '#78350f': '#FDE68A',
+      '#92400e': '#FBBF24',
+      '#b45309': '#FBBF24',
+      '#d97706': '#FBBF24',
+      '#7f1d1d': '#FCA5A5',
+      '#991b1b': '#F87171',
+      '#b91c1c': '#F87171',
+      '#dc2626': '#F87171',
+    };
+    return darkToLightMap[normalized] || raw;
+  };
+
+  const adaptFill = (raw: string | undefined, lightFallback: string, darkFallback: string): string => {
+    if (!raw) return isDarkTheme ? darkFallback : lightFallback;
+    if (!isDarkTheme) return raw;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'none' || normalized === 'transparent') return raw;
+    const lightFillToDarkMap: Record<string, string> = {
+      '#ffffff': '#162038',
+      '#fff': '#162038',
+      'white': '#162038',
+      '#f8fafc': '#162038',
+      '#f1f5f9': '#1E293B',
+      '#e2e8f0': '#26324F',
+      '#eef2ff': '#1A2440',
+      '#e0e7ff': '#1E294B',
+      '#eff6ff': '#172554',
+      '#dbeafe': '#1E3A8A',
+      '#ecfdf5': '#064E3B',
+      '#d1fae5': '#065F46',
+      '#fffbeb': '#451A03',
+      '#fef3c7': '#78350F',
+      '#fef2f2': '#450A0A',
+      '#fee2e2': '#7F1D1D',
+    };
+    return lightFillToDarkMap[normalized] || raw;
+  };
+
   const renderElement = (el: DiagramElement) => {
     const defaultText = isDarkTheme ? '#F8FAFC' : '#0F172A';
 
     switch (el.kind) {
       case 'arrow': {
         const marker = getMarkerId(el.color);
-        const stroke = el.color || (isDarkTheme ? '#818CF8' : '#4F46E5');
+        const stroke = adaptStrokeOrText(el.color, '#4F46E5', '#818CF8');
         const midX = (el.startX + el.endX) / 2;
         const midY = (el.startY + el.endY) / 2 - 8;
         return (
@@ -106,7 +173,7 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       }
 
       case 'line': {
-        const stroke = el.color || (isDarkTheme ? '#94A3B8' : '#64748B');
+        const stroke = adaptStrokeOrText(el.color, '#64748B', '#94A3B8');
         const midX = (el.startX + el.endX) / 2;
         const midY = (el.startY + el.endY) / 2 - 8;
         return (
@@ -137,8 +204,8 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       }
 
       case 'rect': {
-        const fill = isDarkTheme && (el.fill === '#EEF2FF' || el.fill === '#FFFFFF') ? '#1A2440' : el.fill || '#EEF2FF';
-        const stroke = el.stroke || (isDarkTheme ? '#818CF8' : '#4F46E5');
+        const fill = adaptFill(el.fill, '#EEF2FF', '#1A2440');
+        const stroke = adaptStrokeOrText(el.stroke, '#4F46E5', '#818CF8');
         return (
           <g key={el.id}>
             <rect
@@ -169,8 +236,8 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       }
 
       case 'circle': {
-        const fill = isDarkTheme && (el.fill === '#EEF2FF' || el.fill === '#FFFFFF' || el.fill === '#EFF6FF') ? '#1A2440' : el.fill || '#EEF2FF';
-        const stroke = el.stroke || (isDarkTheme ? '#818CF8' : '#4F46E5');
+        const fill = adaptFill(el.fill, '#EEF2FF', '#1A2440');
+        const stroke = adaptStrokeOrText(el.stroke, '#4F46E5', '#818CF8');
         return (
           <g key={el.id}>
             <circle
@@ -199,8 +266,8 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       }
 
       case 'polygon': {
-        const fill = isDarkTheme && (el.fill === '#F1F5F9' || el.fill === '#EEF2FF') ? '#1E293B' : el.fill || '#F1F5F9';
-        const stroke = el.stroke || (isDarkTheme ? '#64748B' : '#475569');
+        const fill = adaptFill(el.fill, '#F1F5F9', '#1E293B');
+        const stroke = adaptStrokeOrText(el.stroke, '#475569', '#94A3B8');
         return (
           <polygon
             key={el.id}
@@ -213,8 +280,8 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       }
 
       case 'path': {
-        const stroke = el.stroke || (isDarkTheme ? '#818CF8' : '#4F46E5');
-        const fill = el.fill || 'none';
+        const stroke = adaptStrokeOrText(el.stroke, '#4F46E5', '#818CF8');
+        const fill = adaptFill(el.fill, 'none', 'none');
         return (
           <path
             key={el.id}
@@ -228,7 +295,7 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       }
 
       case 'text': {
-        const color = el.color || defaultText;
+        const color = adaptStrokeOrText(el.color, '#0F172A', '#F8FAFC');
         return (
           <text
             key={el.id}
@@ -246,7 +313,7 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       }
 
       case 'arc': {
-        const color = el.color || '#D97706';
+        const color = adaptStrokeOrText(el.color, '#D97706', '#FBBF24');
         const rad1 = (el.startAngleDeg * Math.PI) / 180;
         const rad2 = (el.endAngleDeg * Math.PI) / 180;
         const x1 = el.cx + el.r * Math.cos(rad1);

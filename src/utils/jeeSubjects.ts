@@ -102,3 +102,226 @@ export function computeStudyStreak(activity: Date[], today: Date = new Date()): 
   }
   return streak;
 }
+
+export const STUDY_ACTIVITY_CHECKIN_STORAGE_KEY = 'learnmate_study_activity_days_v1';
+
+export interface StudyActivityDayCell {
+  dayKey: string;
+  shortWeekday: string;
+  dayOfMonth: number;
+  monthShort: string;
+  isToday: boolean;
+  isActive: boolean;
+  inCurrentStreak: boolean;
+  activityCount: number;
+}
+
+export interface StudyActivityStreakSummary {
+  currentStreak: number;
+  longestStreak: number;
+  totalActiveDays: number;
+  isTodayActive: boolean;
+  isStreakAtRiskToday: boolean;
+  days: StudyActivityDayCell[];
+}
+
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Pure helper that builds a complete streak summary and 14-day timeline from raw activity Date objects.
+ */
+export function computeStudyActivityStreakSummary(
+  activity: Date[],
+  today: Date = new Date(),
+  windowDays = 14
+): StudyActivityStreakSummary {
+  const countsByDay = new Map<string, number>();
+  for (const raw of activity) {
+    const d = raw instanceof Date ? raw : new Date(raw);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = localDayKey(d);
+    countsByDay.set(key, (countsByDay.get(key) ?? 0) + 1);
+  }
+
+  const activeDayKeys = new Set(countsByDay.keys());
+  const todayAnchor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayKey = localDayKey(todayAnchor);
+  const isTodayActive = activeDayKeys.has(todayKey);
+
+  // Determine which day keys belong to the active consecutive streak
+  const streakDayKeys = new Set<string>();
+  const cursor = new Date(todayAnchor);
+  let canStartStreak = true;
+  if (!activeDayKeys.has(localDayKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+    if (!activeDayKeys.has(localDayKey(cursor))) {
+      canStartStreak = false;
+    }
+  }
+  if (canStartStreak) {
+    while (activeDayKeys.has(localDayKey(cursor))) {
+      streakDayKeys.add(localDayKey(cursor));
+      cursor.setDate(cursor.getDate() - 1);
+    }
+  }
+
+  const currentStreak = streakDayKeys.size;
+  const isStreakAtRiskToday = !isTodayActive && currentStreak > 0;
+
+  // Calculate longest consecutive day streak across all recorded history
+  const sortedKeys = Array.from(activeDayKeys).sort();
+  let longestStreak = 0;
+  let runningStreak = 0;
+  let prevDate: Date | null = null;
+
+  for (const key of sortedKeys) {
+    const [y, m, d] = key.split('-').map(Number);
+    const currentDate = new Date(y, m - 1, d);
+    if (prevDate) {
+      const diffDays = Math.round((currentDate.getTime() - prevDate.getTime()) / 86_400_000);
+      if (diffDays === 1) {
+        runningStreak += 1;
+      } else {
+        runningStreak = 1;
+      }
+    } else {
+      runningStreak = 1;
+    }
+    if (runningStreak > longestStreak) {
+      longestStreak = runningStreak;
+    }
+    prevDate = currentDate;
+  }
+
+  const days: StudyActivityDayCell[] = [];
+  for (let offset = windowDays - 1; offset >= 0; offset -= 1) {
+    const cellDate = new Date(todayAnchor);
+    cellDate.setDate(todayAnchor.getDate() - offset);
+    const key = localDayKey(cellDate);
+    const count = countsByDay.get(key) ?? 0;
+    days.push({
+      dayKey: key,
+      shortWeekday: WEEKDAY_SHORT[cellDate.getDay()],
+      dayOfMonth: cellDate.getDate(),
+      monthShort: MONTH_SHORT[cellDate.getMonth()],
+      isToday: offset === 0,
+      isActive: count > 0,
+      inCurrentStreak: streakDayKeys.has(key),
+      activityCount: count,
+    });
+  }
+
+  return {
+    currentStreak,
+    longestStreak: Math.max(longestStreak, currentStreak),
+    totalActiveDays: activeDayKeys.size,
+    isTodayActive,
+    isStreakAtRiskToday,
+    days,
+  };
+}
+
+/**
+ * Retrieves all recorded study activity timestamps from localStorage keys used by LearnMate JEE:
+ * - learnmate_study_activity_days_v1 (explicit daily check-ins & session logs)
+ * - learnmate_documents_v1 (lastStudiedAt, createdAt)
+ * - learnmate_quiz_attempts_v1 (completedAt)
+ * - learnmate_focus_sessions_v1 (completedAt)
+ * - learnmate_concept_attempts_v1 (timestamp)
+ * - learnmate_handwritten_notes_v1 (updatedAt)
+ */
+export function getStudyActivityDatesFromLocalStorage(
+  storage: Pick<Storage, 'getItem'> | null = typeof window !== 'undefined' ? window.localStorage : null
+): Date[] {
+  const dates: Date[] = [];
+  if (!storage) return dates;
+
+  const pushValidDate = (val: unknown) => {
+    if (!val) return;
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      const [y, m, d] = val.split('-').map(Number);
+      const parsed = new Date(y, m - 1, d, 12, 0, 0);
+      if (!Number.isNaN(parsed.getTime())) dates.push(parsed);
+      return;
+    }
+    if (typeof val === 'string' || typeof val === 'number') {
+      const parsed = new Date(val);
+      if (!Number.isNaN(parsed.getTime())) dates.push(parsed);
+    }
+  };
+
+  try {
+    const checkinsRaw = storage.getItem(STUDY_ACTIVITY_CHECKIN_STORAGE_KEY);
+    if (checkinsRaw) {
+      const parsed = JSON.parse(checkinsRaw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(pushValidDate);
+      }
+    }
+  } catch {
+    // Ignore malformed JSON
+  }
+
+  const collectionKeys: Array<{ key: string; fields: string[] }> = [
+    { key: 'learnmate_documents_v1', fields: ['lastStudiedAt', 'createdAt'] },
+    { key: 'learnmate_quiz_attempts_v1', fields: ['completedAt', 'timestamp'] },
+    { key: 'learnmate_focus_sessions_v1', fields: ['completedAt'] },
+    { key: 'learnmate_concept_attempts_v1', fields: ['timestamp'] },
+    { key: 'learnmate_handwritten_notes_v1', fields: ['updatedAt', 'createdAt'] },
+  ];
+
+  for (const { key, fields } of collectionKeys) {
+    try {
+      const raw = storage.getItem(key);
+      if (!raw) continue;
+      const items = JSON.parse(raw);
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        for (const field of fields) {
+          pushValidDate((item as Record<string, unknown>)[field]);
+        }
+      }
+    } catch {
+      // Ignore malformed JSON
+    }
+  }
+
+  return dates;
+}
+
+/**
+ * Records a study check-in for the given date in localStorage so consecutive study days persist across reloads.
+ */
+export function recordDailyStudyCheckIn(
+  date: Date = new Date(),
+  storage: Pick<Storage, 'getItem' | 'setItem'> | null = typeof window !== 'undefined' ? window.localStorage : null
+): string[] {
+  if (!storage) return [];
+  const dayKey = localDayKey(date);
+  let existing: string[] = [];
+  try {
+    const raw = storage.getItem(STUDY_ACTIVITY_CHECKIN_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        existing = parsed.filter((v): v is string => typeof v === 'string');
+      }
+    }
+  } catch {
+    existing = [];
+  }
+
+  if (!existing.includes(dayKey)) {
+    existing.push(dayKey);
+  }
+  const deduped = Array.from(new Set(existing)).sort();
+  try {
+    storage.setItem(STUDY_ACTIVITY_CHECKIN_STORAGE_KEY, JSON.stringify(deduped));
+  } catch {
+    // Ignore quota errors
+  }
+  return deduped;
+}
+

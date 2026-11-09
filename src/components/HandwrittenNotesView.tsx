@@ -161,30 +161,38 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
     }
   };
 
+  const [sheetSurfaceMode, setSheetSurfaceMode] = useState<'warm_paper' | 'night_slate'>('warm_paper');
+  const useDarkSheet = isDark && sheetSurfaceMode === 'night_slate';
+
   const currentNotebookPage =
     activeNoteDoc.pages[
       Math.min(activeNotebookPageIndex, Math.max(0, activeNoteDoc.pages.length - 1))
     ] || activeNoteDoc.pages[0];
 
-  const inkTextClass =
-    inkColor === 'emerald_notes'
-      ? 'text-emerald-950 dark:text-emerald-200'
+  const inkTextClass = useDarkSheet
+    ? inkColor === 'emerald_notes'
+      ? 'text-emerald-200'
       : inkColor === 'navy_pen'
-        ? 'text-slate-900 dark:text-slate-100'
-        : 'text-indigo-950 dark:text-indigo-100';
+        ? 'text-slate-100'
+        : 'text-indigo-100'
+    : inkColor === 'emerald_notes'
+      ? 'text-[#064E3B]'
+      : inkColor === 'navy_pen'
+        ? 'text-[#0F172A]'
+        : 'text-[#1E1B4B]';
 
   const paperBackgroundStyle =
     notebookStyle === 'ruled' || notebookStyle === 'cornell'
-      ? isDark
-        ? 'bg-[linear-gradient(to_bottom,transparent_31px,rgba(99,102,241,0.16)_32px)] bg-[size:100%_32px] bg-slate-900'
-        : 'bg-[linear-gradient(to_bottom,transparent_31px,rgba(59,130,246,0.18)_32px)] bg-[size:100%_32px] bg-[#FEFDF8]'
+      ? useDarkSheet
+        ? 'bg-[linear-gradient(to_bottom,transparent_31px,rgba(99,102,241,0.16)_32px)] bg-[size:100%_32px] bg-[#121A2E]'
+        : 'bg-[linear-gradient(to_bottom,transparent_31px,rgba(59,130,246,0.18)_32px)] bg-[size:100%_32px] bg-[#FEFDF8] keep-white'
       : notebookStyle === 'grid'
-        ? isDark
-          ? 'bg-[linear-gradient(to_right,rgba(148,163,184,0.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.12)_1px,transparent_1px)] bg-[size:24px_24px] bg-slate-900'
-          : 'bg-[linear-gradient(to_right,rgba(59,130,246,0.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(59,130,246,0.12)_1px,transparent_1px)] bg-[size:24px_24px] bg-[#FEFDF8]'
-        : isDark
-          ? 'bg-slate-900'
-          : 'bg-[#FEFDF8]';
+        ? useDarkSheet
+          ? 'bg-[linear-gradient(to_right,rgba(148,163,184,0.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.12)_1px,transparent_1px)] bg-[size:24px_24px] bg-[#121A2E]'
+          : 'bg-[linear-gradient(to_right,rgba(59,130,246,0.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(59,130,246,0.12)_1px,transparent_1px)] bg-[size:24px_24px] bg-[#FEFDF8] keep-white'
+        : useDarkSheet
+          ? 'bg-[#121A2E]'
+          : 'bg-[#FEFDF8] keep-white';
 
   return (
     <div data-testid="handwritten-notes-view" className="space-y-6">
@@ -361,6 +369,24 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
             </select>
           </div>
 
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-muted dark:text-slate-400 mb-1">
+              Sheet Surface
+            </label>
+            <select
+              aria-label="Notebook sheet surface color"
+              data-testid="hw-sheet-surface-select"
+              value={sheetSurfaceMode}
+              onChange={(e) =>
+                setSheetSurfaceMode(e.target.value as 'warm_paper' | 'night_slate')
+              }
+              className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100"
+            >
+              <option value="warm_paper">Warm Ivory Paper (#FEFDF8)</option>
+              <option value="night_slate">Night Owl Slate Sheet</option>
+            </select>
+          </div>
+
           {workflowSource !== 'revision_sheet' && (
             <div className="flex items-center gap-2">
               <div>
@@ -445,23 +471,31 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
       {currentNotebookPage && (
         <div
           data-testid="handwritten-notebook-canvas"
-          className={`relative rounded-3xl border-2 border-amber-200/80 dark:border-slate-700 shadow-md overflow-hidden ${paperBackgroundStyle}`}
+          className={`relative rounded-3xl border-2 ${
+            useDarkSheet ? 'border-slate-700' : 'border-amber-200/80'
+          } shadow-md overflow-hidden ${paperBackgroundStyle}`}
         >
           {/* Left Vertical Red Margin Rule */}
           <div
-            className={`hidden sm:block absolute top-0 bottom-0 w-[2px] bg-rose-400/60 dark:bg-rose-500/40 ${
-              notebookStyle === 'cornell' ? 'left-44' : 'left-14'
-            }`}
+            className={`hidden sm:block absolute top-0 bottom-0 w-[2px] ${
+              useDarkSheet ? 'bg-rose-500/40' : 'bg-rose-400/60'
+            } ${notebookStyle === 'cornell' ? 'left-44' : 'left-14'}`}
           />
 
           {/* Notebook Top Header */}
           <div
-            className={`px-5 sm:px-8 pt-6 pb-4 border-b-2 border-indigo-900/20 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+            className={`px-5 sm:px-8 pt-6 pb-4 border-b-2 ${
+              useDarkSheet ? 'border-slate-700' : 'border-indigo-900/20'
+            } flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
               notebookStyle === 'cornell' ? 'sm:pl-48' : 'sm:pl-20'
             }`}
           >
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-rose-600 dark:text-rose-400">
+              <div
+                className={`text-[10px] font-bold uppercase tracking-widest ${
+                  useDarkSheet ? 'text-rose-400' : 'text-rose-600'
+                }`}
+              >
                 AI-Generated Handwritten-Style Study Notes · {activeNoteDoc.subject}
               </div>
               <h3
@@ -470,8 +504,14 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                 {activeNoteDoc.title}
               </h3>
             </div>
-            <div className="flex items-center gap-2 text-xs font-mono text-muted dark:text-slate-400">
-              <span className="px-2.5 py-1 rounded-lg bg-amber-100/80 dark:bg-slate-800 text-amber-900 dark:text-amber-300 font-bold">
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <span
+                className={`px-2.5 py-1 rounded-lg font-bold ${
+                  useDarkSheet
+                    ? 'bg-slate-800 text-amber-300'
+                    : 'bg-amber-100/90 text-amber-950'
+                }`}
+              >
                 Sheet {currentNotebookPage.pageNumber}/{activeNoteDoc.pages.length}
               </span>
             </div>
@@ -490,18 +530,30 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                 {/* Cornell Left Cue Column */}
                 {notebookStyle === 'cornell' && (
                   <div className="sm:col-span-3 pr-3 space-y-2 border-b sm:border-b-0 border-rose-200/60 pb-2 sm:pb-0">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-300">
+                    <div
+                      className={`text-[11px] font-bold uppercase tracking-wider ${
+                        useDarkSheet ? 'text-rose-300' : 'text-rose-700'
+                      }`}
+                    >
                       Cue / Recall Margin
                     </div>
                     {sec.marginCallout && (
-                      <div className="p-2.5 rounded-xl bg-amber-100/80 dark:bg-amber-950/50 border border-amber-300/70 dark:border-amber-800 text-xs font-serif italic text-amber-950 dark:text-amber-200">
+                      <div
+                        className={`p-2.5 rounded-xl border text-xs font-serif italic ${
+                          useDarkSheet
+                            ? 'bg-amber-950/50 border-amber-800 text-amber-200'
+                            : 'bg-amber-100/85 border-amber-300/80 text-amber-950'
+                        }`}
+                      >
                         <MathText text={sec.marginCallout} />
                       </div>
                     )}
                     <button
                       type="button"
                       onClick={() => onNavigateToPage?.(sec.sourcePage)}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-brand dark:text-indigo-400 hover:underline cursor-pointer"
+                      className={`inline-flex items-center gap-1 text-[11px] font-bold hover:underline cursor-pointer ${
+                        useDarkSheet ? 'text-indigo-400' : 'text-indigo-700'
+                      }`}
                     >
                       <BookOpen className="w-3 h-3" />
                       <span>{sec.sourceLabel}</span>
@@ -512,14 +564,22 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                 {/* Main Handwritten Section Body */}
                 <div className={notebookStyle === 'cornell' ? 'sm:col-span-9 space-y-3.5' : 'space-y-3.5'}>
                   {/* Underlined Heading + Citation */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-amber-400/70 dark:border-amber-500/40 pb-1">
+                  <div
+                    className={`flex flex-wrap items-center justify-between gap-2 border-b-2 pb-1 ${
+                      useDarkSheet ? 'border-amber-500/40' : 'border-amber-400/70'
+                    }`}
+                  >
                     <h4 className={`font-serif italic text-lg font-bold ${inkTextClass}`}>
                       <MathText text={sec.heading} variant="inline" />
                     </h4>
                     <button
                       type="button"
                       onClick={() => onNavigateToPage?.(sec.sourcePage)}
-                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold text-brand dark:text-indigo-300 cursor-pointer"
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md border text-[11px] font-semibold cursor-pointer ${
+                        useDarkSheet
+                          ? 'bg-indigo-950/70 border-indigo-800 text-indigo-300'
+                          : 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                      }`}
                     >
                       <BookOpen className="w-3 h-3" />
                       <span>{sec.sourceLabel}</span>
@@ -529,13 +589,21 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                   {/* Highlighted Key Terms Strip */}
                   {sec.highlightedTerms.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                      <span
+                        className={`text-[11px] font-bold uppercase tracking-wider ${
+                          useDarkSheet ? 'text-amber-300' : 'text-amber-900'
+                        }`}
+                      >
                         Highlighted Terms:
                       </span>
                       {sec.highlightedTerms.map((term, tIdx) => (
                         <span
                           key={tIdx}
-                          className="px-2.5 py-0.5 rounded-md bg-yellow-200/85 dark:bg-yellow-500/20 text-slate-900 dark:text-yellow-100 text-xs font-serif italic font-semibold shadow-2xs"
+                          className={`px-2.5 py-0.5 rounded-md text-xs font-serif italic font-semibold shadow-2xs ${
+                            useDarkSheet
+                              ? 'bg-yellow-500/20 text-yellow-100'
+                              : 'bg-yellow-200/90 text-[#0F172A]'
+                          }`}
                         >
                           <MathText text={term} variant="inline" />
                         </span>
@@ -547,7 +615,13 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                   <ul className={`space-y-2 font-serif text-sm sm:text-base leading-relaxed ${inkTextClass}`}>
                     {sec.bulletPoints.map((bp, bIdx) => (
                       <li key={bIdx} className="flex items-start gap-2.5">
-                        <span className="font-bold text-brand dark:text-indigo-400 mt-0.5">✎</span>
+                        <span
+                          className={`font-bold mt-0.5 ${
+                            useDarkSheet ? 'text-indigo-400' : 'text-indigo-700'
+                          }`}
+                        >
+                          ✎
+                        </span>
                         <div className="flex-1">
                           <MathText text={bp} />
                         </div>
@@ -562,12 +636,24 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                         <div
                           key={fIdx}
                           data-testid={`hw-formula-box-${fIdx}`}
-                          className="p-3.5 rounded-2xl border-2 border-indigo-600/50 dark:border-indigo-400/50 bg-indigo-50/70 dark:bg-indigo-950/40 space-y-1 shadow-2xs"
+                          className={`p-3.5 rounded-2xl border-2 space-y-1 shadow-2xs ${
+                            useDarkSheet
+                              ? 'border-indigo-400/50 bg-indigo-950/40 text-slate-100'
+                              : 'border-indigo-600/50 bg-indigo-50/85 text-[#0F172A]'
+                          }`}
                         >
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-brand dark:text-indigo-300">
+                          <div
+                            className={`text-[10px] font-bold uppercase tracking-wider ${
+                              useDarkSheet ? 'text-indigo-300' : 'text-indigo-700'
+                            }`}
+                          >
                             ★ Boxed Formula · {f.label}
                           </div>
-                          <div className="text-xs sm:text-sm font-semibold text-ink dark:text-slate-100 overflow-x-auto">
+                          <div
+                            className={`text-xs sm:text-sm font-semibold overflow-x-auto ${
+                              useDarkSheet ? 'text-slate-100' : 'text-[#0F172A]'
+                            }`}
+                          >
                             <MathText text={f.latex} />
                           </div>
                         </div>
@@ -577,8 +663,18 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
 
                   {/* Exam Trap Warning Callout */}
                   {sec.examTrapWarning && (
-                    <div className="p-3 rounded-2xl bg-rose-50/90 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 flex items-start gap-2.5 text-xs text-rose-900 dark:text-rose-200">
-                      <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                    <div
+                      className={`p-3 rounded-2xl border flex items-start gap-2.5 text-xs ${
+                        useDarkSheet
+                          ? 'bg-rose-950/40 border-rose-800 text-rose-200'
+                          : 'bg-rose-50/95 border-rose-300 text-rose-950'
+                      }`}
+                    >
+                      <AlertTriangle
+                        className={`w-4 h-4 shrink-0 mt-0.5 ${
+                          useDarkSheet ? 'text-rose-400' : 'text-rose-600'
+                        }`}
+                      />
                       <div>
                         <span className="font-bold uppercase tracking-wider">JEE Exam Trap Caution: </span>
                         <MathText text={sec.examTrapWarning} variant="inline" />
@@ -589,12 +685,16 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                   {/* Labeled Diagram Sketch */}
                   {sec.diagramSpec && (
                     <div className="pt-2">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-muted dark:text-slate-400 mb-1.5">
+                      <div
+                        className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 ${
+                          useDarkSheet ? 'text-slate-400' : 'text-slate-600'
+                        }`}
+                      >
                         Notebook Diagram Sketch ({sec.diagramSpec.title})
                       </div>
                       <DiagramRenderer
                         spec={sec.diagramSpec}
-                        isDarkTheme={isDark}
+                        isDarkTheme={useDarkSheet}
                         onNavigateToPage={onNavigateToPage}
                       />
                     </div>

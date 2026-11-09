@@ -626,7 +626,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <button
                       type="button"
                       onClick={onOpenDashboard}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-brand hover:bg-indigo-50 cursor-pointer"
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-white keep-white px-5 py-3 text-sm font-semibold text-[#4F46E5] hover:bg-indigo-50 cursor-pointer"
                     >
                       Open my dashboard
                       <ArrowRight className="h-4 w-4" />
@@ -636,7 +636,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       <button
                         type="button"
                         onClick={onSignUp}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-brand hover:bg-indigo-50 cursor-pointer"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-white keep-white px-5 py-3 text-sm font-semibold text-[#4F46E5] hover:bg-indigo-50 cursor-pointer"
                       >
                         Create free account
                         <ArrowRight className="h-4 w-4" />

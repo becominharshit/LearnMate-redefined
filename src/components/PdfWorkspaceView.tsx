@@ -473,7 +473,7 @@ export const PdfWorkspaceView: React.FC<PdfWorkspaceViewProps> = ({
     const parts = paragraph.split(regex);
     return parts.map((part, i) =>
       part.toLowerCase() === q.toLowerCase() ? (
-        <mark key={`${pIdx}-${i}`} className="bg-amber-200 text-slate-900 px-1 rounded font-semibold">
+        <mark key={`${pIdx}-${i}`} className="bg-amber-200 text-slate-900 keep-white px-1 rounded font-semibold">
           {part}
         </mark>
       ) : (
@@ -531,7 +531,7 @@ export const PdfWorkspaceView: React.FC<PdfWorkspaceViewProps> = ({
                 }
               }}
               data-testid={`pdf-real-canvas-${page.pageNumber}`}
-              className="w-full h-auto block select-none pointer-events-none"
+              className="w-full h-auto block select-none pointer-events-none keep-white"
             />
           </div>
         ) : (
@@ -799,7 +799,7 @@ export const PdfWorkspaceView: React.FC<PdfWorkspaceViewProps> = ({
       className="space-y-4 pb-10"
     >
       {/* Workspace Header & Action Bar */}
-      <div className="lm-card p-4 sm:p-5 bg-gradient-to-r from-white via-blue-50/40 to-indigo-50/30 border border-slate-200/80 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="lm-card p-4 sm:p-5 bg-gradient-to-r from-white via-blue-50/40 to-indigo-50/30 dark:from-[#121A2E] dark:via-[#162038] dark:to-[#1A2440] border border-slate-200/80 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3.5">
           <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
             <FileCheck2 className="w-5 h-5" />

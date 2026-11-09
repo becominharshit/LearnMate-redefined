@@ -905,7 +905,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
 
             {/* Topic Jump Bar */}
             {activeDocument.topics.length > 0 && (
-              <div className="px-4 py-2 bg-[#FBFCFF] border-b border-line flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              <div className="px-4 py-2 bg-canvas dark:bg-[#162038] border-b border-line flex items-center gap-1.5 overflow-x-auto no-scrollbar">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-muted shrink-0 mr-1">
                   Topics:
                 </span>
@@ -1000,7 +1000,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
                           key={idx}
                           className={`rounded-lg transition-colors ${
                             isHighlighted
-                              ? 'bg-[#FEF9C3] ring-1 ring-amber-300 px-2.5 py-1.5 -mx-2'
+                              ? 'bg-[#FEF9C3] dark:bg-amber-500/20 dark:text-amber-100 ring-1 ring-amber-300 dark:ring-amber-500/40 px-2.5 py-1.5 -mx-2'
                               : ''
                           }`}
                         >
@@ -1255,7 +1255,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
                 return (
                   <article
                     key={msg.id}
-                    className="bg-[#FBFCFF] rounded-2xl border border-line p-4 space-y-3"
+                    className="bg-canvas dark:bg-[#162038] rounded-2xl border border-line p-4 space-y-3"
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span
@@ -1656,7 +1656,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
                   </span>
                 </div>
 
-                <div className="p-5 sm:p-6 rounded-2xl bg-[#FBFCFF] border border-line space-y-4">
+                <div className="p-5 sm:p-6 rounded-2xl bg-canvas dark:bg-[#162038] border border-line space-y-4">
                   <MathText
                     text={activeDiagnosticQuestion.question}
                     className="lm-quiz-question"
@@ -1788,7 +1788,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
                   }}
                   className={`text-xs px-3 py-1.5 rounded-xl border font-semibold transition-all cursor-pointer ${
                     isFocused
-                      ? 'bg-ink text-white border-ink'
+                      ? 'bg-brand text-white border-brand'
                       : 'bg-white text-slate-600 border-line hover:bg-canvas'
                   }`}
                 >

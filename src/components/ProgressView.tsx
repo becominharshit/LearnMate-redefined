@@ -28,6 +28,7 @@ import {
   JeeSubject,
   classifyJeeSubject,
   computeStudyStreak,
+  getStudyActivityDatesFromLocalStorage,
 } from '../utils/jeeSubjects';
 import { studyStorage } from '../services/storageService';
 
@@ -79,6 +80,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
   const streak = useMemo(
     () =>
       computeStudyStreak([
+        ...getStudyActivityDatesFromLocalStorage(),
         ...attempts.map((a) => new Date(a.completedAt)),
         ...allFocusSessions.map((s) => new Date(s.completedAt)),
       ]),
@@ -314,7 +316,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
         <>
           {/* 4 Summary Metric Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-2xl bg-[#F3F7FE] border border-blue-100 space-y-1">
+            <div className="p-5 rounded-2xl bg-blue-50 dark:bg-blue-950/35 border border-blue-100 space-y-1">
               <span className="text-xs font-semibold text-slate-500">Total Completed Quizzes</span>
               <p className="text-3xl font-extrabold text-slate-900 tabular-nums">
                 {summary.totalAttempts}
@@ -349,7 +351,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#FDF4F4] border border-red-100 space-y-1">
+            <div className="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/35 border border-red-100 space-y-1">
               <span className="text-xs font-semibold text-slate-500">Topic Mastery Status</span>
               <p className="text-3xl font-extrabold text-slate-900 tabular-nums">
                 {summary.masteredTopicsCount} Mastered

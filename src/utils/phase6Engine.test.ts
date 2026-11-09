@@ -23,6 +23,14 @@ import {
   generateHandwrittenNotesPdfBytes,
   generateStudentDataExportPdfBytes,
 } from './pdfGenerator.ts';
+import {
+  computeStudyActivityStreakSummary,
+  getStudyActivityDatesFromLocalStorage,
+  recordDailyStudyCheckIn,
+  STUDY_ACTIVITY_CHECKIN_STORAGE_KEY,
+} from './jeeSubjects.ts';
+import fs from 'node:fs';
+import path from 'node:path';
 
 test('Phase 6 Section 1: YouTube URL validation & 12-hour (720-min) marathon lecture chunking', () => {
   assert.equal(MAX_YOUTUBE_LECTURE_DURATION_SECONDS, 43_200);
@@ -342,3 +350,94 @@ test('Phase 6 Section 9: UTF-8 Byte-Size Enforcement for Firestore Safety', () =
   const truncated = truncateStringToUtf8Bytes(sample.repeat(100), 256);
   assert.ok(computeUtf8ByteSize(truncated) <= 256);
 });
+
+test('Streak Tracker: Consecutive days of study activity from localStorage & daily check-in', () => {
+  const store = new Map<string, string>();
+  const mockStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+  };
+
+  // Seed 3 consecutive days ending yesterday plus an older 4-day streak in localStorage
+  store.set(
+    'learnmate_documents_v1',
+    JSON.stringify([
+      { id: 'd1', lastStudiedAt: '2026-11-08T10:00:00.000Z', createdAt: '2026-11-06T09:00:00.000Z' },
+    ])
+  );
+  store.set(
+    'learnmate_quiz_attempts_v1',
+    JSON.stringify([
+      { id: 'q1', completedAt: '2026-11-07T14:30:00.000Z' },
+      { id: 'q2', completedAt: '2026-10-20T12:00:00.000Z' },
+      { id: 'q3', completedAt: '2026-10-21T12:00:00.000Z' },
+      { id: 'q4', completedAt: '2026-10-22T12:00:00.000Z' },
+      { id: 'q5', completedAt: '2026-10-23T12:00:00.000Z' },
+      { id: 'q6', completedAt: '2026-10-24T12:00:00.000Z' },
+    ])
+  );
+
+  const today = new Date(2026, 10, 9, 12, 0, 0); // 2026-11-09 local
+  const extractedBefore = getStudyActivityDatesFromLocalStorage(mockStorage);
+  assert.equal(extractedBefore.length, 8);
+
+  const summaryBefore = computeStudyActivityStreakSummary(extractedBefore, today, 14);
+  assert.equal(summaryBefore.currentStreak, 3); // Nov 6, 7, 8
+  assert.equal(summaryBefore.longestStreak, 5); // Oct 20-24
+  assert.equal(summaryBefore.isTodayActive, false);
+  assert.equal(summaryBefore.isStreakAtRiskToday, true);
+  assert.equal(summaryBefore.days.length, 14);
+
+  // Log today's check-in and verify streak increments to 4 consecutive days
+  const savedCheckins = recordDailyStudyCheckIn(today, mockStorage);
+  assert.ok(savedCheckins.includes('2026-11-09'));
+  assert.ok(store.get(STUDY_ACTIVITY_CHECKIN_STORAGE_KEY)?.includes('2026-11-09'));
+
+  const extractedAfter = getStudyActivityDatesFromLocalStorage(mockStorage);
+  const summaryAfter = computeStudyActivityStreakSummary(extractedAfter, today, 14);
+  assert.equal(summaryAfter.currentStreak, 4); // Nov 6, 7, 8, 9
+  assert.equal(summaryAfter.isTodayActive, true);
+  assert.equal(summaryAfter.isStreakAtRiskToday, false);
+});
+
+test('Dark Mode Repair Audit: Semantic Night Owl design tokens and .keep-white protection', () => {
+  const cssPath = path.resolve(process.cwd(), 'src/index.css');
+  const cssContent = fs.readFileSync(cssPath, 'utf-8');
+
+  const requiredTokens = [
+    '--bg-app',
+    '--bg-surface',
+    '--bg-elevated',
+    '--bg-muted',
+    '--bg-overlay',
+    '--text-primary',
+    '--text-secondary',
+    '--text-muted',
+    '--text-inverse',
+    '--border-default',
+    '--border-strong',
+    '--accent-primary',
+    '--accent-secondary',
+    '--status-success',
+    '--status-warning',
+    '--status-danger',
+    '--status-info',
+    '--code-bg',
+    '--math-fg',
+    '--diagram-bg',
+    '--diagram-stroke',
+    '--diagram-text',
+  ];
+
+  for (const token of requiredTokens) {
+    assert.ok(cssContent.includes(token), `Missing semantic design token ${token} in src/index.css`);
+  }
+
+  // Verify .keep-white protects notebook paper and PDF canvas from dark-mode text/math inversion
+  assert.ok(cssContent.includes('.katex:not(.keep-white):not(.keep-white *)'));
+  assert.ok(cssContent.includes('.keep-white .katex'));
+  assert.ok(cssContent.includes(':not(canvas):not(.keep-white)'));
+});
+

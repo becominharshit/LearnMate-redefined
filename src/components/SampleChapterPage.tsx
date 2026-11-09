@@ -296,7 +296,7 @@ export const SampleChapterPage: React.FC<SampleChapterPageProps> = ({
                 <button
                   type="button"
                   onClick={onOpenInLibrary}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-brand hover:bg-indigo-50 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white keep-white px-5 py-3 text-sm font-semibold text-[#4F46E5] hover:bg-indigo-50 cursor-pointer"
                 >
                   Open in my library
                   <ArrowRight className="h-4 w-4" />
@@ -305,7 +305,7 @@ export const SampleChapterPage: React.FC<SampleChapterPageProps> = ({
                 <button
                   type="button"
                   onClick={onAddToAccount}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-brand hover:bg-indigo-50 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white keep-white px-5 py-3 text-sm font-semibold text-[#4F46E5] hover:bg-indigo-50 cursor-pointer"
                 >
                   {isSignedIn ? 'Add this sample' : 'Sign in and add this sample'}
                   <ArrowRight className="h-4 w-4" />

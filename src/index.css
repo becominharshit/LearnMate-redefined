@@ -50,10 +50,32 @@
     --bg-subtle: #F1F5F9;
     --border-subtle: #E2E8F0;
     --text-primary: #0F172A;
-    --text-secondary: #64748B;
+    --text-secondary: #475569;
     --accent: #4F46E5;
     --accent-hover: #4338CA;
     --accent-light: #EEF2FF;
+
+    /* Standardized semantic theme tokens (Light Mode) */
+    --bg-app: #F6F7FB;
+    --bg-surface: #FFFFFF;
+    --bg-elevated: #F8FAFC;
+    --bg-muted: #F1F5F9;
+    --bg-overlay: rgba(15, 23, 42, 0.55);
+    --text-muted: #64748B;
+    --text-inverse: #FFFFFF;
+    --border-default: #E2E8F0;
+    --border-strong: #CBD5E1;
+    --accent-primary: #4F46E5;
+    --accent-secondary: #6366F1;
+    --status-success: #047857;
+    --status-warning: #D97706;
+    --status-danger: #DC2626;
+    --status-info: #2563EB;
+    --code-bg: #0F172A;
+    --math-fg: #0F172A;
+    --diagram-bg: #F8FAFC;
+    --diagram-stroke: #1E293B;
+    --diagram-text: #0F172A;
 
     /* "--font-serif" is kept as the heading font name for existing components. */
     --font-serif: 'Plus Jakarta Sans', 'DM Sans', ui-sans-serif, system-ui, sans-serif;
@@ -80,11 +102,33 @@
     --bg-subtle: #1A2440;
     --border-subtle: #26324F;
     --text-primary: #F8FAFC;
-    --text-secondary: #94A3B8;
+    --text-secondary: #CBD5E1;
     --accent: #818CF8;
     --accent-hover: #6366F1;
     --accent-light: rgba(99, 102, 241, 0.16);
     color-scheme: dark;
+
+    /* Standardized semantic theme tokens (Night Owl Dark Mode) */
+    --bg-app: #0B1020;
+    --bg-surface: #121A2E;
+    --bg-elevated: #162038;
+    --bg-muted: #1A2440;
+    --bg-overlay: rgba(2, 6, 23, 0.76);
+    --text-muted: #94A3B8;
+    --text-inverse: #0F172A;
+    --border-default: #26324F;
+    --border-strong: #334155;
+    --accent-primary: #818CF8;
+    --accent-secondary: #A5B4FC;
+    --status-success: #34D399;
+    --status-warning: #FBBF24;
+    --status-danger: #F87171;
+    --status-info: #60A5FA;
+    --code-bg: #090D1A;
+    --math-fg: #F8FAFC;
+    --diagram-bg: #0B1020;
+    --diagram-stroke: #E2E8F0;
+    --diagram-text: #F8FAFC;
 
     /* Semantic tokens for Night Owl mode */
     --color-ink: #F8FAFC;
@@ -96,24 +140,24 @@
     --color-soft: #1A2440;
     --color-brand-soft: rgba(99, 102, 241, 0.18);
     --color-brand: #818CF8;
-    --color-brand-strong: #A5B4FC;
+    --color-brand-strong: #6366F1;
     --color-brand-200: rgba(129, 140, 248, 0.35);
 
     /* JEE Subject soft colors for dark background */
     --color-physics: #60A5FA;
-    --color-physics-soft: rgba(37, 99, 235, 0.2);
+    --color-physics-soft: rgba(37, 99, 235, 0.22);
     --color-chemistry: #34D399;
-    --color-chemistry-soft: rgba(5, 150, 105, 0.2);
+    --color-chemistry-soft: rgba(5, 150, 105, 0.22);
     --color-maths: #FB923C;
-    --color-maths-soft: rgba(234, 88, 12, 0.2);
+    --color-maths-soft: rgba(234, 88, 12, 0.22);
 
     /* Status alert soft colors */
     --color-success: #34D399;
-    --color-success-soft: rgba(4, 120, 87, 0.2);
+    --color-success-soft: rgba(4, 120, 87, 0.22);
     --color-danger: #F87171;
-    --color-danger-soft: rgba(220, 38, 38, 0.2);
+    --color-danger-soft: rgba(220, 38, 38, 0.22);
     --color-warning: #FBBF24;
-    --color-warning-soft: rgba(217, 119, 6, 0.2);
+    --color-warning-soft: rgba(217, 119, 6, 0.22);
   }
 
   body {
@@ -135,6 +179,12 @@
 
   button, input, select, textarea {
     font-family: var(--font-sans);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
   }
 
   :focus-visible {
@@ -434,55 +484,169 @@ html[data-theme="dark"] .lm-sticky-green, html.dark .lm-sticky-green {
   color: #BBF7D0 !important;
 }
 
-/* KaTeX mathematical formulas & chemistry in Night Owl Mode */
-html[data-theme="dark"] .katex,
-html.dark .katex {
-  color: var(--text-primary);
+/* KaTeX mathematical formulas & chemistry in Night Owl Mode (preserves dark ink inside .keep-white paper sheets) */
+html[data-theme="dark"] .katex:not(.keep-white):not(.keep-white *),
+html.dark .katex:not(.keep-white):not(.keep-white *) {
+  color: var(--math-fg);
 }
 
-/* Surface & Border Harmonization in Night Owl Mode (retains PDF canvas original colors) */
-html[data-theme="dark"] .bg-white:not(canvas):not(.keep-white),
-html.dark .bg-white:not(canvas):not(.keep-white) {
+.keep-white .katex {
+  color: #0F172A;
+}
+
+/* Surface & Border Harmonization in Night Owl Mode (retains PDF canvas and .keep-white original colors) */
+html[data-theme="dark"] .bg-white:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-white\/95:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white\/95:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-white\/90:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white\/90:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-white\/85:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white\/85:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-white\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-white\/75:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white\/75:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-white\/70:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white\/70:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-white\/60:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-white\/60:not(canvas):not(.keep-white):not(.keep-white *) {
   background-color: var(--bg-card);
 }
 
-html[data-theme="dark"] .bg-slate-50:not(canvas):not(.keep-white),
-html.dark .bg-slate-50:not(canvas):not(.keep-white),
-html[data-theme="dark"] .bg-slate-100:not(canvas):not(.keep-white),
-html.dark .bg-slate-100:not(canvas):not(.keep-white) {
+html[data-theme="dark"] .bg-slate-50:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-50:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-50\/90:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-50\/90:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-50\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-50\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-50\/70:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-50\/70:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-50\/60:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-50\/60:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-50\/50:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-50\/50:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-100:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-100:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-100\/90:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-100\/90:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-100\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-100\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-100\/70:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-100\/70:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-100\/60:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-100\/60:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-200:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-200:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-200\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-200\/80:not(canvas):not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .bg-slate-200\/70:not(canvas):not(.keep-white):not(.keep-white *),
+html.dark .bg-slate-200\/70:not(canvas):not(.keep-white):not(.keep-white *) {
   background-color: var(--bg-subtle);
 }
 
-html[data-theme="dark"] .border-line,
-html.dark .border-line,
-html[data-theme="dark"] .border-slate-200,
-html.dark .border-slate-200,
-html[data-theme="dark"] .border-slate-200\/90,
-html.dark .border-slate-200\/90,
-html[data-theme="dark"] .border-slate-200\/80,
-html.dark .border-slate-200\/80,
-html[data-theme="dark"] .border-slate-100,
-html.dark .border-slate-100 {
+/* Pastel Callout & Badge Surface Harmonization in Night Owl Mode */
+html[data-theme="dark"] :is(.bg-amber-50, .bg-amber-50\/90, .bg-amber-50\/80, .bg-amber-50\/70, .bg-amber-50\/60, .bg-amber-100, .bg-amber-100\/80, .bg-yellow-50, .bg-yellow-100):not(.keep-white):not(.keep-white *),
+html.dark :is(.bg-amber-50, .bg-amber-50\/90, .bg-amber-50\/80, .bg-amber-50\/70, .bg-amber-50\/60, .bg-amber-100, .bg-amber-100\/80, .bg-yellow-50, .bg-yellow-100):not(.keep-white):not(.keep-white *) {
+  background-color: rgba(217, 119, 6, 0.16);
+}
+
+html[data-theme="dark"] :is(.bg-emerald-50, .bg-emerald-50\/80, .bg-emerald-50\/70, .bg-emerald-50\/40, .bg-emerald-50\/30, .bg-emerald-100, .bg-emerald-100\/80, .bg-emerald-200, .bg-green-50, .bg-green-100):not(.keep-white):not(.keep-white *),
+html.dark :is(.bg-emerald-50, .bg-emerald-50\/80, .bg-emerald-50\/70, .bg-emerald-50\/40, .bg-emerald-50\/30, .bg-emerald-100, .bg-emerald-100\/80, .bg-emerald-200, .bg-green-50, .bg-green-100):not(.keep-white):not(.keep-white *) {
+  background-color: rgba(5, 150, 105, 0.18);
+}
+
+html[data-theme="dark"] :is(.bg-red-50, .bg-red-50\/70, .bg-red-50\/40, .bg-red-50\/30, .bg-red-100, .bg-rose-50, .bg-rose-50\/90, .bg-rose-50\/70, .bg-rose-50\/40, .bg-rose-100, .bg-rose-100\/80, .bg-rose-200):not(.keep-white):not(.keep-white *),
+html.dark :is(.bg-red-50, .bg-red-50\/70, .bg-red-50\/40, .bg-red-50\/30, .bg-red-100, .bg-rose-50, .bg-rose-50\/90, .bg-rose-50\/70, .bg-rose-50\/40, .bg-rose-100, .bg-rose-100\/80, .bg-rose-200):not(.keep-white):not(.keep-white *) {
+  background-color: rgba(220, 38, 38, 0.18);
+}
+
+html[data-theme="dark"] :is(.bg-blue-50, .bg-blue-50\/90, .bg-blue-50\/80, .bg-blue-50\/70, .bg-blue-50\/60, .bg-blue-50\/40, .bg-blue-100, .bg-blue-100\/80, .bg-sky-50, .bg-sky-100):not(.keep-white):not(.keep-white *),
+html.dark :is(.bg-blue-50, .bg-blue-50\/90, .bg-blue-50\/80, .bg-blue-50\/70, .bg-blue-50\/60, .bg-blue-50\/40, .bg-blue-100, .bg-blue-100\/80, .bg-sky-50, .bg-sky-100):not(.keep-white):not(.keep-white *) {
+  background-color: rgba(37, 99, 235, 0.18);
+}
+
+html[data-theme="dark"] :is(.bg-indigo-50, .bg-indigo-50\/80, .bg-indigo-50\/70, .bg-indigo-50\/50, .bg-indigo-100, .bg-violet-50, .bg-violet-100, .bg-purple-50, .bg-purple-50\/80, .bg-purple-100):not(.keep-white):not(.keep-white *),
+html.dark :is(.bg-indigo-50, .bg-indigo-50\/80, .bg-indigo-50\/70, .bg-indigo-50\/50, .bg-indigo-100, .bg-violet-50, .bg-violet-100, .bg-purple-50, .bg-purple-50\/80, .bg-purple-100):not(.keep-white):not(.keep-white *) {
+  background-color: rgba(99, 102, 241, 0.18);
+}
+
+/* Border Harmonization in Night Owl Mode */
+html[data-theme="dark"] :is(.border-line, .border-slate-200, .border-slate-200\/90, .border-slate-200\/80, .border-slate-100, .border-slate-300):not(.keep-white):not(.keep-white *),
+html.dark :is(.border-line, .border-slate-200, .border-slate-200\/90, .border-slate-200\/80, .border-slate-100, .border-slate-300):not(.keep-white):not(.keep-white *) {
   border-color: var(--border-subtle);
 }
 
-html[data-theme="dark"] .text-slate-900,
-html.dark .text-slate-900 {
+html[data-theme="dark"] :is(.border-amber-100, .border-amber-200, .border-amber-200\/80, .border-amber-300, .border-yellow-200):not(.keep-white):not(.keep-white *),
+html.dark :is(.border-amber-100, .border-amber-200, .border-amber-200\/80, .border-amber-300, .border-yellow-200):not(.keep-white):not(.keep-white *) {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+html[data-theme="dark"] :is(.border-emerald-100, .border-emerald-200, .border-emerald-300, .border-green-200):not(.keep-white):not(.keep-white *),
+html.dark :is(.border-emerald-100, .border-emerald-200, .border-emerald-300, .border-green-200):not(.keep-white):not(.keep-white *) {
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+html[data-theme="dark"] :is(.border-red-100, .border-red-200, .border-red-300, .border-rose-100, .border-rose-200, .border-rose-300):not(.keep-white):not(.keep-white *),
+html.dark :is(.border-red-100, .border-red-200, .border-red-300, .border-rose-100, .border-rose-200, .border-rose-300):not(.keep-white):not(.keep-white *) {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+html[data-theme="dark"] :is(.border-blue-100, .border-blue-200, .border-blue-300, .border-sky-200):not(.keep-white):not(.keep-white *),
+html.dark :is(.border-blue-100, .border-blue-200, .border-blue-300, .border-sky-200):not(.keep-white):not(.keep-white *) {
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+html[data-theme="dark"] :is(.border-indigo-100, .border-indigo-200, .border-indigo-300, .border-violet-200, .border-purple-200):not(.keep-white):not(.keep-white *),
+html.dark :is(.border-indigo-100, .border-indigo-200, .border-indigo-300, .border-violet-200, .border-purple-200):not(.keep-white):not(.keep-white *) {
+  border-color: rgba(129, 140, 248, 0.35);
+}
+
+/* Text Contrast Harmonization in Night Owl Mode (excludes .keep-white paper/canvas surfaces) */
+html[data-theme="dark"] .text-slate-900:not(.keep-white):not(.keep-white *),
+html.dark .text-slate-900:not(.keep-white):not(.keep-white *) {
   color: var(--text-primary);
 }
 
-html[data-theme="dark"] .text-slate-800,
-html.dark .text-slate-800,
-html[data-theme="dark"] .text-slate-700,
-html.dark .text-slate-700 {
+html[data-theme="dark"] .text-slate-800:not(.keep-white):not(.keep-white *),
+html.dark .text-slate-800:not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .text-slate-700:not(.keep-white):not(.keep-white *),
+html.dark .text-slate-700:not(.keep-white):not(.keep-white *) {
   color: var(--color-body);
 }
 
-html[data-theme="dark"] .text-slate-600,
-html.dark .text-slate-600,
-html[data-theme="dark"] .text-slate-500,
-html.dark .text-slate-500 {
-  color: var(--text-secondary);
+html[data-theme="dark"] .text-slate-600:not(.keep-white):not(.keep-white *),
+html.dark .text-slate-600:not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .text-slate-500:not(.keep-white):not(.keep-white *),
+html.dark .text-slate-500:not(.keep-white):not(.keep-white *),
+html[data-theme="dark"] .text-slate-400:not(.keep-white):not(.keep-white *),
+html.dark .text-slate-400:not(.keep-white):not(.keep-white *) {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] :is(.text-amber-700, .text-amber-800, .text-amber-900, .text-amber-950, .text-yellow-800, .text-yellow-900):not(.keep-white):not(.keep-white *),
+html.dark :is(.text-amber-700, .text-amber-800, .text-amber-900, .text-amber-950, .text-yellow-800, .text-yellow-900):not(.keep-white):not(.keep-white *) {
+  color: #FDE68A;
+}
+
+html[data-theme="dark"] :is(.text-emerald-700, .text-emerald-800, .text-emerald-900, .text-emerald-950, .text-green-700, .text-green-800, .text-green-900):not(.keep-white):not(.keep-white *),
+html.dark :is(.text-emerald-700, .text-emerald-800, .text-emerald-900, .text-emerald-950, .text-green-700, .text-green-800, .text-green-900):not(.keep-white):not(.keep-white *) {
+  color: #6EE7B7;
+}
+
+html[data-theme="dark"] :is(.text-red-700, .text-red-800, .text-red-900, .text-red-950, .text-rose-700, .text-rose-800, .text-rose-900, .text-rose-950):not(.keep-white):not(.keep-white *),
+html.dark :is(.text-red-700, .text-red-800, .text-red-900, .text-red-950, .text-rose-700, .text-rose-800, .text-rose-900, .text-rose-950):not(.keep-white):not(.keep-white *) {
+  color: #FCA5A5;
+}
+
+html[data-theme="dark"] :is(.text-blue-700, .text-blue-800, .text-blue-900, .text-blue-950, .text-sky-700, .text-sky-800, .text-sky-900):not(.keep-white):not(.keep-white *),
+html.dark :is(.text-blue-700, .text-blue-800, .text-blue-900, .text-blue-950, .text-sky-700, .text-sky-800, .text-sky-900):not(.keep-white):not(.keep-white *) {
+  color: #93C5FD;
+}
+
+html[data-theme="dark"] :is(.text-indigo-700, .text-indigo-800, .text-indigo-900, .text-indigo-950, .text-violet-700, .text-violet-800, .text-violet-900, .text-purple-700, .text-purple-800, .text-purple-900):not(.keep-white):not(.keep-white *),
+html.dark :is(.text-indigo-700, .text-indigo-800, .text-indigo-900, .text-indigo-950, .text-violet-700, .text-violet-800, .text-violet-900, .text-purple-700, .text-purple-800, .text-purple-900):not(.keep-white):not(.keep-white *) {
+  color: #C7D2FE;
 }
 
 html[data-theme="dark"] .hover\:bg-slate-50:hover,

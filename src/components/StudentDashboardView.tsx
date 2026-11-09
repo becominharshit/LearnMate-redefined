@@ -29,6 +29,7 @@ import type { ActiveTab } from './Navbar';
 import type { StudySubMode } from './StudyView';
 import { AddMaterialBox } from './AddMaterialBox';
 import type { AddMaterialMode } from './AddMaterialModal';
+import { StreakTracker } from './StreakTracker';
 
 interface StudentDashboardViewProps {
   studentName?: string;
@@ -103,6 +104,15 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
 
   const now = useMemo(() => new Date(), [documents]);
   const countdown = useMemo(() => getNextJeeCountdown(now), [now]);
+
+  const docActivityDates = useMemo(() => {
+    const dates: Date[] = [];
+    for (const doc of documents) {
+      if (doc.lastStudiedAt) dates.push(new Date(doc.lastStudiedAt));
+      if (doc.createdAt) dates.push(new Date(doc.createdAt));
+    }
+    return dates;
+  }, [documents]);
 
   const sortedDocs = useMemo(
     () =>
@@ -234,6 +244,9 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* Streak Tracker: Consecutive days of study activity retrieved from localStorage */}
+      <StreakTracker supplementalDates={docActivityDates} />
 
       {/* 2. Add Study Material Box at the top of Home */}
       <AddMaterialBox
