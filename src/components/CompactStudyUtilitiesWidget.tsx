@@ -81,14 +81,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
   const [calcHistory, setCalcHistory] = useState<Array<{ expr: string; res: string }>>([]);
 
   const calcResult = useMemo(() => {
-    let exprToEval = calcInput;
-    if (angleMode === 'DEG') {
-      exprToEval = exprToEval
-        .replace(/\bsin\s*\(([^()]+)\)/gi, 'sin(($1)*pi/180)')
-        .replace(/\bcos\s*\(([^()]+)\)/gi, 'cos(($1)*pi/180)')
-        .replace(/\btan\s*\(([^()]+)\)/gi, 'tan(($1)*pi/180)');
-    }
-    return evaluateScientificExpression(exprToEval);
+    return evaluateScientificExpression(calcInput, angleMode);
   }, [calcInput, angleMode]);
 
   const handleSaveToCalcHistory = () => {

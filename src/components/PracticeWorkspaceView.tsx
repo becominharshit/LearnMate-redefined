@@ -1633,6 +1633,70 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         durationMinutes={activeCbtPaper?.durationMinutes || 180}
         sourceNoteTitle={currentDoc?.title}
         onSaveResult={(res) => {
+          const mappedQuestions = (res.questions || []).map((q, idx) => {
+            const rawOpts = q.options && q.options.length >= 4
+              ? q.options
+              : [
+                  String(q.correctNumericalValue ?? 0),
+                  String((q.correctNumericalValue ?? 0) + 1),
+                  String((q.correctNumericalValue ?? 0) - 1),
+                  String((q.correctNumericalValue ?? 0) + 2),
+                ];
+            const tupleOpts: [string, string, string, string] = [
+              rawOpts[0] ?? 'A',
+              rawOpts[1] ?? 'B',
+              rawOpts[2] ?? 'C',
+              rawOpts[3] ?? 'D',
+            ];
+            return {
+              id: q.id,
+              topic: q.topic,
+              question: q.questionText,
+              options: tupleOpts,
+              correctIndex: q.correctOptionIndex ?? 0,
+              explanation: q.solutionSteps,
+              sourcePage: idx + 1,
+              sourceQuote: q.keyFormula || q.topic,
+              difficulty: q.difficulty.toLowerCase() as 'easy' | 'medium' | 'hard',
+            };
+          });
+          const mappedAnswers = (res.questions || []).map((q, idx) => {
+            const r = res.questionResponses[q.id];
+            const isAttempted =
+              Boolean(r) && (r.status === 'answered' || r.status === 'answered_and_marked');
+            if (!isAttempted || !r) {
+              return {
+                questionId: q.id,
+                selectedIndex: -1,
+                isCorrect: false,
+                topic: q.topic,
+                sourcePage: idx + 1,
+              };
+            }
+            if (q.format === 'numerical') {
+              const numVal = r.numericalInput.trim() !== '' ? Number(r.numericalInput) : NaN;
+              const tol = q.numericalTolerance ?? 0.05;
+              const isNumCorrect =
+                Number.isFinite(numVal) &&
+                q.correctNumericalValue !== undefined &&
+                Math.abs(numVal - q.correctNumericalValue) <= tol;
+              return {
+                questionId: q.id,
+                selectedIndex: isNumCorrect ? 0 : 1,
+                isCorrect: isNumCorrect,
+                topic: q.topic,
+                sourcePage: idx + 1,
+              };
+            }
+            const selIdx = r.selectedOptionIndex ?? -1;
+            return {
+              questionId: q.id,
+              selectedIndex: selIdx,
+              isCorrect: selIdx === (q.correctOptionIndex ?? 0),
+              topic: q.topic,
+              sourcePage: idx + 1,
+            };
+          });
           const attempt: QuizAttempt = {
             id: res.id,
             documentId: currentDoc?.id || res.examVariant,
@@ -1640,13 +1704,13 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             mode: 'jee_simulator',
             examType: res.examVariant === 'jee_advanced' ? 'jee_advanced' : 'jee_main',
             examTitle: res.examTitle,
-            questions: [],
-            answers: [],
+            questions: mappedQuestions,
+            answers: mappedAnswers,
             score: res.correctCount,
             totalQuestions: res.totalQuestions,
             percentage: res.accuracyPercentage,
-            weakTopics: [],
-            strongTopics: [],
+            weakTopics: res.weakTopics || [],
+            strongTopics: res.strongTopics || [],
             completedAt: res.completedAt,
             negativeMarkingUsed: true,
             rawMarks: res.marksObtained,

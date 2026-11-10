@@ -116,6 +116,14 @@ export const StudyView: React.FC<StudyViewProps> = ({
     undefined
   );
   const [subMode, setSubMode] = useState<StudySubMode>(initialSubMode);
+
+  useEffect(() => {
+    setHubSection(initialHubSection);
+  }, [initialHubSection]);
+
+  useEffect(() => {
+    setSubMode(initialSubMode);
+  }, [initialSubMode]);
   const [mobilePane, setMobilePane] = useState<'read' | 'ask'>('read');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [visitedPages, setVisitedPages] = useState<number[]>([1]);

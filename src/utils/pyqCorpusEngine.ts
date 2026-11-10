@@ -128,7 +128,7 @@ export interface PyqErrorReportItem {
 
 const PYQ_ERROR_REPORTS_STORAGE_KEY = 'learnmate_pyq_error_reports_v1';
 
-export const MARKING_RULES: Record<string, PyqMarkingRule> = {
+const BASE_MARKING_RULES: Record<string, PyqMarkingRule> = {
   jee_main_mcq: {
     id: 'jee_main_mcq_v2025',
     format: 'single_mcq',
@@ -176,6 +176,41 @@ export const MARKING_RULES: Record<string, PyqMarkingRule> = {
     description: '+4 if the correct non-negative integer is entered; 0 in all other cases (no negative marking).',
   },
 };
+
+export const MARKING_RULES: Record<string, PyqMarkingRule> = {
+  ...BASE_MARKING_RULES,
+  // Versioned IDs and uppercase aliases used by CBT Exam Modal and Corpus Records
+  jee_main_mcq_v2025: BASE_MARKING_RULES.jee_main_mcq,
+  jee_main_numerical_v2025: BASE_MARKING_RULES.jee_main_numerical,
+  jee_adv_single_v2025: BASE_MARKING_RULES.jee_adv_single,
+  jee_adv_multi_partial_v2025: BASE_MARKING_RULES.jee_adv_multi,
+  jee_adv_integer_v2025: BASE_MARKING_RULES.jee_adv_integer,
+  JEE_MAIN_MCQ_V1: BASE_MARKING_RULES.jee_main_mcq,
+  JEE_MAIN_NUMERICAL_V1: BASE_MARKING_RULES.jee_main_numerical,
+  JEE_ADV_SINGLE_V1: BASE_MARKING_RULES.jee_adv_single,
+  JEE_ADV_MULTI_V1: BASE_MARKING_RULES.jee_adv_multi,
+  JEE_ADV_MULTI_PARTIAL_V1: BASE_MARKING_RULES.jee_adv_multi,
+  JEE_ADV_INTEGER_V1: BASE_MARKING_RULES.jee_adv_integer,
+};
+
+export function resolveMarkingRule(
+  markingRuleId?: string,
+  examVariant: 'jee_main' | 'jee_advanced' = 'jee_main',
+  format: 'mcq_single' | 'mcq_multiple' | 'numerical' = 'mcq_single'
+): PyqMarkingRule {
+  if (markingRuleId && MARKING_RULES[markingRuleId]) {
+    return MARKING_RULES[markingRuleId];
+  }
+  if (examVariant === 'jee_advanced') {
+    if (format === 'mcq_multiple') return BASE_MARKING_RULES.jee_adv_multi;
+    if (format === 'numerical') return BASE_MARKING_RULES.jee_adv_integer;
+    return BASE_MARKING_RULES.jee_adv_single;
+  }
+  if (format === 'numerical') {
+    return BASE_MARKING_RULES.jee_main_numerical;
+  }
+  return BASE_MARKING_RULES.jee_main_mcq;
+}
 
 function mapChapterToSyllabusId(subject: JeeSubject, chapterName: string): string {
   const lower = chapterName.toLowerCase();
@@ -1097,8 +1132,8 @@ export async function downloadOfficialPaperPdf(
   );
   y -= 2;
   drawWrapped(
-    `Conducting Body: ${paper.officialConductingBody}  |  Date: ${paper.examDate} (${paper.shift})  |  Duration: ${paper.durationMinutes} min  |  Answer Key: ${paper.answerKeyVersion}`,
-    9,
+    `Document Type: LearnMate Reconstructed PDF (${questions.length} Verified Local Corpus Questions)  |  Conducting Body: ${paper.officialConductingBody}  |  Date: ${paper.examDate} (${paper.shift})  |  Duration: ${paper.durationMinutes} min`,
+    8.5,
     false,
     rgb(0.35, 0.4, 0.5)
   );
@@ -1146,4 +1181,70 @@ export async function downloadOfficialPaperPdf(
     `LearnMate_${slug}_${mode === 'solutions' ? 'Solutions' : 'Question_Paper'}.pdf`
   );
   return bytes;
+}
+
+export interface PyqPaperCoverageReportItem {
+  paperId: string;
+  title: string;
+  exam: 'jee_main' | 'jee_advanced';
+  year: number;
+  session: string;
+  shift: string;
+  expectedOfficialQuestions: number;
+  availableCorpusQuestions: number;
+  coverageStatus:
+    | 'FULLY_AVAILABLE'
+    | 'PARTIAL_QUESTIONS'
+    | 'METADATA_ONLY'
+    | 'LINK_ONLY'
+    | 'SOLUTIONS_MISSING'
+    | 'SOURCE_UNVERIFIED'
+    | 'CONTENT_REVIEW_PENDING'
+    | 'MISSING';
+  pdfType: 'learnmate_reconstructed_pdf' | 'official_original_pdf';
+}
+
+export function getPyqCorpusCoverageAudit(): {
+  totalPapersInMetadata: number;
+  totalQuestionsInCorpus: number;
+  jeeMainQuestionsCount: number;
+  jeeAdvancedQuestionsCount: number;
+  papers: PyqPaperCoverageReportItem[];
+} {
+  const papers: PyqPaperCoverageReportItem[] = OFFICIAL_PYQ_PAPERS.map((p) => {
+    const qList = getQuestionsForOfficialPaper(p.id);
+    const expectedOfficialQuestions = p.exam === 'jee_advanced' ? 51 : 75;
+    const allHaveSolutions = qList.every((q) => Boolean(q.detailedSolution && q.detailedSolution.trim().length > 10));
+    const coverageStatus: PyqPaperCoverageReportItem['coverageStatus'] =
+      qList.length === 0
+        ? 'METADATA_ONLY'
+        : !allHaveSolutions
+        ? 'SOLUTIONS_MISSING'
+        : qList.length >= expectedOfficialQuestions
+        ? 'FULLY_AVAILABLE'
+        : 'PARTIAL_QUESTIONS';
+    return {
+      paperId: p.id,
+      title: p.title,
+      exam: p.exam,
+      year: p.year,
+      session: p.session,
+      shift: p.shift,
+      expectedOfficialQuestions,
+      availableCorpusQuestions: qList.length,
+      coverageStatus,
+      pdfType: 'learnmate_reconstructed_pdf',
+    };
+  });
+
+  const jeeMainQuestionsCount = OFFICIAL_PYQ_QUESTIONS.filter((q) => q.exam === 'jee_main').length;
+  const jeeAdvancedQuestionsCount = OFFICIAL_PYQ_QUESTIONS.filter((q) => q.exam === 'jee_advanced').length;
+
+  return {
+    totalPapersInMetadata: OFFICIAL_PYQ_PAPERS.length,
+    totalQuestionsInCorpus: OFFICIAL_PYQ_QUESTIONS.length,
+    jeeMainQuestionsCount,
+    jeeAdvancedQuestionsCount,
+    papers,
+  };
 }

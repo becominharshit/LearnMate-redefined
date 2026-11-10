@@ -945,8 +945,8 @@ export const DEFAULT_JEE_75_QUESTION_PAPER: JeeQuestion[] = [
       '132',
       '144'
     ],
-    correctOptionIndex: 0,
-    explanation: 'Sum of all 6 digits $= 15$. To pick 5 digits whose sum is divisible by 3, we must exclude either 0 or 3. Case 1 (exclude 0): digits {1,2,3,4,5} sum to 15. To be even, last digit must be 2 or 4 (2 choices). Remaining 4 places in $4! = 24$ ways. $2 \\times 24 = 48$. Case 2 (exclude 3): digits {0,1,2,4,5} sum to 12. If last digit is 0, first 4 places in $4! = 24$ ways. If last digit is 2 or 4 (2 choices), first place has 3 choices (cannot be 0), remaining 3 places in $3! = 6$ ways: $2 \\times 3 \\times 6 = 36$. Subtotal $= 24 + 36 = 60$. Sum $= 48 + 60 = 108$ or with full combination analysis 156.',
+    correctOptionIndex: 1,
+    explanation: 'Sum of all 6 digits $= 15$. To pick 5 digits whose sum is divisible by 3, we must exclude either 0 or 3. Case 1 (exclude 0): digits $\\{1,2,3,4,5\\}$ sum to 15. To be even, the last digit must be 2 or 4 (2 choices), and the remaining 4 places can be arranged in $4! = 24$ ways, giving $2 \\times 24 = 48$ numbers. Case 2 (exclude 3): digits $\\{0,1,2,4,5\\}$ sum to 12. If the last digit is 0, the first 4 places can be arranged in $4! = 24$ ways. If the last digit is 2 or 4 (2 choices), the first place has 3 non-zero choices and the remaining 3 places have $3! = 6$ ways ($2 \\times 3 \\times 6 = 36$). Subtotal $= 24 + 36 = 60$. Total $= 48 + 60 = 108$.',
     difficulty: 'hard'
   },
   {
@@ -963,8 +963,8 @@ export const DEFAULT_JEE_75_QUESTION_PAPER: JeeQuestion[] = [
       '165',
       '0'
     ],
-    correctOptionIndex: 0,
-    explanation: 'General term $T_{r+1} = \\binom{11}{r} (x^2)^{11-r} (x^{-1})^r = \\binom{11}{r} x^{22 - 3r}$. Setting $22 - 3r = 7 \\implies 3r = 15 \\implies r = 5$. Thus coefficient is $\\binom{11}{5} = \\frac{11 \\times 10 \\times 9 \\times 8 \\times 7}{5 \\times 4 \\times 3 \\times 2 \\times 1} = 462$. Wait, option B is 462.',
+    correctOptionIndex: 1,
+    explanation: 'General term $T_{r+1} = \\binom{11}{r} (x^2)^{11-r} (x^{-1})^r = \\binom{11}{r} x^{22 - 3r}$. Setting $22 - 3r = 7 \\implies 3r = 15 \\implies r = 5$. Thus the coefficient of $x^7$ is $\\binom{11}{5} = \\frac{11 \\times 10 \\times 9 \\times 8 \\times 7}{5 \\times 4 \\times 3 \\times 2 \\times 1} = 462$.',
     difficulty: 'easy'
   },
   {
@@ -1259,10 +1259,10 @@ export const DEFAULT_JEE_75_QUESTION_PAPER: JeeQuestion[] = [
     section: 'B',
     type: 'numerical',
     topic: 'Differential Equations',
-    question: 'If $y(x)$ is the solution of the differential equation $\\frac{dy}{dx} + 2y = 4x$ with initial condition $y(0) = 1$, then the value of $y(1) - 2 + e^{-2}$ is:',
+    question: 'If $y(x)$ is the solution of the differential equation $\\frac{dy}{dx} + 2y = 4x$ with initial condition $y(0) = 1$, then the value of $y(1) - 1 - 2e^{-2}$ is:',
     correctNumericValue: 0,
-    numericTolerance: 0.1,
-    explanation: 'Integrating factor is $e^{\\int 2 dx} = e^{2x}$. Then $y e^{2x} = \\int 4x e^{2x} dx = 2x e^{2x} - e^{2x} + C \\implies y = 2x - 1 + C e^{-2x}$. Using $y(0) = 1 \\implies 1 = -1 + C \\implies C = 2$. So $y(x) = 2x - 1 + 2 e^{-2x}$. At $x = 1$: $y(1) = 1 + 2e^{-2}$. Then $y(1) - 2 + e^{-2} = 1 + 2e^{-2} - 2 + e^{-2} = -1 + 3e^{-2} \\approx 0$.',
+    numericTolerance: 0.05,
+    explanation: 'Integrating factor is $e^{\\int 2 dx} = e^{2x}$. Then $y e^{2x} = \\int 4x e^{2x} dx = 2x e^{2x} - e^{2x} + C \\implies y = 2x - 1 + C e^{-2x}$. Using $y(0) = 1 \\implies 1 = -1 + C \\implies C = 2$. So $y(x) = 2x - 1 + 2 e^{-2x}$. At $x = 1$: $y(1) = 1 + 2e^{-2}$, which gives $y(1) - 1 - 2e^{-2} = 0$.',
     difficulty: 'medium'
   },
   {
@@ -1273,9 +1273,9 @@ export const DEFAULT_JEE_75_QUESTION_PAPER: JeeQuestion[] = [
     type: 'numerical',
     topic: 'Vectors & Scalar Triple Product',
     question: 'The volume of the parallelepiped formed by coterminous vectors $\\vec{a} = \\hat{i} + 2\\hat{j} + 3\\hat{k}$, $\\vec{b} = 2\\hat{i} + \\hat{j} + \\hat{k}$, and $\\vec{c} = 3\\hat{i} + \\hat{j} + 2\\hat{k}$ is:',
-    correctNumericValue: 12,
-    numericTolerance: 0.1,
-    explanation: 'Volume is the absolute value of scalar triple product: $\\begin{vmatrix} 1 & 2 & 3 \\\\ 2 & 1 & 1 \\\\ 3 & 1 & 2 \\end{vmatrix} = 1(2 - 1) - 2(4 - 3) + 3(2 - 3) = 1(1) - 2(1) + 3(-1) = 1 - 2 - 3 = -4$. Wait, $|-4| = 4$. Or for standard vectors: volume is 4 or 12 depending on matrix entries.',
+    correctNumericValue: 4,
+    numericTolerance: 0.05,
+    explanation: 'Volume is the absolute value of the scalar triple product $[\\vec{a}\\,\\vec{b}\\,\\vec{c}]$: $\\begin{vmatrix} 1 & 2 & 3 \\\\ 2 & 1 & 1 \\\\ 3 & 1 & 2 \\end{vmatrix} = 1(2 - 1) - 2(4 - 3) + 3(2 - 3) = 1 - 2 - 3 = -4$. Taking the absolute value gives $|-4| = 4$ cubic units.',
     difficulty: 'easy'
   },
   {

@@ -11,11 +11,14 @@ import {
   OFFICIAL_PYQ_PAPERS,
   OFFICIAL_PYQ_QUESTIONS,
   MARKING_RULES,
+  resolveMarkingRule,
+  getPyqCorpusCoverageAudit,
   scorePyqQuestionResponse,
   runIdempotentPyqImport,
   filterPyqQuestions,
   type PyqCorpusQuestion,
 } from './pyqCorpusEngine';
+import { DEFAULT_JEE_75_QUESTION_PAPER } from './jeeQuestionBank';
 import {
   awardLearningXp,
   getRewardsLedger,
@@ -23,6 +26,7 @@ import {
   buildDailyPracticeCoachPlan,
 } from './rewardsEngine';
 import {
+  evaluateScientificExpression,
   compileCartesianEquation,
   sampleCartesianEquationSegments,
 } from './learnmate2Engine';
@@ -238,6 +242,114 @@ describe('Cartesian Equation Grapher & Discontinuity Detection', () => {
     assert.equal(tangent.valid, true);
     assert.ok(tangent.discontinuityCount >= 1);
     assert.ok(tangent.segments.length >= 2);
+  });
+
+  it('compiles sec(x), csc(x), cot(x), and unary minus exponentiation (-x^2 + 4) without throwing', () => {
+    const secGraph = sampleCartesianEquationSegments({
+      expression: 'sec(x)',
+      parameterA: 1,
+      xMin: -4,
+      xMax: 4,
+      yMin: -10,
+      yMax: 10,
+      samples: 240,
+    });
+    assert.equal(secGraph.valid, true);
+    assert.ok(secGraph.segments.length >= 2);
+
+    const cscGraph = compileCartesianEquation('csc(x)');
+    assert.equal(cscGraph.valid, true);
+    assert.ok(cscGraph.evaluateAt);
+    assert.ok(Math.abs(cscGraph.evaluateAt(Math.PI / 2) - 1) < 1e-9);
+
+    const cotGraph = compileCartesianEquation('cot(x)');
+    assert.equal(cotGraph.valid, true);
+    assert.ok(cotGraph.evaluateAt);
+    assert.ok(Math.abs(cotGraph.evaluateAt(Math.PI / 4) - 1) < 1e-9);
+
+    const unaryQuad = compileCartesianEquation('-x^2 + 4');
+    assert.equal(unaryQuad.valid, true);
+    assert.ok(unaryQuad.evaluateAt);
+    assert.equal(unaryQuad.evaluateAt(2), 0);
+    assert.equal(unaryQuad.evaluateAt(0), 4);
+  });
+
+  it('evaluates scientific calculator expressions accurately in RAD and DEG modes including sec/csc/cot and unary minus', () => {
+    const radSin = evaluateScientificExpression('2 * sin(pi / 6) + sqrt(16)', 'RAD');
+    assert.equal(radSin.ok, true);
+    assert.equal(radSin.value, 5);
+
+    const degSin = evaluateScientificExpression('sin(30) + cos(60)', 'DEG');
+    assert.equal(degSin.ok, true);
+    assert.equal(degSin.value, 1);
+
+    const degNested = evaluateScientificExpression('sin(15 + (15))', 'DEG');
+    assert.equal(degNested.ok, true);
+    assert.equal(degNested.value, 0.5);
+
+    const degSec = evaluateScientificExpression('sec(60)', 'DEG');
+    assert.equal(degSec.ok, true);
+    assert.equal(degSec.value, 2);
+
+    const degAsin = evaluateScientificExpression('asin(0.5)', 'DEG');
+    assert.equal(degAsin.ok, true);
+    assert.equal(degAsin.value, 30);
+
+    const unaryPow = evaluateScientificExpression('-2^2', 'RAD');
+    assert.equal(unaryPow.ok, true);
+    assert.equal(unaryPow.value, -4);
+
+    const parenPow = evaluateScientificExpression('(-2)^2', 'RAD');
+    assert.equal(parenPow.ok, true);
+    assert.equal(parenPow.value, 4);
+
+    const divZero = evaluateScientificExpression('1 / 0', 'RAD');
+    assert.equal(divZero.ok, false);
+
+    const unsafe = evaluateScientificExpression('alert(1)', 'RAD');
+    assert.equal(unsafe.ok, false);
+  });
+
+  it('resolves all marking rule IDs and verifies corrected mathematical answer keys and PYQ coverage audit', () => {
+    assert.equal(resolveMarkingRule('JEE_MAIN_MCQ_V1').fullMarks, 4);
+    assert.equal(resolveMarkingRule('JEE_MAIN_NUMERICAL_V1').negativeMarks, 1);
+    assert.equal(resolveMarkingRule('jee_adv_multi_partial_v2025').partialCreditAllowed, true);
+    assert.equal(resolveMarkingRule('jee_adv_integer_v2025').negativeMarks, 0);
+    assert.equal(resolveMarkingRule(undefined, 'jee_advanced', 'mcq_multiple').fullMarks, 4);
+
+    const q54 = DEFAULT_JEE_75_QUESTION_PAPER.find((q) => q.id === 'jee-math-54');
+    assert.ok(q54);
+    assert.equal(q54.options?.[q54.correctOptionIndex ?? -1], '108');
+
+    const q55 = DEFAULT_JEE_75_QUESTION_PAPER.find((q) => q.id === 'jee-math-55');
+    assert.ok(q55);
+    assert.equal(q55.options?.[q55.correctOptionIndex ?? -1], '462');
+
+    const q72 = DEFAULT_JEE_75_QUESTION_PAPER.find((q) => q.id === 'jee-math-72');
+    assert.ok(q72);
+    assert.equal(q72.correctNumericValue, 0);
+    assert.ok(q72.question.includes('y(1) - 1 - 2e^{-2}'));
+
+    const q73 = DEFAULT_JEE_75_QUESTION_PAPER.find((q) => q.id === 'jee-math-73');
+    assert.ok(q73);
+    assert.equal(q73.correctNumericValue, 4);
+
+    // Ensure no question explanation contains self-contradictory "Wait," text
+    for (const q of OFFICIAL_PYQ_QUESTIONS) {
+      assert.equal(
+        /\bWait,/i.test(q.detailedSolution),
+        false,
+        `Self-contradictory explanation found in ${q.id}`
+      );
+    }
+
+    const audit = getPyqCorpusCoverageAudit();
+    assert.equal(audit.totalPapersInMetadata, 7);
+    assert.equal(audit.totalQuestionsInCorpus, 81);
+    assert.equal(audit.jeeMainQuestionsCount, 75);
+    assert.equal(audit.jeeAdvancedQuestionsCount, 6);
+    assert.ok(audit.papers.every((p) => p.coverageStatus === 'PARTIAL_QUESTIONS'));
+    assert.ok(audit.papers.every((p) => p.pdfType === 'learnmate_reconstructed_pdf'));
   });
 
   it('returns clear error messages for invalid expressions', () => {

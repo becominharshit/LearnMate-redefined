@@ -512,7 +512,18 @@ export function gradeJeeExamAttempt(params: {
  * without using eval() on arbitrary JS code.
  * Supports: +, -, *, /, ^, (), sin, cos, tan, asin, acos, atan, sqrt, log, ln, abs, exp, pi, e
  */
-export function evaluateScientificExpression(rawExpr: string): {
+function replaceUnaryMinusBeforeExponent(expr: string): string {
+  // In JS, `-2**2` or `-x**2` is a SyntaxError; rewrite unary `-base^exp` at start or after `(`, `+`, `-`, `*`, `/`, `,` as `-(base**exp)` while preserving mathematical precedence `-x^2 = -(x^2)`.
+  return expr.replace(
+    /(^|[([+\-*/,]\s*)-\s*([a-zA-Z0-9_.]+|\([^()]+\))\s*\*\*\s*([a-zA-Z0-9_.]+|\([^()]+\))/g,
+    '$1-(($2)**($3))'
+  );
+}
+
+export function evaluateScientificExpression(
+  rawExpr: string,
+  angleMode: 'RAD' | 'DEG' = 'RAD'
+): {
   valid: boolean;
   ok: boolean;
   result?: number;
@@ -527,7 +538,10 @@ export function evaluateScientificExpression(rawExpr: string): {
 
   // Reject any characters outside safe math tokens
   const sanitizedCheck = expr
-    .replace(/\b(sin|cos|tan|asin|acos|atan|sqrt|cbrt|log|ln|abs|exp|pi|PI|e|E)\b/g, '')
+    .replace(
+      /\b(sin|cos|tan|sec|csc|cot|asin|acos|atan|sinh|cosh|tanh|sqrt|cbrt|log|ln|abs|exp|floor|ceil|round|pi|PI|e|E)\b/g,
+      ''
+    )
     .replace(/[0-9+\-*/^().%\s,]/g, '');
 
   if (sanitizedCheck.length > 0) {
@@ -535,25 +549,71 @@ export function evaluateScientificExpression(rawExpr: string): {
   }
 
   try {
-    const jsMathExpr = expr
-      .replace(/\bpi\b/gi, '(Math.PI)')
-      .replace(/\be\b/g, '(Math.E)')
-      .replace(/\bsin\s*\(/gi, 'Math.sin(')
-      .replace(/\bcos\s*\(/gi, 'Math.cos(')
-      .replace(/\btan\s*\(/gi, 'Math.tan(')
-      .replace(/\basin\s*\(/gi, 'Math.asin(')
-      .replace(/\bacos\s*\(/gi, 'Math.acos(')
-      .replace(/\batan\s*\(/gi, 'Math.atan(')
-      .replace(/\bsqrt\s*\(/gi, 'Math.sqrt(')
-      .replace(/\bcbrt\s*\(/gi, 'Math.cbrt(')
-      .replace(/\blog\s*\(/gi, 'Math.log10(')
-      .replace(/\bln\s*\(/gi, 'Math.log(')
-      .replace(/\babs\s*\(/gi, 'Math.abs(')
-      .replace(/\bexp\s*\(/gi, 'Math.exp(')
-      .replace(/\^/g, '**');
+    const jsMathExpr = replaceUnaryMinusBeforeExponent(
+      expr
+        .replace(/\bpi\b/gi, '(Math.PI)')
+        .replace(/\be\b/g, '(Math.E)')
+        .replace(/\basin\s*\(/gi, '__asin(')
+        .replace(/\bacos\s*\(/gi, '__acos(')
+        .replace(/\batan\s*\(/gi, '__atan(')
+        .replace(/\bsinh\s*\(/gi, 'Math.sinh(')
+        .replace(/\bcosh\s*\(/gi, 'Math.cosh(')
+        .replace(/\btanh\s*\(/gi, 'Math.tanh(')
+        .replace(/\bsin\s*\(/gi, '__sin(')
+        .replace(/\bcos\s*\(/gi, '__cos(')
+        .replace(/\btan\s*\(/gi, '__tan(')
+        .replace(/\bsec\s*\(/gi, '__sec(')
+        .replace(/\bcsc\s*\(/gi, '__csc(')
+        .replace(/\bcot\s*\(/gi, '__cot(')
+        .replace(/\bsqrt\s*\(/gi, 'Math.sqrt(')
+        .replace(/\bcbrt\s*\(/gi, 'Math.cbrt(')
+        .replace(/\blog\s*\(/gi, 'Math.log10(')
+        .replace(/\bln\s*\(/gi, 'Math.log(')
+        .replace(/\babs\s*\(/gi, 'Math.abs(')
+        .replace(/\bexp\s*\(/gi, 'Math.exp(')
+        .replace(/\bfloor\s*\(/gi, 'Math.floor(')
+        .replace(/\bceil\s*\(/gi, 'Math.ceil(')
+        .replace(/\bround\s*\(/gi, 'Math.round(')
+        .replace(/\^/g, '**')
+    );
 
-    const fn = new Function(`"use strict"; return (${jsMathExpr});`);
-    const val = Number(fn());
+    const toRad = (v: number) => (angleMode === 'DEG' ? (v * Math.PI) / 180 : v);
+    const fromRad = (v: number) => (angleMode === 'DEG' ? (v * 180) / Math.PI : v);
+    const __sin = (v: number) => Math.sin(toRad(v));
+    const __cos = (v: number) => Math.cos(toRad(v));
+    const __tan = (v: number) => {
+      const c = Math.cos(toRad(v));
+      return Math.abs(c) < 1e-12 ? NaN : Math.sin(toRad(v)) / c;
+    };
+    const __sec = (v: number) => {
+      const c = Math.cos(toRad(v));
+      return Math.abs(c) < 1e-12 ? NaN : 1 / c;
+    };
+    const __csc = (v: number) => {
+      const s = Math.sin(toRad(v));
+      return Math.abs(s) < 1e-12 ? NaN : 1 / s;
+    };
+    const __cot = (v: number) => {
+      const s = Math.sin(toRad(v));
+      return Math.abs(s) < 1e-12 ? NaN : Math.cos(toRad(v)) / s;
+    };
+    const __asin = (v: number) => fromRad(Math.asin(v));
+    const __acos = (v: number) => fromRad(Math.acos(v));
+    const __atan = (v: number) => fromRad(Math.atan(v));
+
+    const fn = new Function(
+      '__sin',
+      '__cos',
+      '__tan',
+      '__sec',
+      '__csc',
+      '__cot',
+      '__asin',
+      '__acos',
+      '__atan',
+      `"use strict"; return (${jsMathExpr});`
+    );
+    const val = Number(fn(__sin, __cos, __tan, __sec, __csc, __cot, __asin, __acos, __atan));
     if (!Number.isFinite(val)) {
       return { valid: false, ok: false, value: null, error: 'Result is undefined or infinite' };
     }
@@ -1046,49 +1106,65 @@ export function compileCartesianEquation(rawInput: string): {
     };
   }
 
-  const jsExpr = withImplicitMult
-    .replace(/\bpi\b/gi, '(Math.PI)')
-    .replace(/\be\b/g, '(Math.E)')
-    .replace(/\bsin\s*\(/gi, 'Math.sin(')
-    .replace(/\bcos\s*\(/gi, 'Math.cos(')
-    .replace(/\btan\s*\(/gi, 'Math.tan(')
-    .replace(/\bsec\s*\(/gi, '(1/Math.cos)(')
-    .replace(/\bcsc\s*\(/gi, '(1/Math.sin)(')
-    .replace(/\bcot\s*\(/gi, '(1/Math.tan)(')
-    .replace(/\basin\s*\(/gi, 'Math.asin(')
-    .replace(/\bacos\s*\(/gi, 'Math.acos(')
-    .replace(/\batan\s*\(/gi, 'Math.atan(')
-    .replace(/\bsinh\s*\(/gi, 'Math.sinh(')
-    .replace(/\bcosh\s*\(/gi, 'Math.cosh(')
-    .replace(/\btanh\s*\(/gi, 'Math.tanh(')
-    .replace(/\bsqrt\s*\(/gi, 'Math.sqrt(')
-    .replace(/\bcbrt\s*\(/gi, 'Math.cbrt(')
-    .replace(/\babs\s*\(/gi, 'Math.abs(')
-    .replace(/\blog\s*\(/gi, 'Math.log10(')
-    .replace(/\bln\s*\(/gi, 'Math.log(')
-    .replace(/\bexp\s*\(/gi, 'Math.exp(')
-    .replace(/\bfloor\s*\(/gi, 'Math.floor(')
-    .replace(/\bceil\s*\(/gi, 'Math.ceil(')
-    .replace(/\bround\s*\(/gi, 'Math.round(')
-    .replace(/\bsign\s*\(/gi, 'Math.sign(')
-    .replace(/\^/g, '**');
+  const jsExpr = replaceUnaryMinusBeforeExponent(
+    withImplicitMult
+      .replace(/\bpi\b/gi, '(Math.PI)')
+      .replace(/\be\b/g, '(Math.E)')
+      .replace(/\basin\s*\(/gi, 'Math.asin(')
+      .replace(/\bacos\s*\(/gi, 'Math.acos(')
+      .replace(/\batan\s*\(/gi, 'Math.atan(')
+      .replace(/\bsinh\s*\(/gi, 'Math.sinh(')
+      .replace(/\bcosh\s*\(/gi, 'Math.cosh(')
+      .replace(/\btanh\s*\(/gi, 'Math.tanh(')
+      .replace(/\bsin\s*\(/gi, 'Math.sin(')
+      .replace(/\bcos\s*\(/gi, 'Math.cos(')
+      .replace(/\btan\s*\(/gi, 'Math.tan(')
+      .replace(/\bsec\s*\(/gi, '__sec(')
+      .replace(/\bcsc\s*\(/gi, '__csc(')
+      .replace(/\bcot\s*\(/gi, '__cot(')
+      .replace(/\bsqrt\s*\(/gi, 'Math.sqrt(')
+      .replace(/\bcbrt\s*\(/gi, 'Math.cbrt(')
+      .replace(/\babs\s*\(/gi, 'Math.abs(')
+      .replace(/\blog\s*\(/gi, 'Math.log10(')
+      .replace(/\bln\s*\(/gi, 'Math.log(')
+      .replace(/\bexp\s*\(/gi, 'Math.exp(')
+      .replace(/\bfloor\s*\(/gi, 'Math.floor(')
+      .replace(/\bceil\s*\(/gi, 'Math.ceil(')
+      .replace(/\bround\s*\(/gi, 'Math.round(')
+      .replace(/\bsign\s*\(/gi, 'Math.sign(')
+      .replace(/\^/g, '**')
+  );
+
+  const __sec = (v: number) => 1 / Math.cos(v);
+  const __csc = (v: number) => 1 / Math.sin(v);
+  const __cot = (v: number) => Math.cos(v) / Math.sin(v);
 
   try {
     const fn = new Function(
       'x',
       'a',
       'k',
+      '__sec',
+      '__csc',
+      '__cot',
       `"use strict"; return Number(${jsExpr});`
-    ) as (x: number, a: number, k: number) => number;
+    ) as (
+      x: number,
+      a: number,
+      k: number,
+      secFn: (v: number) => number,
+      cscFn: (v: number) => number,
+      cotFn: (v: number) => number
+    ) => number;
     // Smoke-test compilation at x = 1.123
-    fn(1.123, 1, 1);
+    fn(1.123, 1, 1, __sec, __csc, __cot);
 
     return {
       valid: true,
       normalizedRhs: rhs,
       evaluateAt: (x: number, paramA = 1) => {
         try {
-          return fn(x, paramA, paramA);
+          return fn(x, paramA, paramA, __sec, __csc, __cot);
         } catch {
           return NaN;
         }

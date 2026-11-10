@@ -1964,6 +1964,8 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
       localStorage.removeItem(KEYS.ATTEMPTS);
       localStorage.removeItem(KEYS.CONCEPT_ATTEMPTS);
       localStorage.removeItem(KEYS.FOCUS_SESSIONS);
+      localStorage.removeItem('learnmate_rewards_ledger_v1');
+      localStorage.removeItem('learnmate_daily_coach_completed_v1');
       const toRemoveMastery: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);

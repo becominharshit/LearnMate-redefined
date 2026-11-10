@@ -65,6 +65,7 @@ interface StudentDashboardViewProps {
   isProfileSyncing?: boolean;
   onOpenProfileModal?: () => void;
   onSaveDocument?: (doc: StudyDocument) => void;
+  onOpenStudySection?: (section: 'my_materials' | 'syllabus' | 'chapter_notes' | 'ai_tutor' | 'resources') => void;
 }
 
 const SUBJECT_STYLE: Record<
@@ -117,6 +118,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   isProfileSyncing = false,
   onOpenProfileModal,
   onSaveDocument,
+  onOpenStudySection,
 }) => {
   const [doubtInput, setDoubtInput] = useState('');
   const [doubtLang, setDoubtLang] = useState<'en' | 'hi'>(
@@ -423,7 +425,13 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => onNavigateTab('study')}
+                onClick={() => {
+                  if (onOpenStudySection) {
+                    onOpenStudySection('syllabus');
+                  } else {
+                    onNavigateTab('study');
+                  }
+                }}
                 className="text-xs font-semibold text-brand hover:underline cursor-pointer"
               >
                 Explore Syllabus →
@@ -666,7 +674,13 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               </h2>
               <button
                 type="button"
-                onClick={() => onNavigateTab('study')}
+                onClick={() => {
+                  if (onOpenStudySection) {
+                    onOpenStudySection('chapter_notes');
+                  } else {
+                    onNavigateTab('study');
+                  }
+                }}
                 className="text-xs font-semibold text-brand hover:underline cursor-pointer"
               >
                 All Chapters &amp; Notes →

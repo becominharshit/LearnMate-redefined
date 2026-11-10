@@ -26,6 +26,7 @@ import {
   PyqCorpusQuestion,
   scorePyqQuestionResponse,
   MARKING_RULES,
+  resolveMarkingRule,
 } from '../utils/pyqCorpusEngine';
 import { awardLearningXp } from '../utils/rewardsEngine';
 
@@ -117,6 +118,9 @@ export interface JeeCbtExamResult {
   attemptRatePercentage: number; // Attempted / Total * 100
   subjectBreakdowns: Record<JeeSubject, JeeSubjectScoreBreakdown>;
   questionResponses: Record<string, JeeQuestionResponse>;
+  questions?: JeeCbtQuestion[];
+  weakTopics?: string[];
+  strongTopics?: string[];
   integrityEvents: FocusIntegrityEvent[];
   strictModeUsed: boolean;
 }
@@ -769,8 +773,8 @@ const MATHEMATICS_MCQ_BANK: Array<Omit<JeeCbtQuestion, 'id' | 'questionNumber' |
     difficulty: 'Easy',
     questionText: 'The perpendicular distance from the point P(3, 4) to the straight line 3x − 4y + 12 = 0 is:',
     options: ['1 / 5', '3 / 5', '1', '7 / 5'],
-    correctOptionIndex: 0,
-    solutionSteps: 'Distance d = |Ax₁ + By₁ + C| / √(A² + B²) = |3(3) − 4(4) + 12| / √(3² + (−4)²) = |9 − 16 + 12| / 5 = 5 / 5 = 1... Wait: 9 - 16 + 12 = 5, 5/5 = 1! Let us check option index: Option C is 1.',
+    correctOptionIndex: 2,
+    solutionSteps: 'Distance d = |Ax₁ + By₁ + C| / √(A² + B²) = |3(3) − 4(4) + 12| / √(3² + (−4)²) = |9 − 16 + 12| / 5 = 5 / 5 = 1.',
     keyFormula: 'd = |Ax₁ + By₁ + C| / √(A² + B²)',
     commonTrap: 'Forgetting to divide by √(A² + B²) = 5.',
   },
@@ -856,8 +860,7 @@ const MATHEMATICS_MCQ_BANK: Array<Omit<JeeCbtQuestion, 'id' | 'questionNumber' |
   },
 ];
 
-// Fix Q12 of Mathematics where 5/5 = 1 is index 2:
-MATHEMATICS_MCQ_BANK[11].correctOptionIndex = 2;
+// MATHEMATICS_MCQ_BANK[11] has correctOptionIndex: 2 ('1') directly in its definition.
 
 const MATHEMATICS_NUMERICAL_BANK: Array<Omit<JeeCbtQuestion, 'id' | 'questionNumber' | 'subject' | 'section' | 'format'>> = [
   {
@@ -1400,11 +1403,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     marks: number;
     maxMarks: number;
   } => {
-    const rule =
-      MARKING_RULES[q.markingRuleId || ''] ||
-      (examVariant === 'jee_advanced' && q.format === 'mcq_multiple'
-        ? MARKING_RULES.JEE_ADV_MULTI_V1
-        : MARKING_RULES.JEE_MAIN_MCQ_V1);
+    const rule = resolveMarkingRule(q.markingRuleId, examVariant, q.format);
 
     const isEvaluated =
       r && (r.status === 'answered' || r.status === 'answered_and_marked');
@@ -1625,6 +1624,20 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     const attemptRatePercentage =
       questions.length > 0 ? Math.round((totalAttempted / questions.length) * 100) : 0;
 
+    const weakTopicsSet = new Set<string>();
+    const strongTopicsSet = new Set<string>();
+    questions.forEach((q) => {
+      const r = responses[q.id];
+      const evalRes = evaluateQuestionMarks(q, r);
+      if (evalRes.isAttempted) {
+        if (evalRes.status === 'correct') {
+          strongTopicsSet.add(q.topic);
+        } else if (evalRes.status === 'incorrect') {
+          weakTopicsSet.add(q.topic);
+        }
+      }
+    });
+
     const attemptId = `jee-cbt-${Date.now()}`;
     const result: JeeCbtExamResult = {
       id: attemptId,
@@ -1645,6 +1658,9 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
       attemptRatePercentage,
       subjectBreakdowns: breakdowns,
       questionResponses: responses,
+      questions,
+      weakTopics: Array.from(weakTopicsSet),
+      strongTopics: Array.from(strongTopicsSet),
       integrityEvents,
       strictModeUsed: strictMockMode,
     };

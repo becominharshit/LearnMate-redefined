@@ -212,6 +212,7 @@ interface AppGuideAndSearchModalProps {
   onOpenSyllabusChapter: (chapter: SyllabusChapterRecord, mode: 'full' | 'quick') => void;
   onOpenReviseSubTab: (subTab: QuickReviseSubTab) => void;
   onOpenUtilityTab: (tab: UtilityTab) => void;
+  onOpenStudySection?: (section: NonNullable<AppGuideEntry['studySection']>) => void;
 }
 
 export const AppGuideAndSearchModal: React.FC<AppGuideAndSearchModalProps> = ({
@@ -224,6 +225,7 @@ export const AppGuideAndSearchModal: React.FC<AppGuideAndSearchModalProps> = ({
   onOpenSyllabusChapter,
   onOpenReviseSubTab,
   onOpenUtilityTab,
+  onOpenStudySection,
 }) => {
   const [view, setView] = useState<'search' | 'guide'>(initialView);
   const [query, setQuery] = useState('');
@@ -344,6 +346,10 @@ export const AppGuideAndSearchModal: React.FC<AppGuideAndSearchModalProps> = ({
     }
     if (entry.reviseSubTab) {
       onOpenReviseSubTab(entry.reviseSubTab);
+      return;
+    }
+    if (entry.studySection && onOpenStudySection) {
+      onOpenStudySection(entry.studySection);
       return;
     }
     onNavigateTab(entry.targetTab);

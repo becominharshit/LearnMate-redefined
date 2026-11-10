@@ -942,6 +942,10 @@ export function App() {
                 setSetupDismissed(false);
                 setSetupOpen(true);
               }}
+              onOpenStudySection={(section) => {
+                setStudyInitialHubSection(section);
+                goToApp('study');
+              }}
             />
           </div>
         )}
@@ -1137,6 +1141,23 @@ export function App() {
         onOpenUtilityTab={(tab) => {
           setGuideModalOpen(false);
           setExternalUtilityTab(tab);
+        }}
+        onOpenStudySection={(section) => {
+          setGuideModalOpen(false);
+          if (section === 'create') {
+            goToApp('create');
+            return;
+          }
+          const mappedSection =
+            section === 'notes'
+              ? 'chapter_notes'
+              : section === 'materials'
+              ? 'my_materials'
+              : section === 'tutor'
+              ? 'ai_tutor'
+              : section;
+          setStudyInitialHubSection(mappedSection);
+          goToApp('study');
         }}
       />
 
