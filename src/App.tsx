@@ -11,7 +11,6 @@ import { StudentProfileModal } from './components/StudentProfileModal';
 import { ProgressView } from './components/ProgressView';
 import { VoiceTutorModal } from './components/VoiceTutorModal';
 import { AddMaterialModal, AddMaterialMode } from './components/AddMaterialModal';
-import { DynamicCompanion } from './components/DynamicCompanion';
 import { AuthScreen } from './components/AuthScreen';
 import { VerifyEmailScreen, FirebaseSetupScreen } from './components/AccountGateScreens';
 import { SafetyStatementPage } from './components/SafetyStatementPage';
@@ -382,7 +381,12 @@ export function App() {
     setNotifications(studyStorage.getNotifications());
     setStudentProfile(studyStorage.getStudentProfile());
 
+    const fallbackTimer = window.setTimeout(() => {
+      setIsAuthReady(true);
+    }, 1500);
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      window.clearTimeout(fallbackTimer);
       setUser(currentUser);
 
       if (currentUser) {
@@ -397,8 +401,48 @@ export function App() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
   }, [isAutostartTestMode]);
+
+  const handleEnterDemoWorkspace = () => {
+    let docs = studyStorage.getDocuments();
+    if (docs.length === 0) {
+      const sample = buildSampleChapterDocument();
+      studyStorage.saveDocument(sample);
+      studyStorage.setActiveDocumentId(sample.id);
+      docs = studyStorage.getDocuments();
+    }
+    const existingProfile = studyStorage.getStudentProfile();
+    if (!existingProfile.setupCompleted) {
+      const updatedProfile = studyStorage.saveStudentProfile({
+        ...existingProfile,
+        fullName: existingProfile.fullName || 'Aarav Sharma',
+        schoolClass: 'Class 12',
+        ageBand: '16_17',
+        setupCompleted: true,
+      });
+      setStudentProfile(updatedProfile);
+    } else {
+      setStudentProfile(existingProfile);
+    }
+    setDocuments(docs);
+    const activeId = studyStorage.getActiveDocumentId();
+    setActiveDoc(docs.find((d) => d.id === activeId) || docs[0] || null);
+    setNotifications(studyStorage.getNotifications());
+    setUser({
+      uid: 'dev-student-local',
+      email: 'student@learnmate.local',
+      emailVerified: true,
+      displayName: 'Aarav Sharma',
+      providerData: [],
+    } as unknown as User);
+    setAccountSynced(true);
+    setIsAuthReady(true);
+    goToApp('dashboard');
+  };
 
   const handleSetupComplete = (answers: FirstRunAnswers) => {
     const updated: StudentAcademicProfile = {
@@ -832,6 +876,23 @@ export function App() {
     }
     return landingElement;
   }
+  if (!user && (publicRoute === 'signin' || publicRoute === 'signup')) {
+    return (
+      <AuthScreen
+        key={publicRoute}
+        initialMode={publicRoute}
+        onBack={() => goPublic('landing')}
+        onOpenSafety={() => goPublic('safety')}
+        onOpenLegal={(page) => goPublic(page)}
+        onEnterDemo={handleEnterDemoWorkspace}
+        notice={
+          pendingSampleAdd
+            ? 'Sign in to add the free sample chapter to your account. After email verification, it will appear automatically.'
+            : null
+        }
+      />
+    );
+  }
   if (!isAuthReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-canvas text-sm text-muted">
@@ -840,22 +901,6 @@ export function App() {
     );
   }
   if (!user) {
-    if (publicRoute === 'signin' || publicRoute === 'signup') {
-      return (
-        <AuthScreen
-          key={publicRoute}
-          initialMode={publicRoute}
-          onBack={() => goPublic('landing')}
-          onOpenSafety={() => goPublic('safety')}
-          onOpenLegal={(page) => goPublic(page)}
-          notice={
-            pendingSampleAdd
-              ? 'Sign in to add the free sample chapter to your account. After email verification, it will appear automatically.'
-              : null
-          }
-        />
-      );
-    }
     return landingElement;
   }
   if (needsEmailVerification(user)) {
@@ -879,7 +924,6 @@ export function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-canvas text-ink pb-20 lg:pb-0 overflow-x-hidden">
-      <DynamicCompanion activeDoc={effectiveDoc} />
       <Navbar
         activeTab={activeTab}
         onSelectTab={handleSelectTab}

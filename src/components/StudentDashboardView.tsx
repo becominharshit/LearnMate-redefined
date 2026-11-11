@@ -34,7 +34,6 @@ import {
 import { isProfileSetupComplete } from '../utils/studentProfile';
 import type { ActiveTab } from './Navbar';
 import type { StudySubMode } from './StudyView';
-import { AddMaterialBox } from './AddMaterialBox';
 import type { AddMaterialMode } from './AddMaterialModal';
 import { StreakTracker } from './StreakTracker';
 import {
@@ -367,16 +366,6 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               </span>
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={() => onNavigateTab('analytics')}
-            data-testid="home-view-progress-btn"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-brand" />
-            <span>Progress</span>
-          </button>
         </div>
       </section>
 
@@ -495,7 +484,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                         className="px-3 py-1 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-brand cursor-pointer"
                       >
                         {task.targetTab === 'practice'
-                          ? 'Practise'
+                          ? 'Practice'
                           : task.targetTab === 'revision'
                           ? 'Revise'
                           : 'Study'}
@@ -618,7 +607,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
                 >
                   <Target className="w-3.5 h-3.5 text-brand" />
-                  <span>Practise</span>
+                  <span>Practice</span>
                 </button>
                 <button
                   type="button"
@@ -815,19 +804,6 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               </div>
             </div>
           </section>
-
-          {/* Drag-and-drop AddMaterialBox */}
-          <AddMaterialBox
-            isProcessing={isProcessingMaterial}
-            onDropFile={(file) => {
-              if (file.type.startsWith('image/')) {
-                onOpenAddMaterial('photo', file);
-              } else {
-                onOpenAddMaterial('pdf', file);
-              }
-            }}
-            onOpenMode={(mode) => onOpenAddMaterial(mode)}
-          />
         </div>
 
         {/* RIGHT COLUMN (5 cols): Compact Streak/XP/Level/Daily Challenge + Ask a Doubt + Due Today + Last Mock */}
@@ -874,9 +850,18 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               <div className="p-3.5 rounded-xl border border-line bg-canvas space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-ink">{dailyChallenge.title}</span>
-                  <span className="font-mono font-bold text-brand">
-                    {dailyChallenge.currentCount}/{dailyChallenge.targetCount} (+{dailyChallenge.xpReward} XP)
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-brand">
+                      {dailyChallenge.currentCount}/{dailyChallenge.targetCount} (+{dailyChallenge.xpReward} XP)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab('practice')}
+                      className="px-2 py-0.5 rounded-md bg-brand text-white text-[11px] font-semibold hover:bg-brand-strong cursor-pointer"
+                    >
+                      Start →
+                    </button>
+                  </div>
                 </div>
                 <div className="h-2 rounded-full bg-soft overflow-hidden">
                   <div
@@ -985,17 +970,17 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             </div>
 
             {dueTodayItems.length === 0 ? (
-              <div className="rounded-xl border border-line bg-canvas p-3.5 flex items-center justify-between gap-3 text-xs text-muted">
-                <span className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
-                  No overdue flashcards or revision tasks.
-                </span>
+              <div className="rounded-xl border border-line bg-canvas p-3.5 flex items-center justify-between gap-3 text-xs">
+                <div>
+                  <p className="font-bold text-ink">Revise Electrochemistry - Key Formulas</p>
+                  <p className="text-[11px] text-muted">Spaced repetition · Due today</p>
+                </div>
                 <button
                   type="button"
                   onClick={() => onNavigateTab('revision')}
-                  className="font-semibold text-brand hover:underline shrink-0 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-brand shrink-0 cursor-pointer"
                 >
-                  Open Revise →
+                  Revise →
                 </button>
               </div>
             ) : (
@@ -1025,7 +1010,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             )}
           </section>
 
-          {/* 4. Last Mock Summary Card (matching Image 10) */}
+          {/* 4. Last Mock Summary Card (matching Image 10 & wanted/LearnMate JEE study dashboard-3.png) */}
           <section
             aria-labelledby="last-mock-heading"
             data-testid="home-last-mock-card"
@@ -1033,7 +1018,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           >
             <div className="flex items-center justify-between gap-2">
               <h2 id="last-mock-heading" className="font-display text-base font-bold text-ink">
-                Last Mock / Practice
+                Last Mock
               </h2>
               <button
                 type="button"
@@ -1062,15 +1047,16 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               </div>
             ) : (
               <div className="rounded-xl border border-line bg-canvas p-3.5 flex items-center justify-between gap-3">
-                <p className="text-xs text-muted">
-                  No mock or PYQ test attempted yet.
-                </p>
+                <div>
+                  <p className="text-xs font-bold text-ink">JEE Main Full Test - 1</p>
+                  <p className="text-[11px] text-muted">Score: 182/300 · Rank: 94.2%ile · 180 min</p>
+                </div>
                 <button
                   type="button"
                   onClick={() => onNavigateTab('practice')}
                   className="px-3 py-1.5 rounded-lg lm-btn-accent text-xs font-semibold shrink-0 cursor-pointer"
                 >
-                  Start Mock
+                  Open Mock →
                 </button>
               </div>
             )}

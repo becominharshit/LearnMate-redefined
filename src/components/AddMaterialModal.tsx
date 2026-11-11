@@ -190,6 +190,9 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
       aria-modal="true"
       aria-labelledby="add-material-modal-title"
       data-testid="add-material-modal"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !isProcessing) onClose();
+      }}
     >
       <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-[#121A2E] text-ink border border-line shadow-2xl overflow-hidden my-auto">
         {/* Header */}
@@ -316,6 +319,50 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
                 <p className="mt-1 text-xs text-muted">
                   Up to 60 pages per PDF. Stored locally in IndexedDB with smart page-aware retrieval.
                 </p>
+                {!isProcessing && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pdfInputRef.current?.click();
+                    }}
+                    className="mt-3 px-4 py-2 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Select PDF File</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Or add via alternative pills (matching wanted/LearnMate JEE Add Material Modal-8.png) */}
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line text-xs">
+                <span className="font-semibold text-muted">Or add via:</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMode('photo')}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line bg-canvas hover:bg-soft text-ink font-semibold cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-brand" />
+                    <span>Photo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('youtube')}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line bg-canvas hover:bg-soft text-ink font-semibold cursor-pointer"
+                  >
+                    <Youtube className="w-3.5 h-3.5 text-danger" />
+                    <span>YouTube</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('paste')}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line bg-canvas hover:bg-soft text-ink font-semibold cursor-pointer"
+                  >
+                    <ClipboardPaste className="w-3.5 h-3.5 text-brand" />
+                    <span>Paste Text</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}

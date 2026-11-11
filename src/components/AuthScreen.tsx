@@ -27,6 +27,7 @@ interface AuthScreenProps {
   onOpenSafety: () => void;
   onBack?: () => void;
   onOpenLegal?: (page: 'privacy' | 'terms' | 'contact') => void;
+  onEnterDemo?: () => void;
   initialMode?: 'signin' | 'signup';
   /** Explains why the student was sent here, e.g. to add the sample chapter. */
   notice?: string | null;
@@ -43,6 +44,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   onOpenSafety,
   onBack,
   onOpenLegal,
+  onEnterDemo,
   initialMode = 'signin',
   notice: entryNotice = null,
 }) => {
@@ -297,6 +299,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               {busy === 'email' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
               {submitLabel}
             </button>
+
+            {onEnterDemo && mode !== 'reset' && (
+              <button
+                type="button"
+                onClick={onEnterDemo}
+                data-testid="auth-enter-demo-btn"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-brand-200 bg-brand-soft hover:bg-brand-100 text-brand text-xs font-bold transition-colors cursor-pointer"
+              >
+                <GraduationCap className="w-4 h-4" />
+                <span>Continue with Demo Student Workspace</span>
+              </button>
+            )}
           </form>
 
           <p className="text-sm text-muted text-center">

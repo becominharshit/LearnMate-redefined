@@ -192,7 +192,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <>
       <header className="sticky top-0 z-40 w-full bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-b border-line lm-no-print">
-        <div className="max-w-[1360px] mx-auto px-3 sm:px-6 lg:px-8 h-15 flex items-center gap-2">
+        <div className="max-w-[1440px] mx-auto px-3 sm:px-4 lg:px-6 h-15 flex items-center gap-1.5">
           {/* Brand */}
           <button
             type="button"
@@ -215,7 +215,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {/* Desktop 5 Primary Destinations: Home · Study · Practice · Revise · Progress */}
-          <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-1 ml-2">
+          <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-0.5 ml-1">
             {DESKTOP_NAV.map((item) => {
               const Icon = item.icon;
               const active = isTabActive(item.id, activeTab);
@@ -226,13 +226,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onSelectTab(item.id)}
                   data-testid={`nav-tab-${item.id}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
                     active
                       ? 'bg-brand-soft text-brand border border-brand/20'
                       : 'text-muted hover:text-ink hover:bg-soft'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
                   {item.label}
                 </button>
               );
@@ -240,14 +240,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
 
           {/* Right Global Utilities: + Add Material · Search (Ctrl+K) · Study Tools · Focus 25:00 · Theme · Notifications · Help (?) · Profile */}
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-1.5 shrink-0">
             {onOpenAddMaterial && (
               <button
                 type="button"
                 onClick={() => onOpenAddMaterial('pdf')}
                 data-testid="navbar-add-material-btn"
                 aria-label="Add Material"
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus className="w-3.5 h-3.5 shrink-0" />
                 <span>
@@ -264,10 +264,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 data-testid="navbar-search-btn"
                 aria-label="Search (Ctrl+K)"
                 title="Search chapters, notes, PYQs, materials & tools (Ctrl+K)"
-                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer"
               >
                 <Search className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden md:inline">Search (Ctrl+K)</span>
+                <span className="hidden xl:inline">Search (Ctrl+K)</span>
               </button>
             )}
 

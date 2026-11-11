@@ -800,64 +800,67 @@ export const StudyView: React.FC<StudyViewProps> = ({
           </p>
         </div>
 
-        {/* Mode Switcher: Read & Ask | Chapter Quiz | Adaptive Drill + Live Voice */}
+        {/* Mode Actions: Chapter Quiz | Adaptive Drill | Voice Tutor (matching wanted/LearnMate JEE Study Workbench-6.png) */}
         <div className="flex flex-wrap items-center gap-2 pb-2">
-          <div
-            role="tablist"
-            aria-label="Study Screen Modes"
-            className="inline-flex items-center p-1 rounded-xl bg-canvas border border-line"
-          >
+          {subMode !== 'explain' && (
             <button
               type="button"
-              role="tab"
-              aria-selected={subMode === 'explain'}
               onClick={() => setSubMode('explain')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                subMode === 'explain'
-                  ? 'bg-brand text-white shadow-2xs'
-                  : 'text-muted hover:text-ink'
-              }`}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-canvas hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
             >
-              Read &amp; Ask Tutor
+              <ChevronLeft className="w-3.5 h-3.5 text-muted" />
+              <span>Back to Notes</span>
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={subMode === 'quiz'}
-              onClick={() => {
+          )}
+
+          <button
+            type="button"
+            data-testid="study-chapter-quiz-btn"
+            onClick={() => {
+              if (subMode === 'quiz') {
+                setSubMode('explain');
+              } else {
                 setSubMode('quiz');
                 if (quizQuestions.length === 0 && !isGeneratingQuiz) {
                   void handleGenerateDiagnosticQuiz(false);
                 }
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                subMode === 'quiz'
-                  ? 'bg-brand text-white shadow-2xs'
-                  : 'text-muted hover:text-ink'
-              }`}
-            >
-              Chapter Quiz
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={subMode === 'adaptive'}
-              onClick={() => setSubMode('adaptive')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                subMode === 'adaptive'
-                  ? 'bg-brand text-white shadow-2xs'
-                  : 'text-muted hover:text-ink'
-              }`}
-            >
-              Adaptive Drill
-            </button>
-          </div>
+              }
+            }}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+              subMode === 'quiz'
+                ? 'lm-btn-accent shadow-2xs'
+                : 'border border-line bg-white hover:bg-canvas text-ink'
+            }`}
+          >
+            <Target className="w-3.5 h-3.5 text-brand" />
+            <span>Chapter Quiz</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="study-adaptive-drill-btn"
+            onClick={() => {
+              if (subMode === 'adaptive') {
+                setSubMode('explain');
+              } else {
+                setSubMode('adaptive');
+              }
+            }}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+              subMode === 'adaptive'
+                ? 'lm-btn-accent shadow-2xs'
+                : 'border border-line bg-white hover:bg-canvas text-ink'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 text-brand" />
+            <span>Adaptive Drill</span>
+          </button>
 
           <button
             type="button"
             onClick={() => setVoiceModalOpen(true)}
             data-testid="open-voice-tutor-btn"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer"
           >
             <Mic className="w-3.5 h-3.5 text-brand" />
             <span>Voice Tutor</span>

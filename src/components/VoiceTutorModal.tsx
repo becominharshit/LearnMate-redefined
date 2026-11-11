@@ -694,6 +694,9 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
       data-testid="voice-tutor-modal"
       data-voice-lifecycle={lifecycleState}
       className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) handleEndSession();
+      }}
     >
       <div className="w-full max-w-2xl bg-slate-900 text-white rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Top Header */}

@@ -993,33 +993,32 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
       )}
 
       {/* =====================================================================
-       * 1. DIAGRAM MAKER (Phase 5.1)
+       * 1. DIAGRAM MAKER (Phase 5.1 & wanted/LearnMate Diagram Maker_ Inclined Plane Forces-5.png)
        * ===================================================================== */}
       {subTab === 'visualize' && (
-        <div className="space-y-6">
-          {/* Main Controls Card */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 space-y-5 shadow-2xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-ink dark:text-slate-100 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-brand dark:text-indigo-400" />
-                  <span>Interactive JEE Diagram Maker</span>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* LEFT 4 COLS: Concept Input, Category, Presets & Source Grounding */}
+          <div className="lg:col-span-4 space-y-5">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-5 space-y-4 shadow-2xs">
+              <div className="space-y-1">
+                <h2 className="text-base font-bold text-ink dark:text-slate-100 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-brand dark:text-indigo-400" />
+                  <span>JEE Diagram Maker</span>
                 </h2>
-                <p className="text-xs text-muted dark:text-slate-400">
-                  Grounds diagrams in &ldquo;{activeDocument.title}&rdquo; with arrows, force components,
-                  equations, and page citations.
+                <p className="text-xs text-muted dark:text-slate-400 leading-relaxed">
+                  Grounds diagrams in &ldquo;{activeDocument.title}&rdquo; with vector coordinates, arrows, and formulas.
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-muted dark:text-slate-400">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-muted dark:text-slate-400">
                   Category:
-                </span>
+                </label>
                 <select
                   aria-label="Diagram category selector"
                   value={visualCategory}
                   onChange={(e) => setVisualCategory(e.target.value)}
-                  className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-canvas dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100"
                 >
                   <option value="auto">Auto-Detect from Concept</option>
                   <option value="free_body_diagram">Free-Body Diagram (FBD)</option>
@@ -1031,11 +1030,11 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   <option value="educational_diagram">General Scientific Diagram</option>
                 </select>
               </div>
-            </div>
 
-            {/* Input Bar */}
-            <div className="flex flex-col sm:flex-row items-stretch gap-2.5">
-              <div className="flex-1 relative">
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-muted dark:text-slate-400">
+                  Concept Prompt:
+                </label>
                 <input
                   type="text"
                   value={visualConceptInput}
@@ -1043,175 +1042,199 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void handleRunVisualize();
                   }}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs sm:text-sm font-semibold text-ink dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand/40"
-                  placeholder="Enter concept (e.g. Block on incline with friction, H2O VSEPR geometry, Convex lens ray optics)..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs font-semibold text-ink dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand/40"
+                  placeholder="e.g. Block on incline with friction, H2O VSEPR..."
                 />
+                <button
+                  type="button"
+                  disabled={isVisualizing || !visualConceptInput.trim()}
+                  onClick={() => void handleRunVisualize()}
+                  data-testid="generate-visual-btn"
+                  className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer disabled:opacity-60 transition-colors shadow-2xs"
+                >
+                  {isVisualizing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Generating SVG...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>Generate Diagram</span>
+                    </>
+                  )}
+                </button>
               </div>
 
-              <button
-                type="button"
-                disabled={isVisualizing || !visualConceptInput.trim()}
-                onClick={() => void handleRunVisualize()}
-                data-testid="generate-visual-btn"
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs sm:text-sm font-semibold cursor-pointer disabled:opacity-60 transition-colors shadow-sm"
-              >
-                {isVisualizing ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Generating SVG...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>Generate Diagram</span>
-                  </>
-                )}
-              </button>
-            </div>
+              {/* Quick Concept Presets */}
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted dark:text-slate-400 flex items-center gap-1">
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Presets:</span>
+                  </span>
+                  <div className="flex items-center gap-1 text-[10px]">
+                    {(['all', 'Physics', 'Chemistry', 'Mathematics'] as const).map((sub) => (
+                      <button
+                        key={sub}
+                        type="button"
+                        onClick={() => setSelectedSubjectFilter(sub)}
+                        className={`px-1.5 py-0.5 rounded font-semibold cursor-pointer transition-colors ${
+                          selectedSubjectFilter === sub
+                            ? 'bg-brand/10 dark:bg-indigo-950/60 text-brand dark:text-indigo-400'
+                            : 'text-muted hover:text-ink'
+                        }`}
+                      >
+                        {sub === 'all' ? 'All' : sub.slice(0, 4)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Quick Concept Presets */}
-            <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted dark:text-slate-400 flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>JEE Core Concept Presets:</span>
-                </span>
-                <div className="flex items-center gap-1.5 text-[11px]">
-                  {(['all', 'Physics', 'Chemistry', 'Mathematics'] as const).map((sub) => (
+                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+                  {JEE_PRESETS.filter(
+                    (p) => selectedSubjectFilter === 'all' || p.subject === selectedSubjectFilter
+                  ).map((preset) => (
                     <button
-                      key={sub}
+                      key={preset.label}
                       type="button"
-                      onClick={() => setSelectedSubjectFilter(sub)}
-                      className={`px-2 py-0.5 rounded-md font-semibold cursor-pointer transition-colors ${
-                        selectedSubjectFilter === sub
-                          ? 'bg-brand/10 dark:bg-indigo-950/60 text-brand dark:text-indigo-400'
-                          : 'text-muted dark:text-slate-400 hover:text-ink dark:hover:text-slate-200'
-                      }`}
+                      onClick={() => {
+                        setVisualConceptInput(preset.concept);
+                        setVisualCategory(preset.category);
+                        void handleRunVisualize(preset.concept, preset.category);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-canvas hover:border-brand/40 text-[11px] text-ink dark:text-slate-200 font-medium transition-all cursor-pointer"
                     >
-                      {sub === 'all' ? 'All' : sub}
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand dark:bg-indigo-400" />
+                      <span className="truncate max-w-[140px]">{preset.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
+            </div>
 
-              <div className="flex flex-wrap gap-2">
-                {JEE_PRESETS.filter(
-                  (p) => selectedSubjectFilter === 'all' || p.subject === selectedSubjectFilter
-                ).map((preset) => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => {
-                      setVisualConceptInput(preset.concept);
-                      setVisualCategory(preset.category);
-                      void handleRunVisualize(preset.concept, preset.category);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:border-brand/40 dark:hover:border-indigo-500/40 hover:bg-brand/5 dark:hover:bg-indigo-950/30 text-xs text-ink dark:text-slate-200 font-medium transition-all cursor-pointer"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-brand dark:bg-indigo-400" />
-                    <span>{preset.label}</span>
-                    <span className="text-[10px] text-muted dark:text-slate-400">
-                      ({preset.subject})
-                    </span>
-                  </button>
-                ))}
+            {/* Cited Source Card (matching wanted/LearnMate Diagram Maker_ Inclined Plane Forces-5.png) */}
+            <div className="p-4 rounded-2xl border border-line bg-canvas space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-ink uppercase tracking-wider text-[10px] text-muted">
+                  Cited Source
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-brand-soft text-brand text-[10px] font-bold">
+                  Grounded
+                </span>
               </div>
+              <div>
+                <p className="font-bold text-ink truncate">{activeDocument.title}</p>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Vector geometry and physics equations derived directly from your notes.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubTab('videolesson')}
+                className="w-full py-1.5 px-3 rounded-lg border border-line bg-white dark:bg-slate-800 hover:bg-soft text-ink text-[11px] font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1"
+              >
+                <span>Open Animated Lesson</span>
+                <ArrowRight className="w-3 h-3 text-muted" />
+              </button>
             </div>
           </div>
 
-          {/* Diagram Result View */}
-          {visualResult?.spec ? (
-            <div className="space-y-4">
-              {/* Top Banner if Notice / Fallback */}
-              {visualResult.modelNotice && (
-                <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-950 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                    <span>
-                      <strong>Status ({visualResult.verificationStatus || 'VERIFIED'}):</strong>{' '}
-                      {visualResult.modelNotice}
+          {/* RIGHT 8 COLS: Diagram Result / Canvas / Component Breakdown */}
+          <div className="lg:col-span-8 space-y-4">
+            {visualResult?.spec ? (
+              <div className="space-y-4">
+                {/* Top Banner if Notice / Fallback */}
+                {visualResult.modelNotice && (
+                  <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-950 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>
+                        <strong>Status ({visualResult.verificationStatus || 'VERIFIED'}):</strong>{' '}
+                        {visualResult.modelNotice}
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-[11px] font-bold shrink-0">
+                      {visualResult.isAiGenerated ? 'AI Model Grounded' : 'Deterministic SVG Template'}
                     </span>
                   </div>
-                  <span className="px-2.5 py-0.5 rounded-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-[11px] font-bold shrink-0">
-                    {visualResult.isAiGenerated ? 'AI Model Grounded' : 'Deterministic SVG Template'}
-                  </span>
-                </div>
-              )}
+                )}
 
-              {/* Main App-Owned SVG Renderer */}
-              <DiagramRenderer
-                spec={visualResult.spec}
-                isDarkTheme={isDark}
-                isSaved={isCurrentVisualSaved}
-                onSave={(spec) => {
-                  handleSaveCreativeAsset('visual_diagram', spec.title || visualResult.concept, {
-                    concept: visualResult.concept,
-                    style: visualResult.style,
-                    spec,
-                    diagramSteps: visualResult.diagramSteps,
-                    citedPages: spec.citedPages,
-                    isAiGenerated: visualResult.isAiGenerated,
-                    modelNotice: visualResult.modelNotice,
-                  });
-                }}
-                onNavigateToPage={onNavigateToPage}
-              />
+                {/* Main App-Owned SVG Renderer */}
+                <DiagramRenderer
+                  spec={visualResult.spec}
+                  isDarkTheme={isDark}
+                  isSaved={isCurrentVisualSaved}
+                  onSave={(spec) => {
+                    handleSaveCreativeAsset('visual_diagram', spec.title || visualResult.concept, {
+                      concept: visualResult.concept,
+                      style: visualResult.style,
+                      spec,
+                      diagramSteps: visualResult.diagramSteps,
+                      citedPages: spec.citedPages,
+                      isAiGenerated: visualResult.isAiGenerated,
+                      modelNotice: visualResult.modelNotice,
+                    });
+                  }}
+                  onNavigateToPage={onNavigateToPage}
+                />
 
-              {/* Step / Formula Details Below Diagram */}
-              {visualResult.diagramSteps && visualResult.diagramSteps.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted dark:text-slate-400">
-                    Component Breakdown &amp; Analysis:
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {visualResult.diagramSteps.map((step) => (
-                      <div
-                        key={step.step}
-                        className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-1.5"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="w-5 h-5 rounded-md text-white text-[11px] font-bold flex items-center justify-center shrink-0"
-                            style={{ backgroundColor: step.color || '#4F46E5' }}
-                          >
-                            {step.step}
-                          </span>
-                          <span className="text-xs font-bold text-ink dark:text-slate-100 truncate">
-                            {step.title}
-                          </span>
+                {/* Step / Formula Details Below Diagram */}
+                {visualResult.diagramSteps && visualResult.diagramSteps.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted dark:text-slate-400">
+                      Component Breakdown &amp; Analysis:
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {visualResult.diagramSteps.map((step) => (
+                        <div
+                          key={step.step}
+                          className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-1.5"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-5 h-5 rounded-md text-white text-[11px] font-bold flex items-center justify-center shrink-0"
+                              style={{ backgroundColor: step.color || '#4F46E5' }}
+                            >
+                              {step.step}
+                            </span>
+                            <span className="text-xs font-bold text-ink dark:text-slate-100 truncate">
+                              {step.title}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted dark:text-slate-400 leading-relaxed">
+                            {step.detail}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted dark:text-slate-400 leading-relaxed">
-                          {step.detail}
-                        </p>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
+                )}
+              </div>
+            ) : isVisualizing ? (
+              <div className="p-12 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-3">
+                <RefreshCw className="w-8 h-8 mx-auto text-brand dark:text-indigo-400 animate-spin" />
+                <div className="text-sm font-bold text-ink dark:text-slate-100">
+                  Building Grounded SVG Diagram...
                 </div>
-              )}
-            </div>
-          ) : isVisualizing ? (
-            <div className="p-12 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-3">
-              <RefreshCw className="w-8 h-8 mx-auto text-brand dark:text-indigo-400 animate-spin" />
-              <div className="text-sm font-bold text-ink dark:text-slate-100">
-                Building Grounded SVG Diagram...
+                <p className="text-xs text-muted dark:text-slate-400 max-w-md mx-auto">
+                  Analyzing notes in &ldquo;{activeDocument.title}&rdquo;, solving geometric
+                  coordinates, and rendering validated vector primitives.
+                </p>
               </div>
-              <p className="text-xs text-muted dark:text-slate-400 max-w-md mx-auto">
-                Analyzing notes in &ldquo;{activeDocument.title}&rdquo;, solving geometric
-                coordinates, and rendering validated vector primitives.
-              </p>
-            </div>
-          ) : (
-            <div className="p-10 rounded-3xl bg-slate-50 dark:bg-slate-900/60 border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-2">
-              <BookOpen className="w-8 h-8 mx-auto text-slate-400 dark:text-slate-600" />
-              <div className="text-sm font-semibold text-ink dark:text-slate-200">
-                Ready to Generate Concept Diagram
+            ) : (
+              <div className="p-10 rounded-3xl bg-slate-50 dark:bg-slate-900/60 border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-2">
+                <BookOpen className="w-8 h-8 mx-auto text-slate-400 dark:text-slate-600" />
+                <div className="text-sm font-semibold text-ink dark:text-slate-200">
+                  Ready to Generate Concept Diagram
+                </div>
+                <p className="text-xs text-muted dark:text-slate-400 max-w-md mx-auto">
+                  Choose a core JEE preset on the left or type any physics, chemistry, or math concept to
+                  synthesize an SVG diagram directly from your study notes.
+                </p>
               </div>
-              <p className="text-xs text-muted dark:text-slate-400 max-w-md mx-auto">
-                Choose a core JEE preset above or type any physics, chemistry, or math concept to
-                synthesize an SVG diagram directly from your study notes.
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
@@ -2587,7 +2610,12 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
 
       {/* Inspecting Saved Asset Modal */}
       {inspectingAsset && inspectingAsset.payload?.spec && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setInspectingAsset(null);
+          }}
+        >
           <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
               <div>

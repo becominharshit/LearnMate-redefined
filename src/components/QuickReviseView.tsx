@@ -782,25 +782,25 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       {/* Editorial Header */}
       <div className="space-y-4 border-b border-line pb-0 no-print">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-2">
-          <div className="space-y-1.5">
-            <div className="lm-kicker">
-              {subjectLabel} &nbsp;/&nbsp; {activeDocument.title.replace(/\.pdf$/i, '')}
+          <div className="space-y-1">
+            <div className="lm-kicker text-xs font-bold uppercase tracking-wider text-brand">
+              REVISE
             </div>
-            <h1 className="lm-editorial-title text-4xl sm:text-5xl">
-              Revise with clarity.
+            <h1 className="lm-editorial-title text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+              Revise
             </h1>
-            <p className="lm-editorial-subtitle text-base sm:text-lg text-body">
-              Flashcards, sticky notes, mind map, summary sheet, mistake DNA, and formula book.
+            <p className="lm-editorial-subtitle text-xs sm:text-sm text-body">
+              Review concepts, mind maps, formula sheets, and spaced repetition cards.
             </p>
           </div>
 
-          {/* Primary PDF Export & Preview Actions */}
+          {/* Primary PDF Export & Preview Actions (matching wanted/d & f Block Revision Mind Map-4.png) */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               data-testid="preview-revision-pdf-btn"
               onClick={handleOpenPreviewModal}
-              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-ink transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
             >
               <Eye className="w-3.5 h-3.5 text-brand" />
               <span>Preview Notes</span>
@@ -811,17 +811,17 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               data-testid="download-revision-pdf-btn"
               disabled={isGeneratingPdf}
               onClick={() => void handleDownloadRevisionPdf()}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg lm-btn-accent text-xs font-semibold transition-all cursor-pointer disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl lm-btn-accent text-xs font-semibold transition-all cursor-pointer disabled:opacity-60"
             >
               {isGeneratingPdf ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Generating PDF...</span>
+                  <span>PDF...</span>
                 </>
               ) : (
                 <>
                   <FileDown className="w-3.5 h-3.5" />
-                  <span>Download PDF</span>
+                  <span>PDF</span>
                 </>
               )}
             </button>
@@ -830,11 +830,11 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               type="button"
               data-testid="download-revision-txt-btn"
               onClick={handleDownloadOnePageRevisionTxt}
-              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-medium text-muted transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-muted hover:text-ink transition-colors cursor-pointer"
               title="Download plain text (.txt) version"
             >
               <FileText className="w-3.5 h-3.5 text-muted" />
-              <span>Download TXT</span>
+              <span>TXT</span>
             </button>
           </div>
         </div>
@@ -1961,28 +1961,10 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               <button
                 type="button"
                 onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Notes</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadOnePageRevisionTxt}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>Download as TXT</span>
-              </button>
-              <button
-                type="button"
-                data-testid="onepage-download-pdf-btn"
-                disabled={isGeneratingPdf}
-                onClick={() => void handleDownloadRevisionPdf()}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold shadow-2xs cursor-pointer disabled:opacity-60"
-              >
-                <FileDown className="w-3.5 h-3.5" />
-                <span>{isGeneratingPdf ? 'Generating PDF...' : 'Download PDF'}</span>
               </button>
             </div>
           </div>

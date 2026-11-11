@@ -183,6 +183,9 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     <div
       data-testid="student-profile-modal"
       className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div className="bg-white dark:bg-[#121A2E] text-ink rounded-2xl border border-line shadow-2xl max-w-3xl w-full overflow-hidden my-8">
         {/* Modal Header */}

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Calculator,
   Scale,
@@ -17,6 +18,8 @@ import {
   ZoomOut,
   Download,
   AlertCircle,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import type { StudyDocument, FocusSessionRecord } from '../types/study';
 import {
@@ -73,6 +76,43 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
       onConsumeExternalOpen?.();
     }
   }, [externalOpenTab, onConsumeExternalOpen]);
+
+  // Escape closes the Study Tools panel; lock page scroll while it is open
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen]);
+
+  // Clicking outside (or Escape) closes the focus timer popover
+  const focusWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!focusPopoverOpen) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (focusWrapRef.current && !focusWrapRef.current.contains(e.target as Node)) {
+        setFocusPopoverOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFocusPopoverOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [focusPopoverOpen]);
 
   // 1. Scientific Calculator State
   const [calcInput, setCalcInput] = useState('2 * sin(pi / 6) + sqrt(16)');
@@ -282,11 +322,33 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
   };
 
   // 6. Docked Non-Overlapping Pomodoro Focus Timer State (25:00)
+  const [focusMode, setFocusMode] = useState<'focus' | 'break'>('focus');
   const [focusSeconds, setFocusSeconds] = useState(25 * 60);
   const [isFocusRunning, setIsFocusRunning] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [completedPomodoros, setCompletedPomodoros] = useState(
     () => studyStorage.getFocusSessions().length
   );
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const handleToggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (!isFocusRunning) return;
@@ -294,29 +356,31 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
       setFocusSeconds((prev) => {
         if (prev <= 1) {
           setIsFocusRunning(false);
-          const sessionId = `focus-${Date.now()}`;
-          const newSession: FocusSessionRecord = {
-            id: sessionId,
-            documentId: activeDocument?.id || 'general',
-            documentTitle: activeDocument?.title || 'General Study Session',
-            durationMinutes: 25,
-            completedAt: new Date().toISOString(),
-          };
-          studyStorage.saveFocusSession(newSession);
-          awardLearningXp({
-            eventId: `focus:${sessionId}`,
-            category: 'focus_session_completed',
-            title: `Completed 25m Focus Session (${newSession.documentTitle})`,
-            xpAwarded: 25,
-          });
-          setCompletedPomodoros(studyStorage.getFocusSessions().length);
-          return 25 * 60;
+          if (focusMode === 'focus') {
+            const sessionId = `focus-${Date.now()}`;
+            const newSession: FocusSessionRecord = {
+              id: sessionId,
+              documentId: activeDocument?.id || 'general',
+              documentTitle: activeDocument?.title || 'General Study Session',
+              durationMinutes: 25,
+              completedAt: new Date().toISOString(),
+            };
+            studyStorage.saveFocusSession(newSession);
+            awardLearningXp({
+              eventId: `focus:${sessionId}`,
+              category: 'focus_session_completed',
+              title: `Completed 25m Focus Session (${newSession.documentTitle})`,
+              xpAwarded: 25,
+            });
+            setCompletedPomodoros(studyStorage.getFocusSessions().length);
+          }
+          return focusMode === 'focus' ? 25 * 60 : 5 * 60;
         }
         return prev - 1;
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [isFocusRunning, activeDocument]);
+  }, [isFocusRunning, activeDocument, focusMode]);
 
   const formatTimer = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -346,27 +410,28 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
         type="button"
         onClick={() => setIsOpen(true)}
         data-testid="study-utilities-toggle-btn"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold transition-colors cursor-pointer"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
         title="Open Study Tools (Calculator, Units, Statistics, Formulas, Graph)"
       >
-        <Wrench className="w-3.5 h-3.5 text-brand" />
+        <Wrench className="w-3.5 h-3.5 text-brand shrink-0" />
         <span className="hidden sm:inline">Study Tools</span>
       </button>
 
       {/* Docked Focus Timer Pill (non-overlapping in top navbar) */}
-      <div className="relative">
+      <div className="relative shrink-0" ref={focusWrapRef}>
         <button
           type="button"
           onClick={() => setFocusPopoverOpen((prev) => !prev)}
           data-testid="navbar-focus-timer-btn"
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold tabular-nums transition-colors cursor-pointer ${
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold tabular-nums whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
             isFocusRunning
               ? 'border-brand bg-brand-soft text-brand'
               : 'border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink'
           }`}
           title="Pomodoro Focus Timer (25:00)"
         >
-          <Timer className="w-3.5 h-3.5 text-brand" />
+          <Timer className="w-3.5 h-3.5 text-brand shrink-0" />
+          <span className="hidden xl:inline">{focusMode === 'focus' ? 'Focus' : 'Break'}</span>
           <span>{formatTimer(focusSeconds)}</span>
         </button>
 
@@ -376,12 +441,56 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
             className="absolute right-0 mt-2 w-72 rounded-2xl border border-line bg-white dark:bg-[#121A2E] shadow-xl p-4 z-50 space-y-3"
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-ink">Focus Timer</span>
-              <span className="text-[11px] font-semibold text-brand">
-                {completedPomodoros} session{completedPomodoros === 1 ? '' : 's'} logged
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-ink">Focus Timer</span>
+                <span className="text-[11px] font-semibold text-brand">
+                  {completedPomodoros} session{completedPomodoros === 1 ? '' : 's'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFocusPopoverOpen(false)}
+                aria-label="Close Focus Timer"
+                className="p-1 rounded-lg text-muted hover:text-ink hover:bg-soft transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <div className="text-center py-2 rounded-xl bg-soft border border-line">
+
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-soft border border-line">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFocusRunning(false);
+                  setFocusMode('focus');
+                  setFocusSeconds(25 * 60);
+                }}
+                className={`py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  focusMode === 'focus'
+                    ? 'bg-white dark:bg-[#121A2E] text-brand shadow-xs'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                25m Focus
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFocusRunning(false);
+                  setFocusMode('break');
+                  setFocusSeconds(5 * 60);
+                }}
+                className={`py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  focusMode === 'break'
+                    ? 'bg-white dark:bg-[#121A2E] text-brand shadow-xs'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                5m Break
+              </button>
+            </div>
+
+            <div className="text-center py-2.5 rounded-xl bg-soft border border-line">
               <div className="text-2xl font-extrabold font-mono text-ink tabular-nums">
                 {formatTimer(focusSeconds)}
               </div>
@@ -397,51 +506,66 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                 className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer"
               >
                 {isFocusRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                <span>{isFocusRunning ? 'Pause' : 'Start 25m'}</span>
+                <span>{isFocusRunning ? 'Pause' : focusMode === 'focus' ? 'Start 25m' : 'Start 5m'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setIsFocusRunning(false);
-                  setFocusSeconds(25 * 60);
+                  setFocusSeconds(focusMode === 'focus' ? 25 * 60 : 5 * 60);
                 }}
+                data-testid="focus-timer-reset-btn"
                 className="px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#0B1020] hover:bg-soft text-xs font-semibold text-muted hover:text-ink cursor-pointer"
                 title="Reset timer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleFullscreen}
+                data-testid="focus-timer-fullscreen-btn"
+                className="px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#0B1020] hover:bg-soft text-xs font-semibold text-muted hover:text-ink cursor-pointer"
+                title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen Focus'}
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Slide-over / Modal Study Tools Drawer (matching Image 6) */}
-      {isOpen && (
+      {/* Slide-over / Modal Study Tools Dialog (matching Image 6 & wanted/Study Tools Graphing Workspace-7.png) */}
+      {/* Rendered in a portal on <body>: the sticky navbar uses backdrop-filter, which would
+          otherwise become the containing block for this fixed overlay and clip it to the header. */}
+      {isOpen && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-xs flex justify-end"
-          onClick={(e) => {
+          className="fixed inset-0 z-[100] bg-slate-950/50 backdrop-blur-[2px] flex justify-end"
+          onMouseDown={(e) => {
             if (e.target === e.currentTarget) setIsOpen(false);
           }}
         >
           <aside
+            role="dialog"
+            aria-modal="true"
             data-testid="study-utilities-popover"
             aria-label="Study Tools"
-            className="w-full max-w-[600px] h-full bg-white dark:bg-[#111827] border-l border-line shadow-2xl flex flex-col overflow-hidden"
+            className="w-full sm:max-w-[640px] h-full bg-white dark:bg-[#111827] text-ink sm:border-l border-line shadow-2xl flex flex-col overflow-hidden"
           >
             {/* Header */}
             <div className="px-5 py-4 border-b border-line flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Wrench className="w-4 h-4 text-brand" />
-                <h2 className="font-display text-base font-bold text-ink">Study Tools</h2>
+                <h2 className="font-display text-xl font-bold text-ink">Study Tools</h2>
               </div>
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
                 aria-label="Close Study Tools"
+                title="Close (Esc)"
                 data-testid="study-tools-close-btn"
-                className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-soft transition-colors cursor-pointer"
+                className="w-9 h-9 rounded-xl border border-line bg-canvas text-muted hover:text-ink hover:bg-soft flex items-center justify-center transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-brand"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
@@ -464,7 +588,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
                     data-testid={`utility-tab-${tab.id}`}
-                    className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 border-b-2 text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                    className={`flex-1 min-w-fit inline-flex items-center justify-center gap-1.5 px-3 py-2.5 border-b-2 text-xs sm:text-sm font-bold whitespace-nowrap transition-colors cursor-pointer ${
                       active
                         ? 'border-brand text-brand bg-brand-soft/40 rounded-t-lg'
                         : 'border-transparent text-muted hover:text-ink'
@@ -1250,7 +1374,8 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
               )}
             </div>
           </aside>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
