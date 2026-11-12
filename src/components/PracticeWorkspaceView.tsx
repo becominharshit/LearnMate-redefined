@@ -82,6 +82,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
   // Top-level Practice Hub state matching Image 11 + Open-Source Question Bank + Multi-Exam Curricula
   const [examFilter, setExamFilter] = useState<'jee_main' | 'jee_advanced' | 'bitsat' | 'viteee'>('jee_main');
+  const selectedExam = examFilter;
   const [hubTab, setHubTab] = useState<PracticeHubTab>('mock_tests');
   const [adminQbOpen, setAdminQbOpen] = useState<boolean>(false);
   const [mistakeBookOpen, setMistakeBookOpen] = useState<boolean>(false);
@@ -203,9 +204,8 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   // Filtered PYQ Corpus Questions for Chapter-wise / Year-wise solver (includes ingested open-source PYQs + BITSAT + VITEEE)
   const filteredPyqQuestions = useMemo(() => {
     if (examFilter === 'bitsat' || examFilter === 'viteee') {
-      const targetPaperPrefix = examFilter === 'bitsat' ? 'bitsat' : 'viteee';
       return BITSAT_AND_VITEEE_PYQ_QUESTIONS.filter((q) => {
-        if (!q.paperId.startsWith(targetPaperPrefix)) return false;
+        if (q.exam !== examFilter && !q.paperId.includes(examFilter)) return false;
         if (paperYearFilter !== 'All' && q.year !== paperYearFilter) return false;
         if (pyqSubjectFilter !== 'All' && q.subject !== pyqSubjectFilter) return false;
         return true;
