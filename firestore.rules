@@ -17,6 +17,35 @@ service cloud.firestore {
       return isVerifiedStudent() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isVerifiedStudent() && (
+        request.auth.token.email == "harshitkumar7407@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidQuestionBankRecord(data, questionId) {
+      return data.keys().hasAll(['id', 'exam', 'year', 'subject', 'chapter', 'topic', 'difficulty', 'questionType', 'status']) &&
+             data.id is string && data.id == questionId && data.id.size() <= 160 &&
+             data.exam in ['JEE_MAIN', 'JEE_ADVANCED'] &&
+             data.year is int && data.year >= 1995 && data.year <= 2030 &&
+             data.subject in ['PHYSICS', 'CHEMISTRY', 'MATHEMATICS'] &&
+             data.chapter is string && data.chapter.size() > 0 && data.chapter.size() <= 160 &&
+             data.topic is string && data.topic.size() > 0 && data.topic.size() <= 160 &&
+             data.difficulty in ['EASY', 'MEDIUM', 'HARD'] &&
+             data.questionType in ['MCQ_SINGLE', 'MCQ_MULTI', 'NUMERICAL', 'INTEGER', 'DECIMAL', 'ASSERTION_REASON'] &&
+             data.status in ['APPROVED', 'PENDING_REVIEW', 'REJECTED', 'FAILED_VALIDATION'];
+    }
+
+    function isValidQuestionIdMapping(data) {
+      return data.keys().hasAll(['mappingKey', 'sourceId', 'externalId', 'learnMateQuestionId', 'importedAt']) &&
+             data.mappingKey is string && data.mappingKey.size() <= 240 &&
+             data.sourceId is string && data.sourceId.size() <= 80 &&
+             data.externalId is string && data.externalId.size() <= 160 &&
+             data.learnMateQuestionId is string && data.learnMateQuestionId.size() <= 160 &&
+             data.importedAt is string && data.importedAt.size() <= 64;
+    }
+
     function isValidUserProfile(data, userId) {
       return data.keys().hasAll(['uid', 'updatedAt']) &&
              data.keys().hasOnly(['uid', 'updatedAt', 'email', 'displayName', 'photoURL', 'activeDocumentId', 'profileJson']) &&
@@ -128,6 +157,27 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidAiReport(request.resource.data, userId, reportId);
         allow delete: if isOwner(userId);
       }
+    }
+
+    // ===============================================================
+    // Global Unified Question Bank & Dataset Ingestion Collections
+    // Students can read approved questions; only admins can import/modify.
+    // ===============================================================
+    match /question_bank/{questionId} {
+      allow read: if isAdmin() || (isVerifiedStudent() && resource.data.status == 'APPROVED');
+      allow create, update: if isAdmin() && isValidQuestionBankRecord(request.resource.data, questionId);
+      allow delete: if isAdmin();
+    }
+
+    match /question_id_mappings/{mappingId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() && isValidQuestionIdMapping(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /ingestion_jobs/{jobId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
   }
 }

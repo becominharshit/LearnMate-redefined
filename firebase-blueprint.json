@@ -86,6 +86,67 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "uid", "kind", "reason", "excerpt", "createdAt"]
+    },
+    "QuestionBankRecord": {
+      "title": "QuestionBankRecord",
+      "description": "Normalized JEE Main or JEE Advanced question record with provenance metadata and solution verification status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "exam": { "type": "string", "enum": ["JEE_MAIN", "JEE_ADVANCED"] },
+        "year": { "type": "integer" },
+        "session": { "type": "string" },
+        "shift": { "type": "string" },
+        "subject": {
+          "type": "string",
+          "enum": ["PHYSICS", "CHEMISTRY", "MATHEMATICS"]
+        },
+        "chapter": { "type": "string" },
+        "topic": { "type": "string" },
+        "difficulty": { "type": "string", "enum": ["EASY", "MEDIUM", "HARD"] },
+        "questionType": {
+          "type": "string",
+          "enum": ["MCQ_SINGLE", "MCQ_MULTI", "NUMERICAL", "INTEGER", "DECIMAL", "ASSERTION_REASON"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["APPROVED", "PENDING_REVIEW", "REJECTED", "FAILED_VALIDATION"]
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "exam", "year", "subject", "chapter", "topic", "difficulty", "questionType", "status"]
+    },
+    "QuestionIdMappingRecord": {
+      "title": "QuestionIdMappingRecord",
+      "description": "Idempotent mapping between an external dataset record ID and its internal LearnMate Question ID.",
+      "type": "object",
+      "properties": {
+        "mappingKey": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "externalId": { "type": "string" },
+        "learnMateQuestionId": { "type": "string" },
+        "canonicalHash": { "type": "string" },
+        "importedAt": { "type": "string", "format": "date-time" },
+        "lastUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["mappingKey", "sourceId", "externalId", "learnMateQuestionId", "importedAt"]
+    },
+    "IngestionJobReportRecord": {
+      "title": "IngestionJobReportRecord",
+      "description": "Dataset import audit report, validation diagnostics, and resumable checkpoint metadata.",
+      "type": "object",
+      "properties": {
+        "jobId": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "dryRun": { "type": "boolean" },
+        "totalInspected": { "type": "integer" },
+        "importedApprovedCount": { "type": "integer" },
+        "failedValidationCount": { "type": "integer" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["jobId", "sourceId", "dryRun", "totalInspected", "startedAt", "completedAt"]
     }
   },
   "firestore": {
@@ -108,6 +169,18 @@
     "/users/{userId}/reports/{reportId}": {
       "schema": { "$ref": "#/entities/AiReport" },
       "description": "User-scoped AI content reports."
+    },
+    "/question_bank/{questionId}": {
+      "schema": { "$ref": "#/entities/QuestionBankRecord" },
+      "description": "Global verified PYQ question bank for JEE Main and JEE Advanced. Read-only for verified students; writable only by authorized admins."
+    },
+    "/question_id_mappings/{mappingId}": {
+      "schema": { "$ref": "#/entities/QuestionIdMappingRecord" },
+      "description": "Admin-managed source-to-LearnMate question ID mapping table."
+    },
+    "/ingestion_jobs/{jobId}": {
+      "schema": { "$ref": "#/entities/IngestionJobReportRecord" },
+      "description": "Admin-managed dataset import reports and checkpoints."
     }
   }
 }

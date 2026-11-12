@@ -18,6 +18,7 @@ import {
   Filter,
   Award,
   Calendar,
+  Database,
 } from 'lucide-react';
 import {
   StudyDocument,
@@ -46,6 +47,13 @@ import {
 } from '../utils/pyqCorpusEngine';
 import { JEE_SYLLABUS_CHAPTERS } from '../data/jeeSyllabusAndNotes';
 import { awardLearningXp } from '../utils/rewardsEngine';
+import { AdminQuestionBankModal } from './AdminQuestionBankModal';
+import {
+  ensureInitialOpenSourcePyqSeed,
+  getStoredUnifiedQuestions,
+  unifiedToPyqCorpusQuestion,
+  type UnifiedQuestionRecord,
+} from '../ingestion';
 
 interface PracticeWorkspaceViewProps {
   documents: StudyDocument[];
@@ -67,9 +75,19 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 }) => {
   const currentDoc = activeDoc || documents[0] || null;
 
-  // Top-level Practice Hub state matching Image 11
+  // Top-level Practice Hub state matching Image 11 + Open-Source Question Bank
   const [examFilter, setExamFilter] = useState<'jee_main' | 'jee_advanced'>('jee_main');
   const [hubTab, setHubTab] = useState<PracticeHubTab>('mock_tests');
+  const [adminQbOpen, setAdminQbOpen] = useState<boolean>(false);
+  const [unifiedCorpus, setUnifiedCorpus] = useState<UnifiedQuestionRecord[]>(() =>
+    getStoredUnifiedQuestions()
+  );
+
+  useEffect(() => {
+    void ensureInitialOpenSourcePyqSeed().then((seeded) => {
+      setUnifiedCorpus(seeded);
+    });
+  }, []);
 
   // Official Paper Filters
   const [paperYearFilter, setPaperYearFilter] = useState<number | 'All'>('All');
@@ -165,16 +183,42 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     });
   }, [examFilter, paperYearFilter, paperSessionFilter, paperShiftFilter]);
 
-  // Filtered PYQ Corpus Questions for Chapter-wise / Year-wise solver
+  // Filtered PYQ Corpus Questions for Chapter-wise / Year-wise solver (includes ingested open-source PYQs)
   const filteredPyqQuestions = useMemo(() => {
-    return filterPyqQuestions({
+    const targetUnifiedExam =
+      examFilter === 'jee_advanced' ? 'JEE_ADVANCED' : 'JEE_MAIN';
+
+    const importedMatching = unifiedCorpus
+      .filter((uq) => uq.status === 'APPROVED' && uq.exam === targetUnifiedExam)
+      .map((uq, idx) => unifiedToPyqCorpusQuestion(uq, idx + 1))
+      .filter((mapped) => {
+        if (paperYearFilter !== 'All' && mapped.year !== paperYearFilter) return false;
+        if (pyqSubjectFilter !== 'All' && mapped.subject !== pyqSubjectFilter) return false;
+        return true;
+      });
+
+    const baseQuestions = filterPyqQuestions({
       exam: examFilter,
       year: paperYearFilter,
       subject: pyqSubjectFilter,
       chapterId: paperChapterFilter === 'All' ? 'All' : paperChapterFilter,
       difficulty: difficulty === 'Mixed' ? 'All' : difficulty,
     });
-  }, [examFilter, paperYearFilter, pyqSubjectFilter, paperChapterFilter, difficulty]);
+
+    const existingIds = new Set(baseQuestions.map((q) => q.id));
+    const merged = [
+      ...importedMatching.filter((q) => !existingIds.has(q.id)),
+      ...baseQuestions,
+    ];
+    return merged;
+  }, [
+    examFilter,
+    paperYearFilter,
+    pyqSubjectFilter,
+    paperChapterFilter,
+    difficulty,
+    unifiedCorpus,
+  ]);
 
   const launchFullJeeMainMock = () => {
     setActiveCbtPaper({
@@ -744,35 +788,48 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           </p>
         </div>
 
-        {/* Main | Advanced Switcher */}
-        <div
-          role="group"
-          aria-label="Exam Mode Switcher"
-          className="inline-flex items-center p-1 rounded-xl bg-white border border-line shadow-2xs self-start sm:self-auto"
-        >
+        {/* Main | Advanced Switcher + Question Bank Admin Console */}
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <div
+            role="group"
+            aria-label="Exam Mode Switcher"
+            className="inline-flex items-center p-1 rounded-xl bg-white dark:bg-[#121A2E] border border-line shadow-2xs"
+          >
+            <button
+              type="button"
+              data-testid="practice-exam-toggle-main"
+              onClick={() => setExamFilter('jee_main')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                examFilter === 'jee_main'
+                  ? 'bg-brand-soft text-brand border border-brand/30'
+                  : 'text-muted hover:text-ink'
+              }`}
+            >
+              Main
+            </button>
+            <button
+              type="button"
+              data-testid="practice-exam-toggle-advanced"
+              onClick={() => setExamFilter('jee_advanced')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                examFilter === 'jee_advanced'
+                  ? 'bg-brand-soft text-brand border border-brand/30'
+                  : 'text-muted hover:text-ink'
+              }`}
+            >
+              Advanced
+            </button>
+          </div>
+
           <button
             type="button"
-            data-testid="practice-exam-toggle-main"
-            onClick={() => setExamFilter('jee_main')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              examFilter === 'jee_main'
-                ? 'bg-brand-soft text-brand border border-brand/30'
-                : 'text-muted hover:text-ink'
-            }`}
+            onClick={() => setAdminQbOpen(true)}
+            data-testid="open-admin-question-bank-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-bold text-ink transition-colors cursor-pointer"
+            title="Open-Source PYQ Dataset Importer & Question Bank Console"
           >
-            Main
-          </button>
-          <button
-            type="button"
-            data-testid="practice-exam-toggle-advanced"
-            onClick={() => setExamFilter('jee_advanced')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              examFilter === 'jee_advanced'
-                ? 'bg-brand-soft text-brand border border-brand/30'
-                : 'text-muted hover:text-ink'
-            }`}
-          >
-            Advanced
+            <Database className="w-3.5 h-3.5 text-brand" />
+            <span>PYQ Dataset Engine</span>
           </button>
         </div>
       </div>
@@ -1708,7 +1765,10 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           activeCbtPaper?.title ||
           `JEE (Main) 2027 Full Mock Paper — ${currentDoc?.title || 'Comprehensive'}`
         }
-        examVariant={activeCbtPaper?.variant || examFilter}
+        examVariant={
+          activeCbtPaper?.variant ||
+          (examFilter === 'jee_advanced' ? 'jee_advanced' : 'jee_main')
+        }
         officialPaperId={activeCbtPaper?.paperId}
         customPyqQuestions={activeCbtPaper?.questions}
         durationMinutes={activeCbtPaper?.durationMinutes || 180}
@@ -1800,6 +1860,22 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           };
           studyStorage.saveQuizAttempt(attempt);
           setAttempts(studyStorage.getQuizAttempts());
+        }}
+      />
+
+      {/* Open-Source PYQ Dataset & Question Bank Integration Admin Console */}
+      <AdminQuestionBankModal
+        isOpen={adminQbOpen}
+        onClose={() => setAdminQbOpen(false)}
+        onCorpusUpdated={(updated) => setUnifiedCorpus(updated)}
+        onLaunchMockFromBlueprint={({ title, examVariant, questions: bpQs, durationMinutes }) => {
+          setActiveCbtPaper({
+            title,
+            variant: examVariant,
+            questions: bpQs,
+            durationMinutes,
+          });
+          setIsJeeExamModalOpen(true);
         }}
       />
     </div>
