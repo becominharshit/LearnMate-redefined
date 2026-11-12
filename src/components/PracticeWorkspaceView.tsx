@@ -37,10 +37,12 @@ import { JeeCbtExamModal } from './JeeCbtExamModal';
 import {
   OFFICIAL_PYQ_PAPERS,
   OFFICIAL_PYQ_QUESTIONS,
+  JEE_ADVANCED_ARCHETYPE_QUESTIONS,
   OfficialPyqPaperMetadata,
   PyqCorpusQuestion,
   filterPyqQuestions,
   getQuestionsForOfficialPaper,
+  assembleFull75QuestionNtaMock,
   scorePyqQuestionResponse,
   downloadOfficialPaperPdf,
   submitPyqErrorReport,
@@ -48,6 +50,8 @@ import {
 import { JEE_SYLLABUS_CHAPTERS } from '../data/jeeSyllabusAndNotes';
 import { awardLearningXp } from '../utils/rewardsEngine';
 import { AdminQuestionBankModal } from './AdminQuestionBankModal';
+import { MistakeBookAndImprovementModal } from './MistakeBookAndImprovementModal';
+import { getStoredMistakeBook } from '../utils/mistakeBookEngine';
 import {
   ensureInitialOpenSourcePyqSeed,
   getStoredUnifiedQuestions,
@@ -79,6 +83,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   const [examFilter, setExamFilter] = useState<'jee_main' | 'jee_advanced'>('jee_main');
   const [hubTab, setHubTab] = useState<PracticeHubTab>('mock_tests');
   const [adminQbOpen, setAdminQbOpen] = useState<boolean>(false);
+  const [mistakeBookOpen, setMistakeBookOpen] = useState<boolean>(false);
   const [unifiedCorpus, setUnifiedCorpus] = useState<UnifiedQuestionRecord[]>(() =>
     getStoredUnifiedQuestions()
   );
@@ -117,11 +122,20 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     durationMinutes?: number;
   } | null>(null);
 
-  // Practice Set Builder State
+  // Practice Set Builder State (MARKS-Style Custom Test Generator)
   const [sourceMode, setSourceMode] = useState<PracticeSourceMode>('notes');
   const [selectedTopicPill, setSelectedTopicPill] = useState<string>('All');
   const [questionCount, setQuestionCount] = useState<number>(10);
   const [difficulty, setDifficulty] = useState<'Mixed' | 'Easy' | 'Medium' | 'Hard'>('Mixed');
+  const [customYearRange, setCustomYearRange] = useState<
+    'All (2019–2026)' | '2025–2026' | '2023–2024' | '2019–2022'
+  >('All (2019–2026)');
+  const [customQuestionTypeFilter, setCustomQuestionTypeFilter] = useState<
+    'All' | 'mcq_single' | 'mcq_multiple' | 'numerical' | 'paragraph_comprehension' | 'matrix_match'
+  >('All');
+  const [customStatusFilter, setCustomStatusFilter] = useState<
+    'All' | 'Unseen' | 'Previously Wrong' | 'Bookmarked'
+  >('All');
   const [timeLimit, setTimeLimit] = useState<'No Limit' | '10 min' | '20 min' | '30 min'>(
     '20 min'
   );
@@ -205,8 +219,18 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
       difficulty: difficulty === 'Mixed' ? 'All' : difficulty,
     });
 
+    const archetypeMatches =
+      examFilter === 'jee_advanced'
+        ? JEE_ADVANCED_ARCHETYPE_QUESTIONS.filter((aq) => {
+            if (paperYearFilter !== 'All' && aq.year !== paperYearFilter) return false;
+            if (pyqSubjectFilter !== 'All' && aq.subject !== pyqSubjectFilter) return false;
+            return true;
+          })
+        : [];
+
     const existingIds = new Set(baseQuestions.map((q) => q.id));
     const merged = [
+      ...archetypeMatches.filter((q) => !existingIds.has(q.id)),
       ...importedMatching.filter((q) => !existingIds.has(q.id)),
       ...baseQuestions,
     ];
@@ -221,20 +245,23 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   ]);
 
   const launchFullJeeMainMock = () => {
+    const assembled75 = assembleFull75QuestionNtaMock('jee-main-2025-jan22-s1');
     setActiveCbtPaper({
-      title: `JEE (Main) 2027 Full Mock Paper — ${currentDoc?.title || 'Comprehensive'}`,
+      title: `JEE (Main) 2026/2027 Official 75-Q NTA Mock — ${currentDoc?.title || 'Comprehensive'}`,
       variant: 'jee_main',
+      questions: assembled75.questions,
       durationMinutes: 180,
     });
     setIsJeeExamModalOpen(true);
   };
 
   const launchJeeAdvancedPaper = () => {
-    const advQuestions = OFFICIAL_PYQ_QUESTIONS.filter(
-      (q) => q.exam === 'jee_advanced'
-    );
+    const advQuestions = [
+      ...OFFICIAL_PYQ_QUESTIONS.filter((q) => q.exam === 'jee_advanced'),
+      ...JEE_ADVANCED_ARCHETYPE_QUESTIONS,
+    ];
     setActiveCbtPaper({
-      title: 'JEE (Advanced) Paper 1 — Multi-Correct & Integer Mock',
+      title: 'JEE (Advanced) Paper 1 — Multi-Correct, Comprehension & Matrix-Match Mock',
       variant: 'jee_advanced',
       paperId: 'jee-adv-2024-p1',
       questions: advQuestions,
@@ -245,12 +272,28 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
   const launchOfficialPaperMock = (paper: OfficialPyqPaperMetadata) => {
     const paperQs = getQuestionsForOfficialPaper(paper.id);
+    const enrichedQs =
+      paper.exam === 'jee_advanced'
+        ? [...paperQs, ...JEE_ADVANCED_ARCHETYPE_QUESTIONS]
+        : paperQs;
     setActiveCbtPaper({
       title: paper.title,
       variant: paper.exam,
       paperId: paper.id,
-      questions: paperQs.length > 0 ? paperQs : undefined,
+      questions: enrichedQs.length > 0 ? enrichedQs : undefined,
       durationMinutes: paper.durationMinutes,
+    });
+    setIsJeeExamModalOpen(true);
+  };
+
+  const launchAssembled75QMockForPaper = (paper: OfficialPyqPaperMetadata) => {
+    const assembled = assembleFull75QuestionNtaMock(paper.id);
+    setActiveCbtPaper({
+      title: `${paper.title} — Assembled 75-Question Full NTA Blueprint Mock`,
+      variant: 'jee_main',
+      paperId: paper.id,
+      questions: assembled.questions,
+      durationMinutes: 180,
     });
     setIsJeeExamModalOpen(true);
   };
@@ -823,6 +866,17 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
 
           <button
             type="button"
+            onClick={() => setMistakeBookOpen(true)}
+            data-testid="open-practice-mistake-book-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-bold text-amber-950 transition-colors cursor-pointer"
+            title="Open Mistake Book & SuperMemo SM-2 Improvement Booklet"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+            <span>Mistake Book &amp; SM-2 ({getStoredMistakeBook().length})</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setAdminQbOpen(true)}
             data-testid="open-admin-question-bank-btn"
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-bold text-ink transition-colors cursor-pointer"
@@ -999,57 +1053,79 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
-                    {filteredOfficialPapers.map((paper) => (
-                      <tr key={paper.id} className="hover:bg-canvas/60">
-                        <td className="py-3.5 px-3">
-                          <div className="font-bold text-ink text-xs sm:text-sm">
-                            {paper.title}
-                          </div>
-                          <div className="text-[11px] text-muted">
-                            {paper.examDate} · {paper.shift} · Verified v{paper.syllabusVersion}
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3 font-semibold text-ink tabular-nums">
-                          {paper.totalQuestions}
-                        </td>
-                        <td className="py-3.5 px-3 text-muted tabular-nums">
-                          {paper.durationMinutes} min
-                        </td>
-                        <td className="py-3.5 px-3 text-muted">
-                          {paper.markingSummary}
-                        </td>
-                        <td className="py-3.5 px-3 text-right">
-                          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => void handleDownloadPaperPdf(paper, false)}
-                              data-testid={`download-paper-pdf-${paper.id}`}
-                              className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
-                            >
-                              <Download className="w-3 h-3 text-muted" />
-                              <span>Paper PDF</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDownloadPaperPdf(paper, true)}
-                              data-testid={`download-solutions-pdf-${paper.id}`}
-                              className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
-                            >
-                              <FileText className="w-3 h-3 text-brand" />
-                              <span>Solutions PDF</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => launchOfficialPaperMock(paper)}
-                              data-testid={`start-official-mock-${paper.id}`}
-                              className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
-                            >
-                              Start Mock
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredOfficialPapers.map((paper) => {
+                      const shiftPoolCount = getQuestionsForOfficialPaper(paper.id).length;
+                      return (
+                        <tr key={paper.id} className="hover:bg-canvas/60">
+                          <td className="py-3.5 px-3">
+                            <div className="font-bold text-ink text-xs sm:text-sm">
+                              {paper.title}
+                            </div>
+                            <div className="text-[11px] text-muted flex flex-wrap items-center gap-1.5 mt-0.5">
+                              <span>
+                                {paper.examDate} · {paper.shift} · Verified v{paper.syllabusVersion}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold">
+                                Shift Mini-Pack ({shiftPoolCount} Qs)
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-3 font-semibold text-ink tabular-nums">
+                            <div>75 Blueprint</div>
+                            <div className="text-[10px] text-muted">
+                              ({shiftPoolCount} shift seed)
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-3 text-muted tabular-nums">
+                            {paper.durationMinutes} min
+                          </td>
+                          <td className="py-3.5 px-3 text-muted">
+                            {paper.markingSummary}
+                          </td>
+                          <td className="py-3.5 px-3 text-right">
+                            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => void handleDownloadPaperPdf(paper, false)}
+                                data-testid={`download-paper-pdf-${paper.id}`}
+                                className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
+                              >
+                                <Download className="w-3 h-3 text-muted" />
+                                <span>Paper PDF</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleDownloadPaperPdf(paper, true)}
+                                data-testid={`download-solutions-pdf-${paper.id}`}
+                                className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
+                              >
+                                <FileText className="w-3 h-3 text-brand" />
+                                <span>Solutions PDF</span>
+                              </button>
+                              {paper.exam === 'jee_main' && (
+                                <button
+                                  type="button"
+                                  onClick={() => launchAssembled75QMockForPaper(paper)}
+                                  data-testid={`assemble-75q-mock-${paper.id}`}
+                                  title="Dynamically assemble a full 75-Question (25P + 25C + 25M) NTA CBT Mock seeded from this shift"
+                                  className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-xs font-bold cursor-pointer"
+                                >
+                                  Assemble 75-Q Mock
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => launchOfficialPaperMock(paper)}
+                                data-testid={`start-official-mock-${paper.id}`}
+                                className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
+                              >
+                                Start Mock
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1470,6 +1546,70 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {/* MARKS-Style Custom Test Generator Filters (Year, Question Archetype, Attempt Status) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-soft">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-muted">
+                      PYQ Year Cohort
+                    </label>
+                    <select
+                      aria-label="PYQ Year Cohort"
+                      value={customYearRange}
+                      onChange={(e) =>
+                        setCustomYearRange(e.target.value as typeof customYearRange)
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    >
+                      <option value="All (2019–2026)">All (2019–2026)</option>
+                      <option value="2025–2026">2025–2026 Latest Pattern</option>
+                      <option value="2023–2024">2023–2024 Shifts</option>
+                      <option value="2019–2022">2019–2022 Archival</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-muted">
+                      Question Archetype
+                    </label>
+                    <select
+                      aria-label="Question Archetype"
+                      value={customQuestionTypeFilter}
+                      onChange={(e) =>
+                        setCustomQuestionTypeFilter(
+                          e.target.value as typeof customQuestionTypeFilter
+                        )
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    >
+                      <option value="All">All Archetypes</option>
+                      <option value="mcq_single">Single-Choice MCQ (+4/−1)</option>
+                      <option value="mcq_multiple">Multi-Correct (+4/−2 Partial)</option>
+                      <option value="numerical">Numerical Value (Sec-B)</option>
+                      <option value="paragraph_comprehension">Paragraph Comprehension</option>
+                      <option value="matrix_match">Matrix-Match (List-I / List-II)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-muted">
+                      Question Status Filter
+                    </label>
+                    <select
+                      aria-label="Question Status Filter"
+                      value={customStatusFilter}
+                      onChange={(e) =>
+                        setCustomStatusFilter(e.target.value as typeof customStatusFilter)
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg border border-line bg-white text-xs font-semibold text-ink"
+                    >
+                      <option value="All">All Questions</option>
+                      <option value="Unseen">Unseen Only</option>
+                      <option value="Previously Wrong">Previously Wrong (Mistake Book)</option>
+                      <option value="Bookmarked">Bookmarked Only</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               <div className="pt-4 border-t border-soft flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1877,6 +2017,12 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           });
           setIsJeeExamModalOpen(true);
         }}
+      />
+
+      {/* Mistake Book & SuperMemo SM-2 Improvement Booklet Modal */}
+      <MistakeBookAndImprovementModal
+        isOpen={mistakeBookOpen}
+        onClose={() => setMistakeBookOpen(false)}
       />
     </div>
   );

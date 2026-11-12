@@ -19,6 +19,7 @@ import { SampleChapterPage } from './components/SampleChapterPage';
 import { FirstRunSetupModal, type FirstRunAnswers } from './components/FirstRunSetupModal';
 import { LegalPage } from './components/LegalPage';
 import { AppGuideAndSearchModal } from './components/AppGuideAndSearchModal';
+import { DynamicCompanion } from './components/DynamicCompanion';
 import type { UtilityTab } from './components/CompactStudyUtilitiesWidget';
 import { buildSampleChapterDocument, SAMPLE_CHAPTER_ID } from './data/sampleChapter';
 import {
@@ -1261,6 +1262,9 @@ export function App() {
           weakTopics={studentProfile.weakAreas}
         />
       )}
+
+      {/* Floating Study Companion: Pomodoro Timer + Khanmigo Socratic Clue Coins + OCR Doubt + 15m ShardZ */}
+      <DynamicCompanion activeDoc={effectiveDoc} />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Award,
+  BookOpen,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -27,12 +28,27 @@ import {
   scorePyqQuestionResponse,
   MARKING_RULES,
   resolveMarkingRule,
+  predictShiftPercentileAndAir,
+  computeTimeVsAccuracyQuadrants,
+  type ShiftDifficultyCurve,
+  type MatrixMatchRowItem,
+  type MatrixMatchColItem,
 } from '../utils/pyqCorpusEngine';
 import { awardLearningXp } from '../utils/rewardsEngine';
+import {
+  extractMistakesFromCbtAttempt,
+  type MistakeBookEntry,
+} from '../utils/mistakeBookEngine';
+import { MistakeBookAndImprovementModal } from './MistakeBookAndImprovementModal';
 
 export type JeeSubject = 'Physics' | 'Chemistry' | 'Mathematics';
 export type JeeQuestionSection = 'Section A' | 'Section B';
-export type JeeQuestionFormat = 'mcq_single' | 'mcq_multiple' | 'numerical';
+export type JeeQuestionFormat =
+  | 'mcq_single'
+  | 'mcq_multiple'
+  | 'numerical'
+  | 'paragraph_comprehension'
+  | 'matrix_match';
 
 /**
  * Official NTA JEE Main 5-State Question Palette Statuses:
@@ -63,6 +79,18 @@ export interface JeeCbtQuestion {
   correctOptionIndices?: number[]; // for JEE Advanced multiple-correct
   correctNumericalValue?: number; // for Numerical Value
   numericalTolerance?: number; // e.g., 0.05
+  passageTitle?: string;
+  passageText?: string;
+  linkedQuestionGroup?: string;
+  matrixMatchList1?: MatrixMatchRowItem[];
+  matrixMatchList2?: MatrixMatchColItem[];
+  matrixMatch?: {
+    list1Title?: string;
+    list1Rows: MatrixMatchRowItem[];
+    list2Title?: string;
+    list2Cols: MatrixMatchColItem[];
+  };
+  correctMatrixMapping?: Record<'P' | 'Q' | 'R' | 'S', string>;
   solutionSteps: string;
   keyFormula: string;
   commonTrap: string;
@@ -75,6 +103,7 @@ export interface JeeQuestionResponse {
   selectedOptionIndex: number | null;
   selectedOptionIndices?: number[];
   numericalInput: string;
+  matrixMapping?: Record<string, string>;
   timeSpentSeconds: number;
 }
 
@@ -961,11 +990,22 @@ export function mapCorpusToCbtQuestions(corpus: PyqCorpusQuestion[]): JeeCbtQues
     id: q.id,
     questionNumber: idx + 1,
     subject: q.subject,
-    section: q.questionType === 'numerical' ? 'Section B' : 'Section A',
+    section:
+      q.questionType === 'numerical' ||
+      q.format === 'numerical_integer' ||
+      q.format === 'numerical_decimal'
+        ? 'Section B'
+        : 'Section A',
     format:
-      q.questionType === 'mcq_multiple'
+      q.format === 'paragraph_comprehension' || q.questionType === 'paragraph_comprehension'
+        ? 'paragraph_comprehension'
+        : q.format === 'matrix_match' || q.questionType === 'matrix_match'
+        ? 'matrix_match'
+        : q.questionType === 'mcq_multiple' || q.format === 'multiple_mcq'
         ? 'mcq_multiple'
-        : q.questionType === 'numerical'
+        : q.questionType === 'numerical' ||
+          q.format === 'numerical_integer' ||
+          q.format === 'numerical_decimal'
         ? 'numerical'
         : 'mcq_single',
     topic: q.chapterTitle,
@@ -976,6 +1016,12 @@ export function mapCorpusToCbtQuestions(corpus: PyqCorpusQuestion[]): JeeCbtQues
     correctOptionIndices: q.correctOptionIndices,
     correctNumericalValue: q.correctNumericalValue,
     numericalTolerance: q.numericalTolerance ?? 0.05,
+    passageTitle: q.passageTitle,
+    passageText: q.passageText,
+    linkedQuestionGroup: q.linkedQuestionGroup,
+    matrixMatchList1: q.matrixMatchList1,
+    matrixMatchList2: q.matrixMatchList2,
+    correctMatrixMapping: q.correctMatrixMapping,
     solutionSteps: q.solutionExplanation,
     keyFormula: q.keyFormula,
     commonTrap: q.commonTrap,
@@ -1012,6 +1058,14 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
   const [strictMockMode, setStrictMockMode] = useState(false);
   const [acceptedInstructions, setAcceptedInstructions] = useState(true);
   const [showInstructionsModal, setShowInstructionsModal] = useState(false);
+  const [sectionBRuleMode, setSectionBRuleMode] = useState<'compulsory_2026' | 'archival_2024'>(
+    'compulsory_2026'
+  );
+  const [shiftDifficultyCurve, setShiftDifficultyCurve] = useState<
+    'Tough' | 'Moderate' | 'Easy'
+  >('Moderate');
+  const [mistakeBookModalOpen, setMistakeBookModalOpen] = useState<boolean>(false);
+  const [extractedMistakes, setExtractedMistakes] = useState<MistakeBookEntry[]>([]);
 
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [responses, setResponses] = useState<Record<string, JeeQuestionResponse>>({});
@@ -1020,6 +1074,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
   const [draftOption, setDraftOption] = useState<number | null>(null);
   const [draftMultiOptions, setDraftMultiOptions] = useState<number[]>([]);
   const [draftNumerical, setDraftNumerical] = useState<string>('');
+  const [draftMatrixMapping, setDraftMatrixMapping] = useState<Record<string, string>>({});
 
   // Timer: persistent deadline in sessionStorage
   const [remainingSeconds, setRemainingSeconds] = useState<number>(durationMinutes * 60);
@@ -1186,10 +1241,12 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
       setDraftOption(saved.selectedOptionIndex);
       setDraftMultiOptions(saved.selectedOptionIndices || []);
       setDraftNumerical(saved.numericalInput);
+      setDraftMatrixMapping(saved.matrixMapping || {});
     } else {
       setDraftOption(null);
       setDraftMultiOptions([]);
       setDraftNumerical('');
+      setDraftMatrixMapping({});
     }
     questionEntryTimestampRef.current = Date.now();
   }, [currentIndex, currentQuestion]);
@@ -1295,11 +1352,23 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     if (currentQuestion.format === 'mcq_multiple') {
       return draftMultiOptions.length > 0;
     }
-    if (currentQuestion.format === 'mcq_single') {
+    if (
+      currentQuestion.format === 'mcq_single' ||
+      currentQuestion.format === 'paragraph_comprehension'
+    ) {
       return draftOption !== null;
+    }
+    if (currentQuestion.format === 'matrix_match') {
+      return (
+        draftOption !== null ||
+        Object.keys(draftMatrixMapping).filter((k) => Boolean(draftMatrixMapping[k])).length > 0
+      );
     }
     return draftNumerical.trim() !== '' && !Number.isNaN(Number(draftNumerical.trim()));
   };
+
+  const isSingleChoiceLike = (fmt: JeeQuestionFormat) =>
+    fmt === 'mcq_single' || fmt === 'paragraph_comprehension' || fmt === 'matrix_match';
 
   const handleSaveAndNext = () => {
     const answered = hasValidDraftAnswer();
@@ -1307,10 +1376,11 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     const nextIdx = (currentIndex + 1) % questions.length;
     navigateToIndex(nextIdx, {
       status: newStatus,
-      selectedOptionIndex: currentQuestion.format === 'mcq_single' ? draftOption : null,
+      selectedOptionIndex: isSingleChoiceLike(currentQuestion.format) ? draftOption : null,
       selectedOptionIndices:
         currentQuestion.format === 'mcq_multiple' ? draftMultiOptions : [],
       numericalInput: currentQuestion.format === 'numerical' ? draftNumerical.trim() : '',
+      matrixMapping: currentQuestion.format === 'matrix_match' ? draftMatrixMapping : undefined,
     });
   };
 
@@ -1322,10 +1392,11 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     const nextIdx = (currentIndex + 1) % questions.length;
     navigateToIndex(nextIdx, {
       status: newStatus,
-      selectedOptionIndex: currentQuestion.format === 'mcq_single' ? draftOption : null,
+      selectedOptionIndex: isSingleChoiceLike(currentQuestion.format) ? draftOption : null,
       selectedOptionIndices:
         currentQuestion.format === 'mcq_multiple' ? draftMultiOptions : [],
       numericalInput: currentQuestion.format === 'numerical' ? draftNumerical.trim() : '',
+      matrixMapping: currentQuestion.format === 'matrix_match' ? draftMatrixMapping : undefined,
     });
   };
 
@@ -1337,10 +1408,11 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     const nextIdx = (currentIndex + 1) % questions.length;
     navigateToIndex(nextIdx, {
       status: newStatus,
-      selectedOptionIndex: currentQuestion.format === 'mcq_single' ? draftOption : null,
+      selectedOptionIndex: isSingleChoiceLike(currentQuestion.format) ? draftOption : null,
       selectedOptionIndices:
         currentQuestion.format === 'mcq_multiple' ? draftMultiOptions : [],
       numericalInput: currentQuestion.format === 'numerical' ? draftNumerical.trim() : '',
+      matrixMapping: currentQuestion.format === 'matrix_match' ? draftMatrixMapping : undefined,
     });
   };
 
@@ -1348,6 +1420,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     setDraftOption(null);
     setDraftMultiOptions([]);
     setDraftNumerical('');
+    setDraftMatrixMapping({});
     setResponses((prev) => ({
       ...prev,
       [currentQuestion.id]: {
@@ -1356,6 +1429,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
         selectedOptionIndex: null,
         selectedOptionIndices: [],
         numericalInput: '',
+        matrixMapping: {},
       },
     }));
   };
@@ -1403,7 +1477,14 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     marks: number;
     maxMarks: number;
   } => {
-    const rule = resolveMarkingRule(q.markingRuleId, examVariant, q.format);
+    const effectiveRuleId =
+      examVariant === 'jee_main' &&
+      q.format === 'numerical' &&
+      sectionBRuleMode === 'archival_2024'
+        ? 'jee_main_numerical_archival_v2024'
+        : q.markingRuleId;
+
+    const rule = resolveMarkingRule(effectiveRuleId, examVariant, q.format);
 
     const isEvaluated =
       r && (r.status === 'answered' || r.status === 'answered_and_marked');
@@ -1439,12 +1520,20 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
           ? 'multiple_mcq'
           : q.format === 'numerical'
           ? 'numerical_decimal'
+          : q.format === 'paragraph_comprehension'
+          ? 'paragraph_comprehension'
+          : q.format === 'matrix_match'
+          ? 'matrix_match'
           : 'single_mcq',
       questionType:
         q.format === 'mcq_multiple'
           ? 'mcq_multiple'
           : q.format === 'numerical'
           ? 'numerical'
+          : q.format === 'paragraph_comprehension'
+          ? 'paragraph_comprehension'
+          : q.format === 'matrix_match'
+          ? 'matrix_match'
           : 'mcq_single',
       questionNumber: q.questionNumber,
       officialQuestionId: q.id,
@@ -1460,6 +1549,12 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
       numericalAnswer: q.correctNumericalValue,
       correctNumericalValue: q.correctNumericalValue,
       numericalTolerance: q.numericalTolerance ?? 0.05,
+      passageTitle: q.passageTitle,
+      passageText: q.passageText,
+      linkedQuestionGroup: q.linkedQuestionGroup,
+      matrixMatchList1: q.matrixMatchList1,
+      matrixMatchList2: q.matrixMatchList2,
+      correctMatrixMapping: q.correctMatrixMapping,
       keyStatus: 'normal',
       markingRule: rule,
       markingRuleId: rule.id,
@@ -1487,6 +1582,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
         q.format === 'numerical' && r.numericalInput.trim() !== ''
           ? Number(r.numericalInput)
           : null,
+      matrixMapping: r.matrixMapping,
     });
 
     return {
@@ -1680,6 +1776,45 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
       subject: 'All',
     });
 
+    // Auto-extract Mistakes (Incorrect, Unattempted-Visited, and Overtime >180s) into Mistake Book
+    const mistakeRecords = extractMistakesFromCbtAttempt({
+      examTitle,
+      questions: questions.map((q) => ({
+        id: q.id,
+        subject: q.subject,
+        chapterTitle: q.topic,
+        topic: q.topic,
+        questionText: q.questionText,
+        keyFormula: q.keyFormula,
+        solutionSteps: q.solutionSteps,
+        options: q.options,
+        correctOptionIndex: q.correctOptionIndex,
+        correctOptionIndices: q.correctOptionIndices,
+        correctNumericalValue: q.correctNumericalValue,
+      })),
+      responses: Object.fromEntries(
+        questions.map((q) => {
+          const r = responses[q.id] || {
+            questionId: q.id,
+            status: 'not_visited',
+            selectedOptionIndex: null,
+            selectedOptionIndices: [],
+            numericalInput: '',
+            timeSpentSeconds: 0,
+          };
+          const evalRes = evaluateQuestionMarks(q, r);
+          return [
+            q.id,
+            {
+              ...r,
+              isCorrect: evalRes.status === 'correct',
+            },
+          ];
+        })
+      ),
+    });
+    setExtractedMistakes(mistakeRecords);
+
     setConfirmSubmitOpen(false);
     setExamResult(result);
     if (onSaveResult) {
@@ -1756,7 +1891,18 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setMistakeBookModalOpen(true)}
+                data-testid="open-cbt-mistake-book-btn"
+                className="px-3.5 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>
+                  Mistake Book &amp; SM-2 Flashcards ({extractedMistakes.length})
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={() => window.print()}
@@ -1843,6 +1989,172 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Quizrr-Style Shift-Normalized Percentile & AIR Predictor + Time-vs-Accuracy Quadrant Matrix */}
+            {(() => {
+              const prediction = predictShiftPercentileAndAir(
+                examResult.marksObtained,
+                examResult.maxMarks,
+                shiftDifficultyCurve
+              );
+              const quadrantData = computeTimeVsAccuracyQuadrants(
+                questions.map((q) => {
+                  const r = examResult.questionResponses[q.id];
+                  const evalRes = evaluateQuestionMarks(q, r);
+                  return {
+                    questionId: q.id,
+                    subject: q.subject,
+                    isAttempted: evalRes.isAttempted,
+                    isCorrect: evalRes.status === 'correct',
+                    timeSpentSeconds: r?.timeSpentSeconds || 0,
+                  };
+                })
+              );
+
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Shift-Normalized Percentile & All-India Rank Predictor */}
+                  <div
+                    data-testid="shift-percentile-air-card"
+                    className="p-4 rounded-xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white border border-indigo-800 space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                          Historical NTA Shift-Normalized Predictor (2024–2026)
+                        </span>
+                        <h4 className="text-sm font-bold text-white">
+                          Estimated Percentile &amp; All-India Rank (AIR) Band
+                        </h4>
+                      </div>
+                      <div className="flex items-center gap-1 bg-white/10 p-1 rounded-lg">
+                        {(['Tough', 'Moderate', 'Easy'] as ShiftDifficultyCurve[]).map(
+                          (curve) => (
+                            <button
+                              key={curve}
+                              type="button"
+                              onClick={() => setShiftDifficultyCurve(curve)}
+                              data-testid={`shift-curve-btn-${curve.toLowerCase()}`}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer transition-colors ${
+                                shiftDifficultyCurve === curve
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : 'text-slate-200 hover:bg-white/10'
+                              }`}
+                            >
+                              {curve} Shift
+                            </button>
+                          )
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3 pt-1">
+                      <div className="p-3 rounded-lg bg-white/10 border border-white/15">
+                        <div className="text-[11px] text-indigo-200">
+                          Est. NTA Percentile
+                        </div>
+                        <div className="text-xl font-black text-amber-300 tabular-nums">
+                          {prediction.estimatedPercentile.toFixed(2)}%ile
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          Band: {prediction.percentileBand}
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/10 border border-white/15">
+                        <div className="text-[11px] text-indigo-200">
+                          Est. CRL Rank Band
+                        </div>
+                        <div className="text-sm font-extrabold text-white tabular-nums pt-0.5">
+                          {prediction.estimatedAirBand}
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          Scaled: {prediction.scaledScoreOutOf300}/300
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/10 border border-white/15">
+                        <div className="text-[11px] text-indigo-200">
+                          Qualification Outlook
+                        </div>
+                        <div className="text-xs font-bold text-emerald-300 pt-0.5">
+                          {prediction.nitTierEligibility}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Time-vs-Accuracy Quadrant Matrix */}
+                  <div
+                    data-testid="time-vs-accuracy-quadrant-card"
+                    className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                          Pacing &amp; Negative Bleed Diagnostics
+                        </span>
+                        <h4 className="text-sm font-bold text-slate-900">
+                          Time-vs-Accuracy Quadrant Matrix (Threshold: 120s/Q)
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setMistakeBookModalOpen(true)}
+                        className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer"
+                      >
+                        Send {extractedMistakes.length} to SM-2
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
+                        <div className="font-bold text-emerald-800">
+                          Fast &amp; Accurate
+                        </div>
+                        <div className="text-lg font-black text-emerald-900 tabular-nums">
+                          {quadrantData.counts.fast_accurate}
+                        </div>
+                        <div className="text-[10px] text-emerald-700">
+                          ≤120s · Ideal Zone
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200">
+                        <div className="font-bold text-blue-800">
+                          Slow &amp; Accurate
+                        </div>
+                        <div className="text-lg font-black text-blue-900 tabular-nums">
+                          {quadrantData.counts.slow_accurate}
+                        </div>
+                        <div className="text-[10px] text-blue-700">
+                          &gt;120s · Needs Speed
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-red-50 border border-red-200">
+                        <div className="font-bold text-red-800">
+                          Fast &amp; Careless
+                        </div>
+                        <div className="text-lg font-black text-red-900 tabular-nums">
+                          {quadrantData.counts.fast_careless}
+                        </div>
+                        <div className="text-[10px] text-red-700">
+                          ≤120s · Negative Bleed
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                        <div className="font-bold text-amber-900">
+                          Slow &amp; Incorrect
+                        </div>
+                        <div className="text-lg font-black text-amber-950 tabular-nums">
+                          {quadrantData.counts.slow_incorrect}
+                        </div>
+                        <div className="text-[10px] text-amber-800">
+                          &gt;120s · Concept Gap
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Subject-Wise Performance Table */}
             <div className="rounded-xl border border-slate-200 overflow-hidden">
@@ -2089,6 +2401,11 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
             </div>
           </div>
         </div>
+        <MistakeBookAndImprovementModal
+          isOpen={mistakeBookModalOpen}
+          onClose={() => setMistakeBookModalOpen(false)}
+          initialEntries={extractedMistakes}
+        />
       </div>
     );
   }
@@ -2099,6 +2416,9 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
   const isPositiveNegativeRule =
     currentQuestion.format === 'mcq_multiple' && examVariant === 'jee_advanced'
       ? '+4 (Partial +3/+2/+1) / −2'
+      : currentQuestion.format === 'numerical' &&
+        sectionBRuleMode === 'archival_2024'
+      ? '+4 / 0 (Archival Sec-B)'
       : '+4 / −1';
 
   return (
@@ -2275,7 +2595,26 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {examVariant === 'jee_main' && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSectionBRuleMode((prev) =>
+                      prev === 'compulsory_2026'
+                        ? 'archival_2024'
+                        : 'compulsory_2026'
+                    )
+                  }
+                  data-testid="toggle-section-b-rule-btn"
+                  title="Switch between Official 2026/2027 Section B Compulsory (+4/−1) and Archival 2021–2024 (+4/0) rules"
+                  className="px-2.5 py-0.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 font-semibold cursor-pointer"
+                >
+                  {sectionBRuleMode === 'compulsory_2026'
+                    ? 'Sec-B Rule: 2026 Compulsory (+4/−1)'
+                    : 'Sec-B Rule: Archival 2021–24 (+4/0)'}
+                </button>
+              )}
               <span className="text-slate-500 font-medium">
                 {currentQuestion.topic}
               </span>
@@ -2287,6 +2626,59 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
 
           {/* Scrollable Question Stem & Response Input */}
           <div className="flex-1 p-5 sm:p-8 overflow-y-auto space-y-6">
+            {/* JEE Advanced Paragraph / Comprehension Split-Pane Stem */}
+            {currentQuestion.format === 'paragraph_comprehension' &&
+              currentQuestion.passageText && (
+                <div
+                  data-testid="jee-cbt-comprehension-passage"
+                  className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 space-y-2.5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-200/80 text-amber-950 text-xs font-extrabold uppercase tracking-wider">
+                      {currentQuestion.passageTitle ||
+                        'JEE Advanced Comprehension Passage'}
+                    </span>
+                    {currentQuestion.linkedQuestionGroup && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-amber-900">
+                          Linked Passage Questions:
+                        </span>
+                        {questions
+                          .filter(
+                            (q) =>
+                              q.linkedQuestionGroup ===
+                              currentQuestion.linkedQuestionGroup
+                          )
+                          .map((linkedQ, lIdx) => {
+                            const targetGlobalIdx = questions.findIndex(
+                              (item) => item.id === linkedQ.id
+                            );
+                            const isActiveLinked =
+                              linkedQ.id === currentQuestion.id;
+                            return (
+                              <button
+                                key={linkedQ.id}
+                                type="button"
+                                onClick={() => navigateToIndex(targetGlobalIdx)}
+                                className={`px-2.5 py-0.5 rounded text-xs font-bold cursor-pointer ${
+                                  isActiveLinked
+                                    ? 'bg-indigo-700 text-white'
+                                    : 'bg-white text-slate-700 border border-amber-300 hover:bg-amber-100'
+                                }`}
+                              >
+                                Passage Q{lIdx + 1} (#{linkedQ.questionNumber})
+                              </button>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-sm text-slate-800 leading-relaxed bg-white p-3.5 rounded-lg border border-amber-200/80">
+                    <MathText text={currentQuestion.passageText} />
+                  </div>
+                </div>
+              )}
+
             <div className="flex items-baseline gap-3">
               <span className="text-lg sm:text-xl font-extrabold text-indigo-700 shrink-0">
                 Q{currentQuestion.questionNumber}.
@@ -2296,15 +2688,135 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
               </div>
             </div>
 
+            {/* JEE Advanced Matrix-Match (List-I / List-II) Interactive Grid */}
+            {currentQuestion.format === 'matrix_match' &&
+              Boolean(
+                currentQuestion.matrixMatch ||
+                  (currentQuestion.matrixMatchList1 &&
+                    currentQuestion.matrixMatchList2)
+              ) && (
+                <div
+                  data-testid="jee-cbt-matrix-match-grid"
+                  className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-4 max-w-3xl"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-800">
+                      JEE Advanced Matrix-Match (List-I vs List-II)
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Map rows (P, Q, R, S) or select the matching code option below
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs sm:text-sm">
+                    <div className="p-3 rounded-lg bg-white border border-slate-200 space-y-2">
+                      <div className="font-bold text-slate-900 border-b border-slate-100 pb-1">
+                        {currentQuestion.matrixMatch?.list1Title || 'List-I'}
+                      </div>
+                      {(
+                        currentQuestion.matrixMatch?.list1Rows ||
+                        currentQuestion.matrixMatchList1 ||
+                        []
+                      ).map((row) => (
+                        <div key={row.code} className="flex items-baseline gap-2">
+                          <span className="font-extrabold text-indigo-700">
+                            ({row.code})
+                          </span>
+                          <MathText
+                            text={row.text}
+                            variant="inline"
+                            className="text-slate-800"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-white border border-slate-200 space-y-2">
+                      <div className="font-bold text-slate-900 border-b border-slate-100 pb-1">
+                        {currentQuestion.matrixMatch?.list2Title || 'List-II'}
+                      </div>
+                      {(
+                        currentQuestion.matrixMatch?.list2Cols ||
+                        currentQuestion.matrixMatchList2 ||
+                        []
+                      ).map((col) => (
+                        <div key={col.code} className="flex items-baseline gap-2">
+                          <span className="font-extrabold text-emerald-700">
+                            ({col.code})
+                          </span>
+                          <MathText
+                            text={col.text}
+                            variant="inline"
+                            className="text-slate-800"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Interactive Row-to-Column Mapper */}
+                  <div className="p-3 rounded-lg bg-indigo-50/60 border border-indigo-200/80 space-y-2">
+                    <div className="text-[11px] font-bold text-indigo-900">
+                      Interactive Row-to-Column Scratchpad Mapper:
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {(
+                        currentQuestion.matrixMatch?.list1Rows ||
+                        currentQuestion.matrixMatchList1 ||
+                        []
+                      ).map((row) => (
+                        <div
+                          key={row.code}
+                          className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-indigo-200"
+                        >
+                          <span className="text-xs font-extrabold text-indigo-800">
+                            {row.code} →
+                          </span>
+                          {(
+                            currentQuestion.matrixMatch?.list2Cols ||
+                            currentQuestion.matrixMatchList2 ||
+                            []
+                          ).map((col) => {
+                            const isMapped =
+                              draftMatrixMapping[row.code] === col.code;
+                            return (
+                              <button
+                                key={col.code}
+                                type="button"
+                                onClick={() =>
+                                  setDraftMatrixMapping((prev) => ({
+                                    ...prev,
+                                    [row.code]: col.code,
+                                  }))
+                                }
+                                className={`w-6 h-6 rounded text-xs font-bold cursor-pointer ${
+                                  isMapped
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                }`}
+                              >
+                                {col.code}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
             {currentQuestion.format === 'mcq_multiple' && (
               <p className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-lg inline-block">
                 One or More Than One Correct (JEE Advanced Partial Credit: +4 full, +3/+2/+1 partial, −2 wrong)
               </p>
             )}
 
-            {/* Single-Choice or Multi-Choice MCQ Options */}
+            {/* Single-Choice, Multi-Choice, Paragraph Comprehension, or Matrix-Match Code Options */}
             {(currentQuestion.format === 'mcq_single' ||
-              currentQuestion.format === 'mcq_multiple') &&
+              currentQuestion.format === 'mcq_multiple' ||
+              currentQuestion.format === 'paragraph_comprehension' ||
+              currentQuestion.format === 'matrix_match') &&
             currentQuestion.options ? (
               <div className="space-y-3 max-w-2xl pl-2">
                 {currentQuestion.options.map((optText, idx) => {

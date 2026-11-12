@@ -127,6 +127,29 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [languageRegister, setLanguageRegister] = useState<'English' | 'Hinglish' | 'Hindi'>(() => {
+    try {
+      const saved = localStorage.getItem('learnmate_language_register_v1');
+      if (saved === 'Hinglish' || saved === 'Hindi') return saved;
+    } catch {
+      // ignore
+    }
+    return 'English';
+  });
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
 
   const isDark = themeMode === 'dark';
 
@@ -277,6 +300,44 @@ export const Navbar: React.FC<NavbarProps> = ({
               externalOpenTab={externalUtilityTab}
               onConsumeExternalOpen={onConsumeExternalUtilityTab}
             />
+
+            {/* Pedagogical Language Register Selector (English | Coaching Hinglish | Hindi) */}
+            <select
+              aria-label="Pedagogical Language Register"
+              data-testid="navbar-language-register-select"
+              value={languageRegister}
+              onChange={(e) => {
+                const next = e.target.value as 'English' | 'Hinglish' | 'Hindi';
+                setLanguageRegister(next);
+                try {
+                  localStorage.setItem('learnmate_language_register_v1', next);
+                  window.dispatchEvent(
+                    new CustomEvent('learnmate:language-register-change', {
+                      detail: { languageRegister: next },
+                    })
+                  );
+                } catch {
+                  // ignore
+                }
+              }}
+              title="Toggle AI Tutor & Voice Pedagogical Register (Academic English, Coaching Hinglish, or Pure Hindi)"
+              className="hidden md:inline-block px-2 py-1.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] text-[11px] font-bold text-ink cursor-pointer"
+            >
+              <option value="English">EN · Academic</option>
+              <option value="Hinglish">HI-EN · Hinglish</option>
+              <option value="Hindi">HI · हिन्दी</option>
+            </select>
+
+            {/* Offline PWA Status Pill */}
+            {!isOnline && (
+              <span
+                data-testid="navbar-offline-pwa-badge"
+                className="px-2 py-1 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold"
+                title="Offline PWA Mode Active — 58 NTA Chapters & PYQs cached locally"
+              >
+                Offline Ready
+              </span>
+            )}
 
             {/* Light / Night Owl Theme Toggle */}
             {onToggleTheme && (

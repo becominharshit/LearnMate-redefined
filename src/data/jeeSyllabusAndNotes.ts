@@ -12,6 +12,10 @@
 
 import type { JeeSubject } from '../utils/jeeSubjects';
 import type { StudyDocument, StudyPage, StudyTopic } from '../types/study';
+import {
+  UNPACKED_41_NTA_CHAPTER_SEEDS,
+  buildSyllabusChapterFromSeed,
+} from './expandedNta58Chapters';
 
 export type ExamTrackId = 'jee_main' | 'jee_advanced';
 export type EditorialPublicationState = 'draft' | 'review' | 'published';
@@ -82,6 +86,12 @@ export interface ChapterTopicNote {
   id: string;
   title: string;
   examScope: 'both' | 'jee_main' | 'jee_advanced';
+  classLevel?: 'Class 11' | 'Class 12' | '11' | '12';
+  ncertChapterNumber?: number;
+  ntaWeightagePct?: number;
+  syllabusStatus?: 'Active' | 'Removed-In-Main-Only';
+  highYieldFormulas?: string[];
+  formulas?: string[];
   definition: string;
   explanation: string;
   derivation: string;
@@ -107,6 +117,11 @@ export interface SyllabusChapterRecord {
   code: string;
   subject: JeeSubject;
   classLevel: 'Class 11' | 'Class 12';
+  classGrade?: '11' | '12';
+  ncertChapterNumber?: number;
+  ntaWeightagePct?: number;
+  syllabusStatus?: 'Active' | 'Removed-In-Main-Only';
+  highYieldFormulas?: string[];
   unitName: string;
   title: string;
   supportedExams: ExamTrackId[];
@@ -128,7 +143,7 @@ export interface SyllabusChapterRecord {
   quickNotes: ChapterQuickNotes;
 }
 
-export const JEE_SYLLABUS_CHAPTERS: SyllabusChapterRecord[] = [
+const CORE_17_SYLLABUS_CHAPTERS: SyllabusChapterRecord[] = [
   /* ==========================================================================
    * PHYSICS (6 Complete High-Yield Chapters across Class 11 & 12)
    * ========================================================================== */
@@ -2063,6 +2078,40 @@ export const JEE_SYLLABUS_CHAPTERS: SyllabusChapterRecord[] = [
       ],
     },
   },
+];
+
+function enrichCoreChapterMetadata(ch: SyllabusChapterRecord, index: number): SyllabusChapterRecord {
+  const grade: '11' | '12' = ch.classLevel === 'Class 12' ? '12' : '11';
+  const ncertMatch = ch.sourceProvenance.ncertMapping.match(/(\d+)/);
+  const ncertNum = ncertMatch ? Number(ncertMatch[1]) : (index % 12) + 1;
+  const highYield = [
+    ...ch.quickNotes.essentialFormulas.map((ef) => ef.formula),
+    ...ch.topics.flatMap((t) => t.keyFormulas.map((kf) => kf.expression)),
+  ].slice(0, 6);
+  const weightagePct = ch.subject === 'Mathematics' ? 6.5 : 5.8;
+
+  return {
+    ...ch,
+    classGrade: grade,
+    ncertChapterNumber: ch.ncertChapterNumber ?? ncertNum,
+    ntaWeightagePct: ch.ntaWeightagePct ?? weightagePct,
+    syllabusStatus: ch.syllabusStatus ?? 'Active',
+    highYieldFormulas: ch.highYieldFormulas ?? highYield,
+    topics: ch.topics.map((t) => ({
+      ...t,
+      classLevel: ch.classLevel,
+      ncertChapterNumber: ncertNum,
+      ntaWeightagePct: weightagePct,
+      syllabusStatus: 'Active',
+      highYieldFormulas: t.keyFormulas.map((kf) => kf.expression),
+      formulas: t.keyFormulas.map((kf) => kf.expression),
+    })),
+  };
+}
+
+export const JEE_SYLLABUS_CHAPTERS: SyllabusChapterRecord[] = [
+  ...CORE_17_SYLLABUS_CHAPTERS.map((ch, idx) => enrichCoreChapterMetadata(ch, idx)),
+  ...UNPACKED_41_NTA_CHAPTER_SEEDS.map((seed) => buildSyllabusChapterFromSeed(seed)),
 ];
 
 export interface SyllabusCoverageReport {
