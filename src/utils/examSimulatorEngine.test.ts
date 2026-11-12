@@ -7,11 +7,13 @@ import {
 } from './examSimulatorEngine';
 import { QuizQuestion } from '../types/study';
 
-test('EXAM_BLUEPRINTS supports all 7 student exam types with accurate marking rules', () => {
+test('EXAM_BLUEPRINTS supports all 9 student exam types (including BITSAT & VITEEE) with accurate marking rules', () => {
   const keys = Object.keys(EXAM_BLUEPRINTS);
   assert.deepEqual(keys, [
     'jee_main',
     'jee_advanced',
+    'bitsat',
+    'viteee',
     'neet_ug',
     'cuet',
     'board_exams',
@@ -21,6 +23,10 @@ test('EXAM_BLUEPRINTS supports all 7 student exam types with accurate marking ru
 
   assert.equal(getExamBlueprint('jee_main').correctMarks, 4);
   assert.equal(getExamBlueprint('jee_main').negativeMarks, 1);
+  assert.equal(getExamBlueprint('bitsat').correctMarks, 3);
+  assert.equal(getExamBlueprint('bitsat').negativeMarks, 1);
+  assert.equal(getExamBlueprint('viteee').correctMarks, 1);
+  assert.equal(getExamBlueprint('viteee').negativeMarks, 0);
   assert.equal(getExamBlueprint('cuet').correctMarks, 5);
   assert.equal(getExamBlueprint('board_exams').negativeMarks, 0);
   assert.equal(getExamBlueprint('general_practice').supportsTimedMode, false);

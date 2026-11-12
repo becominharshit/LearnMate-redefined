@@ -68,6 +68,8 @@ import { noteGenerationCache, type HandwrittenWorkflowSource } from '../utils/ph
 import { awardLearningXp } from '../utils/rewardsEngine';
 import { MathText } from './MathText';
 import { HandwrittenNotesView } from './HandwrittenNotesView';
+import { JEE_SYLLABUS_CHAPTERS } from '../data/jeeSyllabusAndNotes';
+import { MistakeBookAndImprovementModal } from './MistakeBookAndImprovementModal';
 
 export type QuickReviseSubTab =
   | 'flashcards'
@@ -80,20 +82,25 @@ export type QuickReviseSubTab =
 
 interface QuickReviseViewProps {
   activeDocument: StudyDocument;
+  hasUploadedDocuments?: boolean;
   initialSubTab?: QuickReviseSubTab;
   onNavigateToCitation: (pageNumber: number, quote?: string) => void;
   onAskTutorAboutConcept?: (prompt: string) => void;
   onOpenPractice?: () => void;
+  onOpenUploadModal?: () => void;
 }
 
 export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
   activeDocument,
+  hasUploadedDocuments = true,
   initialSubTab = 'flashcards',
   onNavigateToCitation,
   onAskTutorAboutConcept,
   onOpenPractice,
+  onOpenUploadModal,
 }) => {
   const [subTab, setSubTab] = useState<QuickReviseSubTab>(initialSubTab);
+  const [mistakeBookModalOpen, setMistakeBookModalOpen] = useState(false);
   const [handwrittenInitialWorkflow, setHandwrittenInitialWorkflow] = useState<
     HandwrittenWorkflowSource | undefined
   >(undefined);
@@ -700,7 +707,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
       `${activeDocument.title} ${activeDocument.topics.map((t) => t.name).join(' ')}`
     ) || 'Revise';
 
-  // Formula Book entries extracted from onePageRevision + stickyNotes with formulas
+  // Comprehensive Formula Book entries extracted from onePageRevision, stickyNotes, activeDocument pages/topics, and matching JEE Syllabus chapters
   const formulaBookItems = useMemo(() => {
     const items: Array<{
       term: string;
@@ -710,32 +717,64 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
     }> = [];
     const seen = new Set<string>();
 
+    const addEntry = (term: string, formulaOrDef: string, sourcePage: number, sourceLabel: string) => {
+      const cleanTerm = term.trim();
+      const cleanFormula = formulaOrDef.trim();
+      if (!cleanTerm || !cleanFormula) return;
+      const key = `${cleanTerm.toLowerCase()}::${cleanFormula.toLowerCase().slice(0, 80)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      items.push({
+        term: cleanTerm,
+        formulaOrDef: cleanFormula,
+        sourcePage,
+        sourceLabel,
+      });
+    };
+
     if (onePageRevision?.formulasAndDefinitions) {
       for (const f of onePageRevision.formulasAndDefinitions) {
-        const key = `${f.term.toLowerCase()}::${f.formulaOrDef.toLowerCase()}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          items.push({
-            term: f.term,
-            formulaOrDef: f.formulaOrDef,
-            sourcePage: 1,
-            sourceLabel: f.sourceLabel || 'Page 1',
-          });
-        }
+        addEntry(f.term, f.formulaOrDef, 1, f.sourceLabel || 'Page 1');
       }
     }
 
     for (const note of stickyNotes) {
       if (note.formula) {
-        const key = `${note.title.toLowerCase()}::${note.formula.toLowerCase()}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          items.push({
-            term: note.title,
-            formulaOrDef: note.formula,
-            sourcePage: note.sourcePage,
-            sourceLabel: note.sourceLabel,
-          });
+        addEntry(note.title, note.formula, note.sourcePage, note.sourceLabel);
+      }
+    }
+
+    // Also extract all equations & mathematical lines from activeDocument.pages
+    for (const page of activeDocument.pages || []) {
+      const lines = (page.content || '')
+        .split(/\n+/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      for (const line of lines) {
+        const hasMath =
+          /\$[^$]+\$/.test(line) ||
+          /[=≈≠≤≥±∑∫√Δλμωπθ]|\\[a-zA-Z]+/.test(line);
+        if (hasMath && line.length >= 6 && line.length <= 320) {
+          addEntry(
+            page.title || `Page ${page.pageNumber} Formula`,
+            line,
+            page.pageNumber,
+            `Page ${page.pageNumber}`
+          );
+        }
+      }
+    }
+
+    // Also include matching JEE Syllabus chapter formulas
+    const docLower = activeDocument.title.toLowerCase();
+    for (const ch of JEE_SYLLABUS_CHAPTERS) {
+      if (
+        docLower.includes(ch.title.toLowerCase()) ||
+        ch.title.toLowerCase().includes(docLower) ||
+        items.length < 6
+      ) {
+        for (const f of ch.quickNotes.essentialFormulas) {
+          addEntry(`${ch.title} — ${f.label}`, `${f.formula} (${f.condition})`, 1, ch.title);
         }
       }
     }
@@ -747,7 +786,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
         i.term.toLowerCase().includes(q) ||
         i.formulaOrDef.toLowerCase().includes(q)
     );
-  }, [onePageRevision, stickyNotes, formulaSearch]);
+  }, [onePageRevision, stickyNotes, activeDocument, formulaSearch]);
 
   const handleAddFormulaToFlashcard = (item: {
     term: string;
@@ -794,8 +833,19 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             </p>
           </div>
 
-          {/* Primary PDF Export & Preview Actions (matching wanted/d & f Block Revision Mind Map-4.png) */}
+          {/* Primary PDF Export & Preview Actions */}
           <div className="flex flex-wrap items-center gap-2">
+            {!hasUploadedDocuments && onOpenUploadModal && (
+              <button
+                type="button"
+                data-testid="revise-upload-material-btn"
+                onClick={onOpenUploadModal}
+                className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-brand/40 bg-brand-soft/60 hover:bg-brand hover:text-white text-xs font-bold text-brand transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Upload Personal Material</span>
+              </button>
+            )}
             <button
               type="button"
               data-testid="preview-revision-pdf-btn"
@@ -1244,6 +1294,19 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     from {activeDocument.title.replace(/\.pdf$/i, '')}
                   </span>
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="convert-sticky-to-handwritten-btn"
+                      onClick={() => {
+                        ensureRevisionDataReady();
+                        setHandwrittenInitialWorkflow('revision_sheet');
+                        setSubTab('handwritten');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-bold text-amber-950 cursor-pointer"
+                    >
+                      <PenTool className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Convert to Handwritten Notes</span>
+                    </button>
                     <button
                       type="button"
                       onClick={handleAddBlankNote}
@@ -2140,12 +2203,21 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="open-unified-mistake-book-btn"
+                  onClick={() => setMistakeBookModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>Open Unified Mistake Book &amp; SM-2 Queue</span>
+                </button>
                 {latestWrongCount > 0 && (
                   <button
                     type="button"
                     disabled={isAnalyzingMistakes}
                     onClick={() => void handleAnalyzeLatestQuizMistakes()}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer disabled:opacity-60"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-brand/30 bg-brand-soft text-brand text-xs font-semibold cursor-pointer disabled:opacity-60"
                   >
                     {isAnalyzingMistakes ? (
                       <>
@@ -2410,6 +2482,14 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Unified Mistake Book & AI Mistake Diagnosis Modal */}
+      <MistakeBookAndImprovementModal
+        isOpen={mistakeBookModalOpen}
+        onClose={() => setMistakeBookModalOpen(false)}
+        activeDocument={activeDocument}
+        activeDocumentId={activeDocument.id}
+      />
 
       {/* =================================================================
           PREVIEW REVISION NOTES MODAL BEFORE PDF DOWNLOAD

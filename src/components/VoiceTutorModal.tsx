@@ -1,1012 +1,1438 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Mic,
-  MicOff,
   Volume2,
   VolumeX,
-  X,
-  Send,
-  Square,
+  PhoneOff,
+  Loader2,
   RotateCcw,
-  Trash2,
   BookOpen,
+  FileText,
+  Sparkles,
+  AlertCircle,
+  GraduationCap,
+  History,
 } from 'lucide-react';
-import type {
-  StudyDocument,
-  VoiceTurn,
-  StudentTutorContext,
-  SourceControlMode,
-} from '../types/study';
+import type { StudyDocument, VoiceTurn, TutorCitation } from '../types/study';
 import { aiStudyClient } from '../services/aiClient';
 import { studyStorage } from '../services/storageService';
-import { LearnMateBuddyAvatar, type BuddyAvatarState } from './LearnMateBuddyAvatar';
 import { MathText } from './MathText';
-import {
-  globalAudioRegistry,
-  retrieveRelevantPagesForQuery,
-  stopAllGlobalAudioAndSpeech,
-  type VoiceSessionLifecycleState,
-} from '../utils/phase6Engine';
 
 interface VoiceTutorModalProps {
+  doc?: StudyDocument | null;
+  activeDocument?: StudyDocument | null;
+  weakTopics?: string[];
   isOpen: boolean;
   onClose: () => void;
-  document?: StudyDocument;
-  activeDocument?: StudyDocument;
-  weakTopics?: string[];
   onJumpToPage?: (pageNumber: number) => void;
   onNavigateToCitation?: (pageNumber: number, quote?: string) => void;
-  studentContext?: StudentTutorContext;
-  sourceControlMode?: SourceControlMode;
 }
 
-type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking';
+export type VoiceSessionLifecycleState =
+  | 'IDLE'
+  | 'INITIALIZING'
+  | 'LISTENING'
+  | 'PROCESSING'
+  | 'SPEAKING'
+  | 'MUTED'
+  | 'DISCONNECTED'
+  | 'ERROR';
 
-function stripForSpeech(raw: string): string {
+export type TeacherLanguageAccent =
+  | 'hinglish_in'
+  | 'english_in'
+  | 'hindi_in'
+  | 'english_intl';
+
+export interface SpokenTeacherAdaptation {
+  languageAccent: TeacherLanguageAccent;
+  recognitionLang: string;
+  preferredVoiceLangs: string[];
+  speechRate: number;
+  detectedLanguageLabel: string;
+  styleInstruction: string;
+}
+
+export interface ArchivedVoiceSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  turns: VoiceTurn[];
+}
+
+const ARCHIVED_VOICE_SESSIONS_KEY_PREFIX = 'learnmate_voice_sessions_archive_v1_';
+
+function loadArchivedVoiceSessions(docId: string): ArchivedVoiceSession[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(`${ARCHIVED_VOICE_SESSIONS_KEY_PREFIX}${docId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveArchivedVoiceSessions(docId: string, sessions: ArchivedVoiceSession[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(
+      `${ARCHIVED_VOICE_SESSIONS_KEY_PREFIX}${docId}`,
+      JSON.stringify(sessions.slice(0, 15))
+    );
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+/**
+ * Automatically detects the student's spoken language (Hindi, Hinglish, or English),
+ * desired speaking speed, and pedagogical instructions directly from their spoken words.
+ */
+export function detectSpokenTeacherAdaptation(
+  spokenText: string,
+  previous?: SpokenTeacherAdaptation
+): SpokenTeacherAdaptation {
+  const text = (spokenText || '').trim();
+  const lower = text.toLowerCase();
+
+  let languageAccent: TeacherLanguageAccent = previous?.languageAccent || 'english_in';
+
+  // 1. Check explicit language switch instructions or script/vocabulary
+  const hasDevanagari = /[\u0900-\u097F]/.test(text);
+  const requestsHindi =
+    /\b(in hindi|hindi mein|hindi me|speak hindi|explain in hindi|हिन्दी में|हिंदी में)\b/i.test(text);
+  const requestsHinglish =
+    /\b(in hinglish|hinglish mein|hinglish me|speak hinglish)\b/i.test(text);
+  const requestsEnglish =
+    /\b(in english|english mein|speak in english|explain in english|only english)\b/i.test(text);
+
+  const hinglishMarkers =
+    /\b(samjhao|samjha|batao|bataiye|kya|kaise|kyun|kyu|hai|hain|mein|aur|iska|iski|iske|dekho|bhaiya|sir\s+ji|beta|sawal|padhao|karo|hota|hoti|nahi|wala|wali|chahiye)\b/i;
+
+  if (requestsEnglish) {
+    languageAccent = 'english_in';
+  } else if (requestsHindi || hasDevanagari) {
+    languageAccent = 'hindi_in';
+  } else if (requestsHinglish || hinglishMarkers.test(lower)) {
+    languageAccent = 'hinglish_in';
+  } else if (!previous) {
+    languageAccent = 'english_in';
+  }
+
+  // 2. Check spoken speed instructions
+  let speechRate = previous?.speechRate ?? 1.0;
+  if (/\b(slowly|slow down|speak slow|little slow|dheere|dheere bolo|aaram se|धीरे)\b/i.test(lower)) {
+    speechRate = 0.9;
+  } else if (/\b(faster|speak fast|quickly|tez bolo|jaldi|तेज़)\b/i.test(lower)) {
+    speechRate = 1.15;
+  } else if (/\b(normal speed|normal pace)\b/i.test(lower)) {
+    speechRate = 1.0;
+  }
+
+  // 3. Language-specific voice and prompt configuration
+  const langMap: Record<
+    TeacherLanguageAccent,
+    {
+      recognitionLang: string;
+      preferredVoiceLangs: string[];
+      detectedLanguageLabel: string;
+      langPrompt: string;
+    }
+  > = {
+    hinglish_in: {
+      recognitionLang: 'en-IN',
+      preferredVoiceLangs: ['en-IN', 'hi-IN', 'en-GB', 'en-US'],
+      detectedLanguageLabel: 'Hinglish (Mirrored)',
+      langPrompt:
+        'The student spoke in Hinglish. Reply in natural conversational Hinglish (Hindi-English classroom mix using Roman script for Hindi words and standard English for technical terms) exactly matching the student’s way of speaking.',
+    },
+    hindi_in: {
+      recognitionLang: 'hi-IN',
+      preferredVoiceLangs: ['hi-IN', 'en-IN'],
+      detectedLanguageLabel: 'Hindi (हिन्दी)',
+      langPrompt:
+        'The student spoke in Hindi or asked for Hindi. Reply in natural, clear classroom Hindi (with technical terms clarified) matching the student’s spoken style.',
+    },
+    english_in: {
+      recognitionLang: 'en-IN',
+      preferredVoiceLangs: ['en-IN', 'en-GB', 'en-US'],
+      detectedLanguageLabel: 'English (Mirrored)',
+      langPrompt:
+        'The student spoke in English. Reply in clear, natural, articulate English like a dedicated classroom professor addressing the student directly.',
+    },
+    english_intl: {
+      recognitionLang: 'en-US',
+      preferredVoiceLangs: ['en-US', 'en-GB', 'en-AU'],
+      detectedLanguageLabel: 'English',
+      langPrompt:
+        'Reply in crisp, structured academic English directly answering the student’s spoken request.',
+    },
+  };
+
+  const chosenLang = langMap[languageAccent];
+
+  return {
+    languageAccent,
+    recognitionLang: chosenLang.recognitionLang,
+    preferredVoiceLangs: chosenLang.preferredVoiceLangs,
+    speechRate,
+    detectedLanguageLabel: chosenLang.detectedLanguageLabel,
+    styleInstruction: chosenLang.langPrompt,
+  };
+}
+
+/**
+ * Converts LaTeX math and Markdown into natural spoken teacher phrasing
+ * so the TTS engine reads equations aloud like a real human teacher instead of skipping them.
+ */
+export function convertMathAndMarkdownToTeacherSpeech(raw: string): string {
+  if (!raw) return '';
+
+  const verbalizeMathFragment = (mathStr: string): string => {
+    let s = mathStr.trim();
+    for (let i = 0; i < 3; i++) {
+      s = s.replace(/\\dfrac\{([^{}]+)\}\{([^{}]+)\}/g, ' $1 divided by $2 ');
+      s = s.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, ' $1 divided by $2 ');
+      s = s.replace(/\\sqrt\[([^{}\]]+)\]\{([^{}]+)\}/g, ' $1th root of $2 ');
+      s = s.replace(/\\sqrt\{([^{}]+)\}/g, ' square root of $2 ');
+      s = s.replace(/\\vec\{([^{}]+)\}/g, ' vector $1 ');
+      s = s.replace(/\\hat\{([^{}]+)\}/g, ' $1 hat ');
+      s = s.replace(/\\overline\{([^{}]+)\}/g, ' mean $1 ');
+      s = s.replace(/\\text\{([^{}]+)\}/g, ' $1 ');
+      s = s.replace(/\\mathrm\{([^{}]+)\}/g, ' $1 ');
+      s = s.replace(/\\mathbf\{([^{}]+)\}/g, ' $1 ');
+    }
+
+    s = s
+      .replace(/\^\{2\}|\^2\b/g, ' squared ')
+      .replace(/\^\{3\}|\^3\b/g, ' cubed ')
+      .replace(/\^\{-1\}/g, ' inverse ')
+      .replace(/\^\{([^{}]+)\}/g, ' to the power $1 ')
+      .replace(/\^([a-zA-Z0-9]+)/g, ' to the power $1 ')
+      .replace(/_\{0\}|_0\b/g, ' naught ')
+      .replace(/_\{max\}|_\{(\text\{max\})\}/gi, ' max ')
+      .replace(/_\{min\}|_\{(\text\{min\})\}/gi, ' min ')
+      .replace(/_\{eff\}/gi, ' effective ')
+      .replace(/_\{rms\}/gi, ' r m s ')
+      .replace(/_\{([^{}]+)\}/g, ' sub $1 ')
+      .replace(/_([a-zA-Z0-9])/g, ' sub $1 ');
+
+    const symbolMap: Array<[RegExp, string]> = [
+      [/\\Delta\b/g, ' delta '],
+      [/\\delta\b/g, ' delta '],
+      [/\\theta\b/g, ' theta '],
+      [/\\Theta\b/g, ' theta '],
+      [/\\omega\b/g, ' omega '],
+      [/\\Omega\b/g, ' ohm '],
+      [/\\alpha\b/g, ' alpha '],
+      [/\\beta\b/g, ' beta '],
+      [/\\gamma\b/g, ' gamma '],
+      [/\\lambda\b/g, ' lambda '],
+      [/\\mu\b/g, ' mu '],
+      [/\\pi\b/g, ' pi '],
+      [/\\sigma\b/g, ' sigma '],
+      [/\\tau\b/g, ' tau '],
+      [/\\phi\b/g, ' phi '],
+      [/\\Phi\b/g, ' phi '],
+      [/\\psi\b/g, ' psi '],
+      [/\\rho\b/g, ' rho '],
+      [/\\epsilon\b|\\varepsilon\b/g, ' epsilon '],
+      [/\\eta\b/g, ' eta '],
+      [/\\nu\b/g, ' nu '],
+      [/\\infty\b/g, ' infinity '],
+      [/\\int\b/g, ' integral of '],
+      [/\\oint\b/g, ' closed integral of '],
+      [/\\sum\b/g, ' summation of '],
+      [/\\prod\b/g, ' product of '],
+      [/\\partial\b/g, ' partial '],
+      [/\\nabla\b/g, ' del '],
+      [/\\times\b/g, ' times '],
+      [/\\cdot\b/g, ' times '],
+      [/\\div\b/g, ' divided by '],
+      [/\\pm\b/g, ' plus or minus '],
+      [/\\mp\b/g, ' minus or plus '],
+      [/\\approx\b/g, ' is approximately equal to '],
+      [/\\neq\b|\\ne\b/g, ' is not equal to '],
+      [/\\leq\b|\\le\b/g, ' is less than or equal to '],
+      [/\\geq\b|\\ge\b/g, ' is greater than or equal to '],
+      [/\\propto\b/g, ' is proportional to '],
+      [/\\equiv\b/g, ' is equivalent to '],
+      [/\\rightarrow\b|\\to\b|\\longrightarrow\b/g, ' gives '],
+      [/\\Rightarrow\b/g, ' implies '],
+      [/\\leftrightarrow\b|\\rightleftharpoons\b/g, ' is in equilibrium with '],
+      [/\\sin\b/g, ' sine '],
+      [/\\cos\b/g, ' cosine '],
+      [/\\tan\b/g, ' tangent '],
+      [/\\log\b/g, ' log '],
+      [/\\ln\b/g, ' natural log of '],
+      [/\\lim\b/g, ' limit '],
+      [/\\left|\\right/g, ' '],
+      [/=/g, ' equals '],
+      [/\+/g, ' plus '],
+      [/\{|\}/g, ' '],
+      [/\\/g, ' '],
+    ];
+
+    for (const [pattern, replacement] of symbolMap) {
+      s = s.replace(pattern, replacement);
+    }
+
+    return s.replace(/\s+/g, ' ').trim();
+  };
+
   return raw
-    .replace(/\$\$[\s\S]*?\$\$/g, ' formula ')
-    .replace(/\$[^$\n]+\$/g, ' expression ')
-    .replace(/[`*_#>-]/g, ' ')
-    .replace(/\[Page\s+\d+\]/gi, '')
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_, math) => ` ${verbalizeMathFragment(math)}. `)
+    .replace(/\$([^$\n]+)\$/g, (_, math) => ` ${verbalizeMathFragment(math)} `)
+    .replace(/\[Page\s+(\d+)\]/gi, 'on page $1')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[*_~#>]/g, '')
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\n/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
+function splitIntoSpokenSentences(text: string): string[] {
+  const cleaned = convertMathAndMarkdownToTeacherSpeech(text);
+  if (!cleaned) return [];
+  const rawSentences = cleaned
+    .split(/(?<=[.!?।])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const chunks: string[] = [];
+  for (const sentence of rawSentences) {
+    if (sentence.length <= 220) {
+      chunks.push(sentence);
+    } else {
+      const parts = sentence.split(/(?<=[,;:])\s+/);
+      let current = '';
+      for (const p of parts) {
+        if ((current + ' ' + p).trim().length > 200 && current) {
+          chunks.push(current.trim());
+          current = p;
+        } else {
+          current = (current + ' ' + p).trim();
+        }
+      }
+      if (current.trim()) chunks.push(current.trim());
+    }
+  }
+  return chunks.length > 0 ? chunks : [cleaned];
+}
+
 export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
+  doc: docProp,
+  activeDocument,
+  weakTopics = [],
   isOpen,
   onClose,
-  document: docProp,
-  activeDocument,
-  weakTopics,
-  onJumpToPage: onJumpToPageProp,
+  onJumpToPage,
   onNavigateToCitation,
-  studentContext: studentContextProp,
-  sourceControlMode = 'material_only',
 }) => {
-  const studyDoc = (docProp || activeDocument) as StudyDocument;
-  const onJumpToPage =
-    onJumpToPageProp ||
-    (onNavigateToCitation ? (pageNum: number) => onNavigateToCitation(pageNum) : undefined);
-  const studentContext: StudentTutorContext | undefined =
-    studentContextProp ||
-    (weakTopics && weakTopics.length > 0 ? { weakTopics } : undefined);
-  const docId = studyDoc?.id || 'default-doc';
+  const doc = docProp ?? activeDocument ?? null;
+  const docId = doc?.id || 'general-workspace';
+  const docTitle = doc?.title ? doc.title.replace(/\.pdf$/i, '') : 'General JEE Study Session';
 
-  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [lifecycleState, setLifecycleState] = useState<VoiceSessionLifecycleState>('IDLE');
-  const [turns, setTurns] = useState<VoiceTurn[]>(() =>
-    studyStorage.getVoiceTutorMessages(docId)
-  );
   const [liveTranscript, setLiveTranscript] = useState('');
-  const [textFallbackInput, setTextFallbackInput] = useState('');
-  const [muted, setMuted] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
-  const [micError, setMicError] = useState<string | null>(null);
-  const [autoLoop, setAutoLoop] = useState(true);
+  const [streamingResponse, setStreamingResponse] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [messages, setMessages] = useState<VoiceTurn[]>([]);
+  const [archivedSessions, setArchivedSessions] = useState<ArchivedVoiceSession[]>([]);
+  const [activeSpokenSentence, setActiveSpokenSentence] = useState<string>('');
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+
+  // Automatic spoken adaptation state (mirrors student's spoken language, pace & instructions)
+  const [adaptation, setAdaptation] = useState<SpokenTeacherAdaptation>(() =>
+    detectSpokenTeacherAdaptation('')
+  );
 
   const recognitionRef = useRef<any>(null);
-  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const synthRef = useRef<SpeechSynthesis | null>(
+    typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null
+  );
   const abortControllerRef = useRef<AbortController | null>(null);
-  const turnsEndRef = useRef<HTMLDivElement | null>(null);
-  const autoLoopRef = useRef(autoLoop);
-  const mutedRef = useRef(muted);
-  const isOpenRef = useRef(isOpen);
-  const sessionEpochRef = useRef(0);
-  const lifecycleStateRef = useRef<VoiceSessionLifecycleState>('IDLE');
-
-  const updateLifecycle = useCallback((next: VoiceSessionLifecycleState) => {
-    lifecycleStateRef.current = next;
-    globalAudioRegistry.transitionState(next);
-    setLifecycleState(next);
-  }, []);
+  const isMountedRef = useRef<boolean>(false);
+  const sessionActiveRef = useRef<boolean>(false);
+  const isMutedRef = useRef<boolean>(isMuted);
+  const adaptationRef = useRef<SpokenTeacherAdaptation>(adaptation);
+  const transcriptAccumRef = useRef<string>('');
+  const silenceTimerRef = useRef<number | null>(null);
+  const speechQueueAbortRef = useRef<boolean>(false);
+  const historyEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    autoLoopRef.current = autoLoop;
-  }, [autoLoop]);
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
 
   useEffect(() => {
-    mutedRef.current = muted;
-    if (muted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        if (activeUtteranceRef.current) {
-          activeUtteranceRef.current.onstart = null;
-          activeUtteranceRef.current.onend = null;
-          activeUtteranceRef.current.onerror = null;
-          activeUtteranceRef.current = null;
-        }
-        window.speechSynthesis.cancel();
-      } catch {
-        // ignore
-      }
-      setVoiceState((s) => (s === 'speaking' ? 'idle' : s));
-      if (lifecycleStateRef.current === 'SPEAKING') {
-        updateLifecycle('IDLE');
-      }
-    }
-  }, [muted, updateLifecycle]);
+    adaptationRef.current = adaptation;
+  }, [adaptation]);
 
-  // Restore per-document voice conversation history when switching documents
-  useEffect(() => {
-    const saved = studyStorage.getVoiceTutorMessages(docId);
-    setTurns(saved);
-  }, [docId]);
+  const pickBestTeacherVoice = useCallback(
+    (voices: SpeechSynthesisVoice[], preferredLangs: string[]): SpeechSynthesisVoice | null => {
+      if (!voices || voices.length === 0) return null;
 
-  // Persist finalized turns per document
-  useEffect(() => {
-    const persistable = turns.filter((t) => !t.isStreaming && t.text.trim().length > 0);
-    studyStorage.saveVoiceTutorMessages(docId, persistable);
-  }, [turns, docId]);
+      for (const targetLang of preferredLangs) {
+        const exactMatch = voices.find(
+          (v) =>
+            v.lang.toLowerCase() === targetLang.toLowerCase() &&
+            (v.name.includes('Natural') ||
+              v.name.includes('Google') ||
+              v.name.includes('Microsoft') ||
+              v.name.includes('India') ||
+              v.name.includes('Rishi') ||
+              v.name.includes('Neerja') ||
+              v.name.includes('Prabhat') ||
+              v.name.includes('Swara') ||
+              v.name.includes('Madhur') ||
+              v.name.includes('Lekha'))
+        );
+        if (exactMatch) return exactMatch;
 
-  useEffect(() => {
-    turnsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [turns, liveTranscript]);
-
-  /**
-   * Deterministic teardown that transitions through ENDING -> ENDED,
-   * detaches all utterance/recognition handlers, cancels window.speechSynthesis,
-   * aborts active streams, and invalidates all in-flight session epochs.
-   */
-  const teardownVoiceSession = useCallback(
-    (reason = 'end_voice_session', finalState: 'IDLE' | 'ENDED' = 'ENDED') => {
-      lifecycleStateRef.current = 'ENDING';
-      sessionEpochRef.current += 1;
-
-      if (activeUtteranceRef.current) {
-        try {
-          activeUtteranceRef.current.onstart = null;
-          activeUtteranceRef.current.onend = null;
-          activeUtteranceRef.current.onerror = null;
-        } catch {
-          // ignore
-        }
-        activeUtteranceRef.current = null;
+        const langMatch = voices.find((v) =>
+          v.lang.toLowerCase().startsWith(targetLang.toLowerCase())
+        );
+        if (langMatch) return langMatch;
       }
 
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.onstart = null;
-          recognitionRef.current.onresult = null;
-          recognitionRef.current.onerror = null;
-          recognitionRef.current.onend = null;
-          if (typeof recognitionRef.current.abort === 'function') {
-            recognitionRef.current.abort();
-          } else if (typeof recognitionRef.current.stop === 'function') {
-            recognitionRef.current.stop();
-          }
-        } catch {
-          // ignore
-        }
-        recognitionRef.current = null;
-      }
-
-      if (abortControllerRef.current) {
-        try {
-          abortControllerRef.current.abort();
-        } catch {
-          // ignore
-        }
-        abortControllerRef.current = null;
-      }
-
-      stopAllGlobalAudioAndSpeech(reason);
-      sessionEpochRef.current = globalAudioRegistry.getEpoch();
-      lifecycleStateRef.current = finalState;
-      setLifecycleState(finalState);
-      setVoiceState('idle');
-      setLiveTranscript('');
+      return (
+        voices.find((v) => v.lang.startsWith('en') && v.name.includes('Natural')) ||
+        voices.find((v) => v.lang.startsWith('en')) ||
+        voices[0] ||
+        null
+      );
     },
     []
   );
 
   useEffect(() => {
-    isOpenRef.current = isOpen;
-    if (!isOpen) {
-      teardownVoiceSession('modal_closed', 'ENDED');
-    } else {
-      const nextEpoch = globalAudioRegistry.beginSession('IDLE');
-      sessionEpochRef.current = nextEpoch;
-      lifecycleStateRef.current = 'IDLE';
-      setLifecycleState('IDLE');
+    if (isOpen) {
+      const saved = studyStorage.getVoiceTutorMessages(docId);
+      setMessages(saved);
+      setArchivedSessions(loadArchivedVoiceSessions(docId));
     }
-  }, [isOpen, teardownVoiceSession]);
+  }, [isOpen, docId]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const SpeechRec =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setSpeechSupported(Boolean(SpeechRec));
-    return () => {
-      teardownVoiceSession('component_unmount', 'ENDED');
-    };
-  }, [teardownVoiceSession]);
-
-  const stopSpeakingAndRecognition = useCallback(
-    (reason = 'interrupt_turn') => {
-      teardownVoiceSession(reason, 'IDLE');
-    },
-    [teardownVoiceSession]
-  );
-
-  const startListening = useCallback(() => {
-    if (!isOpenRef.current) return;
-    if (
-      lifecycleStateRef.current === 'ENDING' ||
-      lifecycleStateRef.current === 'ENDED'
-    ) {
-      // Starting a fresh turn explicitly re-opens the session
-      lifecycleStateRef.current = 'CONNECTING';
+    if (isOpen && messages.length > 0) {
+      studyStorage.saveVoiceTutorMessages(docId, messages);
     }
-    setMicError(null);
+  }, [messages, isOpen, docId]);
 
-    if (typeof window === 'undefined') return;
-    const SpeechRec =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) {
-      setMicError('Browser voice recognition unavailable. Use the text bar below.');
-      return;
+  useEffect(() => {
+    historyEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, liveTranscript, streamingResponse]);
+
+  const teardownAllVoiceResources = useCallback(() => {
+    sessionActiveRef.current = false;
+    speechQueueAbortRef.current = true;
+
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
     }
 
-    // Cancel any ongoing speech or stream first so speaker playback never feeds into the mic
-    stopSpeakingAndRecognition('start_listening_interrupt');
-    const currentEpoch = globalAudioRegistry.beginSession('CONNECTING');
-    sessionEpochRef.current = currentEpoch;
-    lifecycleStateRef.current = 'CONNECTING';
-    setLifecycleState('CONNECTING');
-
-    try {
-      const recognition = new SpeechRec();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = 'en-IN';
-      globalAudioRegistry.registerRecognition(recognition);
-
-      let collectedFinal = '';
-
-      recognition.onstart = () => {
-        if (
-          !isOpenRef.current ||
-          sessionEpochRef.current !== currentEpoch ||
-          !globalAudioRegistry.isCallbackValid(currentEpoch)
-        ) {
-          try {
-            recognition.abort();
-          } catch {
-            // ignore
-          }
-          return;
-        }
-        lifecycleStateRef.current = 'LISTENING';
-        globalAudioRegistry.transitionState('LISTENING');
-        setLifecycleState('LISTENING');
-        setVoiceState('listening');
-        setLiveTranscript('');
-      };
-
-      recognition.onresult = (event: any) => {
-        if (
-          !isOpenRef.current ||
-          sessionEpochRef.current !== currentEpoch ||
-          !globalAudioRegistry.isCallbackValid(currentEpoch)
-        ) {
-          return;
-        }
-        let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const piece = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            collectedFinal += piece + ' ';
-          } else {
-            interim += piece;
-          }
-        }
-        setLiveTranscript((collectedFinal + interim).trim());
-      };
-
-      recognition.onerror = (event: any) => {
-        if (sessionEpochRef.current !== currentEpoch) return;
-        if (event.error && event.error !== 'no-speech' && event.error !== 'aborted') {
-          setMicError(`Microphone notice (${event.error}). You can also type below.`);
-        }
-        setVoiceState('idle');
-        updateLifecycle('IDLE');
-      };
-
-      recognition.onend = () => {
-        if (
-          !isOpenRef.current ||
-          sessionEpochRef.current !== currentEpoch ||
-          !globalAudioRegistry.isCallbackValid(currentEpoch)
-        ) {
-          return;
-        }
-        const finalSpoken = collectedFinal.trim();
-        setLiveTranscript('');
-        if (finalSpoken) {
-          void handleProcessSpokenQuestion(finalSpoken, currentEpoch);
-        } else {
-          setVoiceState('idle');
-          updateLifecycle('IDLE');
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch {
-      setMicError('Could not start microphone. Please use the text input below.');
-      setVoiceState('idle');
-      updateLifecycle('IDLE');
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch {
+        // Ignore abort errors
+      }
+      abortControllerRef.current = null;
     }
-  }, [stopSpeakingAndRecognition, updateLifecycle]);
 
-  const speakResponse = useCallback(
-    (text: string, epoch: number) => {
-      if (
-        !isOpenRef.current ||
-        mutedRef.current ||
-        sessionEpochRef.current !== epoch ||
-        lifecycleStateRef.current === 'ENDING' ||
-        lifecycleStateRef.current === 'ENDED' ||
-        !globalAudioRegistry.isCallbackValid(epoch) ||
-        typeof window === 'undefined' ||
-        !('speechSynthesis' in window)
-      ) {
-        setVoiceState('idle');
-        if (lifecycleStateRef.current !== 'ENDED') {
-          updateLifecycle('IDLE');
-        }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort?.();
+        recognitionRef.current.stop?.();
+      } catch {
+        // Ignore errors stopping recognition
+      }
+      recognitionRef.current = null;
+    }
+
+    if (synthRef.current) {
+      try {
+        synthRef.current.cancel();
+      } catch {
+        // Ignore errors cancelling speech synthesis
+      }
+    }
+
+    setActiveSpokenSentence('');
+    setSpeakingMessageId(null);
+  }, []);
+
+  const speakTeacherExplanation = useCallback(
+    (
+      rawMarkdownText: string,
+      currentAdapt: SpokenTeacherAdaptation,
+      messageId?: string,
+      onFinished?: () => void
+    ) => {
+      if (!synthRef.current || isMutedRef.current) {
+        setActiveSpokenSentence('');
+        setSpeakingMessageId(null);
+        onFinished?.();
         return;
       }
 
-      try {
-        window.speechSynthesis.cancel();
-        const cleanSpeech = stripForSpeech(text);
-        if (!cleanSpeech) {
-          setVoiceState('idle');
-          updateLifecycle('IDLE');
+      const synth = synthRef.current;
+      speechQueueAbortRef.current = true;
+      synth.cancel();
+
+      const sentences = splitIntoSpokenSentences(rawMarkdownText);
+      if (sentences.length === 0) {
+        onFinished?.();
+        return;
+      }
+
+      speechQueueAbortRef.current = false;
+      if (messageId) setSpeakingMessageId(messageId);
+
+      const voices = synth.getVoices();
+      const chosenVoice = pickBestTeacherVoice(voices, currentAdapt.preferredVoiceLangs);
+
+      let index = 0;
+
+      const speakNextSentence = () => {
+        if (
+          speechQueueAbortRef.current ||
+          !isMountedRef.current ||
+          isMutedRef.current ||
+          index >= sentences.length
+        ) {
+          setActiveSpokenSentence('');
+          setSpeakingMessageId(null);
+          onFinished?.();
           return;
         }
 
-        const utterance = new SpeechSynthesisUtterance(cleanSpeech);
-        utterance.lang = 'en-IN';
-        utterance.rate = 1.04;
-        utterance.pitch = 1.02;
+        const currentSentence = sentences[index];
+        index += 1;
+        setActiveSpokenSentence(currentSentence);
+        setLifecycleState('SPEAKING');
 
-        const voices = window.speechSynthesis.getVoices();
-        const preferredVoice =
-          voices.find((v) => v.lang.includes('en-IN') || v.name.includes('India')) ||
-          voices.find((v) => v.lang.startsWith('en'));
-        if (preferredVoice) {
-          utterance.voice = preferredVoice;
+        const utterance = new SpeechSynthesisUtterance(currentSentence);
+        if (chosenVoice) {
+          utterance.voice = chosenVoice;
+          utterance.lang = chosenVoice.lang;
+        } else {
+          utterance.lang = currentAdapt.recognitionLang;
         }
-
-        utterance.onstart = () => {
-          if (
-            !isOpenRef.current ||
-            sessionEpochRef.current !== epoch ||
-            lifecycleStateRef.current === 'ENDING' ||
-            lifecycleStateRef.current === 'ENDED' ||
-            !globalAudioRegistry.isCallbackValid(epoch)
-          ) {
-            try {
-              window.speechSynthesis.cancel();
-            } catch {
-              // ignore
-            }
-            return;
-          }
-          lifecycleStateRef.current = 'SPEAKING';
-          globalAudioRegistry.transitionState('SPEAKING');
-          setLifecycleState('SPEAKING');
-          setVoiceState('speaking');
-        };
+        utterance.rate = currentAdapt.speechRate;
+        utterance.pitch = 1.0;
 
         utterance.onend = () => {
-          globalAudioRegistry.unregisterUtterance(utterance);
-          if (activeUtteranceRef.current === utterance) {
-            activeUtteranceRef.current = null;
-          }
-          if (
-            !isOpenRef.current ||
-            sessionEpochRef.current !== epoch ||
-            lifecycleStateRef.current === 'ENDING' ||
-            lifecycleStateRef.current === 'ENDED' ||
-            !globalAudioRegistry.isCallbackValid(epoch)
-          ) {
+          if (speechQueueAbortRef.current || !isMountedRef.current) {
+            setActiveSpokenSentence('');
+            setSpeakingMessageId(null);
             return;
           }
-          setVoiceState('idle');
-          updateLifecycle('IDLE');
-          if (autoLoopRef.current && isOpenRef.current) {
-            const loopTimer = setTimeout(() => {
-              if (
-                isOpenRef.current &&
-                autoLoopRef.current &&
-                sessionEpochRef.current === epoch &&
-                lifecycleStateRef.current !== 'ENDING' &&
-                lifecycleStateRef.current !== 'ENDED'
-              ) {
-                startListening();
-              }
-            }, 350);
-            globalAudioRegistry.registerTimer(loopTimer);
-          }
+          speakNextSentence();
         };
 
         utterance.onerror = () => {
-          globalAudioRegistry.unregisterUtterance(utterance);
-          if (activeUtteranceRef.current === utterance) {
-            activeUtteranceRef.current = null;
-          }
-          if (sessionEpochRef.current !== epoch) return;
-          setVoiceState('idle');
-          if (lifecycleStateRef.current !== 'ENDED') {
-            updateLifecycle('IDLE');
-          }
-        };
-
-        activeUtteranceRef.current = utterance;
-        globalAudioRegistry.registerUtterance(utterance);
-        window.speechSynthesis.speak(utterance);
-      } catch {
-        setVoiceState('idle');
-        if ((lifecycleStateRef.current as VoiceSessionLifecycleState) !== 'ENDED') {
-          updateLifecycle('IDLE');
-        }
-      }
-    },
-    [startListening, updateLifecycle]
-  );
-
-  const handleProcessSpokenQuestion = async (questionText: string, epochOverride?: number) => {
-    const trimmed = questionText.trim();
-    if (!trimmed || !isOpenRef.current) return;
-
-    const activeEpoch =
-      epochOverride ??
-      (sessionEpochRef.current || globalAudioRegistry.beginSession('CONNECTING'));
-    sessionEpochRef.current = activeEpoch;
-    lifecycleStateRef.current = 'CONNECTING';
-    globalAudioRegistry.transitionState('CONNECTING');
-    setLifecycleState('CONNECTING');
-
-    const userTurnId = `v-user-${Date.now()}`;
-    const assistantTurnId = `v-ai-${Date.now() + 1}`;
-    const nowTime = new Date().toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    const userTurn: VoiceTurn = {
-      id: userTurnId,
-      role: 'user',
-      text: trimmed,
-      isFinal: true,
-      timestamp: nowTime,
-    };
-
-    const streamingAssistantTurn: VoiceTurn = {
-      id: assistantTurnId,
-      role: 'assistant',
-      text: '',
-      isStreaming: true,
-      isFinal: false,
-      timestamp: nowTime,
-    };
-
-    setTurns((prev) => [...prev, userTurn, streamingAssistantTurn]);
-    setVoiceState('thinking');
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    globalAudioRegistry.registerAbortController(controller);
-
-    // Retrieve relevant pages for 60-page PDFs so Voice Tutor stays fast and page-accurate
-    const retrieval = retrieveRelevantPagesForQuery(
-      studyDoc.pages,
-      trimmed,
-      studentContext?.currentPage || 1,
-      10
-    );
-
-    try {
-      const historyPayload = turns
-        .filter((t) => !t.isStreaming && t.text.trim())
-        .slice(-6)
-        .map((t) => ({ role: t.role, content: t.text }));
-
-      let accumulatedText = '';
-      const response = await aiStudyClient.askTutorStream(
-        {
-          title: studyDoc.title,
-          pages: retrieval.selectedPages,
-          question: trimmed,
-          history: historyPayload,
-          studentContext,
-          sourceControlMode,
-          isVoiceTutor: true,
-          signal: controller.signal,
-        },
-        (delta) => {
-          const curState = lifecycleStateRef.current as VoiceSessionLifecycleState;
-          if (
-            !isOpenRef.current ||
-            sessionEpochRef.current !== activeEpoch ||
-            curState === 'ENDING' ||
-            curState === 'ENDED'
-          ) {
+          if (speechQueueAbortRef.current || !isMountedRef.current) {
+            setActiveSpokenSentence('');
+            setSpeakingMessageId(null);
             return;
           }
-          accumulatedText += delta;
-          const snapshot = accumulatedText;
-          setTurns((prev) =>
-            prev.map((t) => (t.id === assistantTurnId ? { ...t, text: snapshot } : t))
-          );
-        }
-      );
+          speakNextSentence();
+        };
 
-      // Reject late completion if session was ended or interrupted
-      const curStateAfter = lifecycleStateRef.current as VoiceSessionLifecycleState;
-      if (
-        !isOpenRef.current ||
-        sessionEpochRef.current !== activeEpoch ||
-        curStateAfter === 'ENDING' ||
-        curStateAfter === 'ENDED' ||
-        !globalAudioRegistry.isCallbackValid(activeEpoch)
-      ) {
-        return;
-      }
+        synth.speak(utterance);
+      };
 
-      const finalAnswer = (response.answer || accumulatedText).trim();
-      setTurns((prev) =>
-        prev.map((t) =>
-          t.id === assistantTurnId
-            ? {
-                ...t,
-                text: finalAnswer,
-                isStreaming: false,
-                isFinal: true,
-                citations: response.citations,
-                modelUsed: response.modelUsed,
-              }
-            : t
-        )
-      );
+      speakNextSentence();
+    },
+    [pickBestTeacherVoice]
+  );
 
-      speakResponse(finalAnswer, activeEpoch);
-    } catch (err: any) {
-      const errState = lifecycleStateRef.current as VoiceSessionLifecycleState;
-      if (
-        sessionEpochRef.current !== activeEpoch ||
-        errState === 'ENDING' ||
-        errState === 'ENDED'
-      ) {
-        setTurns((prev) =>
-          prev.map((t) =>
-            t.id === assistantTurnId
-              ? {
-                  ...t,
-                  text: t.text.trim() || 'Interrupted.',
-                  isStreaming: false,
-                  isFinal: true,
-                  interrupted: true,
-                }
-              : t
-          )
-        );
-        return;
-      }
-
-      const fallbackReply = `From ${studyDoc.title}: ${
-        studyDoc.overview ||
-        studyDoc.pages[0]?.content.slice(0, 200) ||
-        'Please ask about a specific concept from your uploaded material.'
-      }`;
-      setTurns((prev) =>
-        prev.map((t) =>
-          t.id === assistantTurnId
-            ? {
-                ...t,
-                text: fallbackReply,
-                isStreaming: false,
-                isFinal: true,
-              }
-            : t
-        )
-      );
-      speakResponse(fallbackReply, activeEpoch);
+  const startListening = useCallback(() => {
+    if (!sessionActiveRef.current) {
+      sessionActiveRef.current = true;
     }
-  };
-
-  /**
-   * Clicking the central voice orb always interrupts the current reply or stream
-   * and immediately opens a fresh listening turn.
-   */
-  const handleCentralOrbClick = () => {
-    if (voiceState === 'listening') {
-      stopSpeakingAndRecognition('orb_stop_listening');
+    if (!recognitionRef.current) {
+      setErrorMsg(
+        'Microphone recognition requires Chrome, Edge, or Safari with microphone permission enabled.'
+      );
       return;
     }
-    setTurns((prev) =>
-      prev.map((t) =>
-        t.isStreaming
-          ? {
-              ...t,
-              text: t.text.trim() || 'Interrupted by student.',
-              isStreaming: false,
-              isFinal: true,
-              interrupted: true,
+
+    speechQueueAbortRef.current = true;
+    if (synthRef.current) {
+      synthRef.current.cancel();
+    }
+    setActiveSpokenSentence('');
+    setSpeakingMessageId(null);
+
+    try {
+      setErrorMsg(null);
+      transcriptAccumRef.current = '';
+      setLiveTranscript('');
+      recognitionRef.current.lang = adaptationRef.current.recognitionLang;
+      recognitionRef.current.start();
+    } catch {
+      try {
+        recognitionRef.current.stop();
+        setTimeout(() => {
+          if (sessionActiveRef.current && isMountedRef.current && recognitionRef.current) {
+            transcriptAccumRef.current = '';
+            setLiveTranscript('');
+            recognitionRef.current.start();
+          }
+        }, 150);
+      } catch {
+        setLifecycleState('IDLE');
+      }
+    }
+  }, []);
+
+  const handleUserQuery = useCallback(
+    async (queryText: string) => {
+      const cleanQuery = queryText.trim();
+      if (!cleanQuery || !isMountedRef.current) return;
+
+      if (!sessionActiveRef.current) {
+        sessionActiveRef.current = true;
+      }
+
+      if (silenceTimerRef.current !== null) {
+        window.clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+
+      speechQueueAbortRef.current = true;
+      if (synthRef.current) {
+        synthRef.current.cancel();
+      }
+
+      // Automatically detect & mirror the student's spoken language, accent, pace, and instructions
+      const nextAdaptation = detectSpokenTeacherAdaptation(cleanQuery, adaptationRef.current);
+      setAdaptation(nextAdaptation);
+      adaptationRef.current = nextAdaptation;
+
+      const userMsg: VoiceTurn = {
+        id: `v-user-${Date.now()}`,
+        role: 'user',
+        text: cleanQuery,
+        isFinal: true,
+        timestamp: new Date().toISOString(),
+      };
+
+      let nextHistory: VoiceTurn[] = [];
+      setMessages((prev) => {
+        nextHistory = [...prev, userMsg];
+        return nextHistory;
+      });
+      setLiveTranscript('');
+      setStreamingResponse('');
+      setLifecycleState('PROCESSING');
+      setErrorMsg(null);
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
+      try {
+        const historyPayload = nextHistory.slice(-10).map((m) => ({
+          role: m.role,
+          content: m.text,
+        }));
+
+        const teacherPrompt = `[AI VOICE CLASSROOM TEACHER — AUTOMATIC MIRRORING DIRECTIVE:
+1. Language & Tone Mirroring: ${nextAdaptation.styleInstruction} Always reply in the exact same language, tone, and style that the student used in their spoken message.
+2. Follow Student Instructions Directly: Do whatever the student has asked for (whether explaining a concept, solving a numerical step-by-step, deriving a formula, quizzing them orally, or summarizing).
+3. Paragraph & Symbol Formatting:
+   - Write in clear, natural paragraphs so your explanation streams word-by-word in a cohesive paragraph and sounds like a real human teacher speaking aloud.
+   - Format all mathematical symbols, expressions, and physics/chemistry formulas in valid KaTeX ($...$ for inline, $$...$$ for display equations) so the student understands every symbol visually.
+   - Highlight important takeaways, laws, and conditions using **bold** and *italic*.]
+
+Student Spoken Words: ${cleanQuery}`;
+
+        let accumulated = '';
+        const responseObj = await aiStudyClient.askTutorStream(
+          {
+            title: doc?.title || 'General JEE Classroom Session',
+            pages: doc?.pages?.length
+              ? doc.pages
+              : [
+                  {
+                    pageNumber: 1,
+                    title: 'General JEE Study Session',
+                    content: 'Physics, Chemistry, and Mathematics Classroom Session',
+                  },
+                ],
+            question: teacherPrompt,
+            history: historyPayload,
+            studentContext: {
+              weakTopics,
+              preferredLanguage: nextAdaptation.detectedLanguageLabel,
+              currentActivity: 'Voice Classroom Session',
+            },
+            sourceControlMode: 'extended_knowledge',
+            isVoiceTutor: true,
+            signal: abortController.signal,
+          },
+          (deltaText) => {
+            if (!isMountedRef.current || !sessionActiveRef.current) return;
+            accumulated += deltaText;
+            setStreamingResponse(accumulated);
+          }
+        );
+
+        if (!isMountedRef.current || !sessionActiveRef.current) return;
+
+        const finalAnswer = (responseObj?.answer || accumulated).trim();
+        const extractedCitations: TutorCitation[] =
+          responseObj?.citations && responseObj.citations.length > 0
+            ? [...responseObj.citations]
+            : [];
+
+        const pageRegex = /\[Page\s+(\d+)\]/gi;
+        let match: RegExpExecArray | null;
+        while ((match = pageRegex.exec(finalAnswer)) !== null) {
+          const pageNum = parseInt(match[1], 10);
+          if (
+            !Number.isNaN(pageNum) &&
+            !extractedCitations.some((c) => c.pageNumber === pageNum)
+          ) {
+            extractedCitations.push({
+              pageNumber: pageNum,
+              section: `Page ${pageNum}`,
+              quote: '',
+            });
+          }
+        }
+
+        const aiMsgId = `v-ai-${Date.now()}`;
+        const aiMsg: VoiceTurn = {
+          id: aiMsgId,
+          role: 'assistant',
+          text: finalAnswer,
+          isFinal: true,
+          timestamp: new Date().toISOString(),
+          citations: extractedCitations.length > 0 ? extractedCitations : undefined,
+          modelUsed: responseObj?.modelUsed,
+        };
+
+        setMessages((prev) => [...prev, aiMsg]);
+        setStreamingResponse('');
+
+        if (!isMutedRef.current && synthRef.current) {
+          speakTeacherExplanation(finalAnswer, nextAdaptation, aiMsgId, () => {
+            if (!isMountedRef.current || !sessionActiveRef.current) return;
+            setLifecycleState('IDLE');
+            startListening();
+          });
+        } else {
+          setLifecycleState(isMutedRef.current ? 'MUTED' : 'IDLE');
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || !isMountedRef.current || !sessionActiveRef.current) {
+          return;
+        }
+        setErrorMsg(err?.message || 'Failed to generate teacher explanation. Tap the mic to retry.');
+        setStreamingResponse('');
+        setLifecycleState('ERROR');
+      }
+    },
+    [doc, weakTopics, speakTeacherExplanation, startListening]
+  );
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    if (!isOpen) {
+      teardownAllVoiceResources();
+      setLifecycleState('DISCONNECTED');
+      setLiveTranscript('');
+      setStreamingResponse('');
+      return;
+    }
+
+    sessionActiveRef.current = true;
+    setLifecycleState('INITIALIZING');
+    setErrorMsg(null);
+
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = adaptationRef.current.recognitionLang;
+
+        recognition.onstart = () => {
+          if (!isMountedRef.current || !sessionActiveRef.current) return;
+          setLifecycleState('LISTENING');
+          setErrorMsg(null);
+        };
+
+        recognition.onresult = (event: any) => {
+          if (!isMountedRef.current || !sessionActiveRef.current) return;
+
+          let fullParagraph = '';
+          for (let i = 0; i < event.results.length; ++i) {
+            const piece = event.results[i][0].transcript;
+            fullParagraph +=
+              (fullParagraph && !fullParagraph.endsWith(' ') ? ' ' : '') + piece.trim();
+          }
+
+          const cleaned = fullParagraph.replace(/\s+/g, ' ').trim();
+          transcriptAccumRef.current = cleaned;
+          setLiveTranscript(cleaned);
+
+          if (silenceTimerRef.current !== null) {
+            window.clearTimeout(silenceTimerRef.current);
+          }
+
+          const latestResult = event.results[event.results.length - 1];
+          const waitMs = latestResult?.isFinal ? 1100 : 2100;
+
+          silenceTimerRef.current = window.setTimeout(() => {
+            const finalSpoken = transcriptAccumRef.current.trim();
+            if (finalSpoken && sessionActiveRef.current && isMountedRef.current) {
+              try {
+                recognition.stop();
+              } catch {
+                // ignore
+              }
+              transcriptAccumRef.current = '';
+              void handleUserQuery(finalSpoken);
             }
-          : t
-      )
-    );
-    startListening();
-  };
+          }, waitMs);
+        };
 
-  /**
-   * End Session immediately stops all audio, detaches utterance handlers,
-   * closes the microphone, cancels in-flight streams, transitions to ENDED,
-   * and closes the modal idempotently.
-   */
-  const handleEndSession = () => {
-    teardownVoiceSession('user_clicked_end_session', 'ENDED');
+        recognition.onerror = (event: any) => {
+          if (!isMountedRef.current || !sessionActiveRef.current) return;
+          if (event.error === 'aborted' || event.error === 'no-speech') {
+            if (event.error === 'no-speech') {
+              setLifecycleState('IDLE');
+            }
+            return;
+          }
+          setErrorMsg(
+            `Microphone notice (${event.error}). Tap the microphone button to speak again.`
+          );
+          setLifecycleState('ERROR');
+        };
+
+        recognition.onend = () => {
+          if (!isMountedRef.current || !sessionActiveRef.current) return;
+          setLifecycleState((prev) => (prev === 'LISTENING' ? 'IDLE' : prev));
+        };
+
+        recognitionRef.current = recognition;
+        setLifecycleState('IDLE');
+      } else {
+        setErrorMsg('Live voice recognition requires Chrome, Edge, or Safari.');
+        setLifecycleState('IDLE');
+      }
+    }
+
+    return () => {
+      isMountedRef.current = false;
+      teardownAllVoiceResources();
+    };
+  }, [isOpen, teardownAllVoiceResources, handleUserQuery]);
+
+  const stopListeningAndSubmit = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+    const finalSpoken = transcriptAccumRef.current.trim() || liveTranscript.trim();
+    if (finalSpoken) {
+      transcriptAccumRef.current = '';
+      void handleUserQuery(finalSpoken);
+    } else {
+      setLifecycleState('IDLE');
+    }
+  }, [liveTranscript, handleUserQuery]);
+
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const nextMuted = !prev;
+      isMutedRef.current = nextMuted;
+      if (nextMuted && synthRef.current) {
+        speechQueueAbortRef.current = true;
+        synthRef.current.cancel();
+        setActiveSpokenSentence('');
+        setSpeakingMessageId(null);
+        setLifecycleState((curr) => (curr === 'SPEAKING' ? 'MUTED' : curr));
+      } else if (!nextMuted) {
+        setLifecycleState((curr) => (curr === 'MUTED' ? 'IDLE' : curr));
+      }
+      return nextMuted;
+    });
+  }, []);
+
+  const stopTeacherSpeechOnly = useCallback(() => {
+    speechQueueAbortRef.current = true;
+    if (synthRef.current) {
+      synthRef.current.cancel();
+    }
+    setActiveSpokenSentence('');
+    setSpeakingMessageId(null);
+    setLifecycleState('IDLE');
+  }, []);
+
+  // New Session Button: archives current turns to Recorded History and resets active conversation
+  const handleNewSession = useCallback(() => {
+    stopTeacherSpeechOnly();
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+    if (messages.length > 0) {
+      const firstUserTurn = messages.find((m) => m.role === 'user');
+      const sessionTitle = firstUserTurn
+        ? firstUserTurn.text.slice(0, 68)
+        : `${docTitle} Voice Session`;
+      const newArchived: ArchivedVoiceSession = {
+        id: `vsess-${Date.now()}`,
+        title: sessionTitle,
+        createdAt: new Date().toISOString(),
+        turns: messages,
+      };
+      const updatedArchive = [newArchived, ...archivedSessions].slice(0, 15);
+      setArchivedSessions(updatedArchive);
+      saveArchivedVoiceSessions(docId, updatedArchive);
+    }
+    studyStorage.saveVoiceTutorMessages(docId, []);
+    setMessages([]);
+    setLiveTranscript('');
+    setStreamingResponse('');
+    setLifecycleState('IDLE');
+  }, [messages, archivedSessions, docId, docTitle, stopTeacherSpeechOnly]);
+
+  const handleEndSession = useCallback(() => {
+    teardownAllVoiceResources();
+    setLifecycleState('DISCONNECTED');
+    setLiveTranscript('');
+    setStreamingResponse('');
     onClose();
-  };
+  }, [teardownAllVoiceResources, onClose]);
 
-  const handleClearHistory = () => {
-    stopSpeakingAndRecognition('clear_voice_history');
-    setTurns([]);
-    studyStorage.saveVoiceTutorMessages(studyDoc.id, []);
-  };
-
-  const handleTextFallbackSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!textFallbackInput.trim()) return;
-    stopSpeakingAndRecognition('text_fallback_submit');
-    const q = textFallbackInput.trim();
-    setTextFallbackInput('');
-    const nextEpoch = globalAudioRegistry.beginSession('CONNECTING');
-    sessionEpochRef.current = nextEpoch;
-    void handleProcessSpokenQuestion(q, nextEpoch);
-  };
+  const lifecycleMeta: Record<
+    VoiceSessionLifecycleState,
+    { label: string; badgeClass: string; dotClass: string; subtitle: string }
+  > = useMemo(
+    () => ({
+      IDLE: {
+        label: 'Ready to Listen',
+        badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+        dotClass: 'bg-slate-400',
+        subtitle:
+          'Tap the microphone and speak naturally in English, Hinglish, or Hindi. The AI Teacher replies in the same way you speak.',
+      },
+      INITIALIZING: {
+        label: 'Initializing Voice',
+        badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
+        dotClass: 'bg-amber-500 animate-pulse',
+        subtitle: 'Preparing voice recognition and teacher audio...',
+      },
+      LISTENING: {
+        label: 'Listening Live',
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        dotClass: 'bg-emerald-600 animate-ping',
+        subtitle:
+          'Speak your question or instruction — your words appear live word-by-word in a paragraph below.',
+      },
+      PROCESSING: {
+        label: 'Teacher Thinking',
+        badgeClass: 'bg-blue-50 text-blue-800 border-blue-200',
+        dotClass: 'bg-blue-600 animate-pulse',
+        subtitle: 'Formulating a step-by-step spoken explanation in your language and style...',
+      },
+      SPEAKING: {
+        label: 'Teacher Explaining',
+        badgeClass: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+        dotClass: 'bg-indigo-600 animate-pulse',
+        subtitle: 'Your teacher is explaining aloud. Tap the mic anytime to interrupt or ask a follow-up.',
+      },
+      MUTED: {
+        label: 'Speaker Muted',
+        badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
+        dotClass: 'bg-amber-500',
+        subtitle: 'Speaker audio is muted. Word-by-word paragraph explanations continue visually.',
+      },
+      DISCONNECTED: {
+        label: 'Session Closed',
+        badgeClass: 'bg-slate-100 text-slate-600 border-slate-200',
+        dotClass: 'bg-slate-400',
+        subtitle: 'Voice session ended.',
+      },
+      ERROR: {
+        label: 'Mic Attention',
+        badgeClass: 'bg-red-50 text-red-700 border-red-200',
+        dotClass: 'bg-red-500',
+        subtitle: 'Tap the microphone button to retry voice capture.',
+      },
+    }),
+    []
+  );
 
   if (!isOpen) return null;
 
-  const buddyAvatarState: BuddyAvatarState =
-    voiceState === 'listening'
-      ? 'listening'
-      : voiceState === 'thinking'
-        ? 'thinking'
-        : voiceState === 'speaking'
-          ? 'speaking'
-          : 'idle';
+  const currentStatus = lifecycleMeta[lifecycleState];
 
-  const statusHeadline =
-    voiceState === 'listening'
-      ? 'Listening to you... Tap circle to stop'
-      : voiceState === 'thinking'
-        ? 'Buddy is thinking... Tap circle to interrupt'
-        : voiceState === 'speaking'
-          ? 'Buddy is speaking... Tap circle to interrupt & speak'
-          : 'Tap the voice circle to start speaking';
+  const renderMessageContent = (msg: VoiceTurn) => {
+    return (
+      <div className="space-y-3">
+        <div className="text-[15px] leading-[1.8] text-slate-800">
+          <MathText text={msg.text} />
+        </div>
+        {msg.citations && msg.citations.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-200/80">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mr-1">
+              Material Reference:
+            </span>
+            {msg.citations.map((citation, cIdx) => (
+              <button
+                key={`${citation.pageNumber}-${cIdx}`}
+                type="button"
+                onClick={() => {
+                  if (onNavigateToCitation) {
+                    onNavigateToCitation(citation.pageNumber, citation.quote);
+                  } else if (onJumpToPage) {
+                    onJumpToPage(citation.pageNumber);
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold transition-colors cursor-pointer"
+                title={`Jump to Page ${citation.pageNumber} in study material`}
+              >
+                <BookOpen className="w-3 h-3" />
+                Page {citation.pageNumber}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 backdrop-blur-xs p-3 sm:p-6"
       data-testid="voice-tutor-modal"
       data-voice-lifecycle={lifecycleState}
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) handleEndSession();
-      }}
     >
-      <div className="w-full max-w-2xl bg-slate-900 text-white rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Top Header */}
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="relative">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center">
-                <LearnMateBuddyAvatar state={buddyAvatarState} outputEnergy={voiceState === 'speaking' ? 0.45 : 0} />
-              </div>
-              <span
-                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900 ${
-                  voiceState === 'listening'
-                    ? 'bg-red-500 animate-ping'
-                    : voiceState === 'speaking'
-                      ? 'bg-emerald-400 animate-pulse'
-                      : voiceState === 'thinking'
-                        ? 'bg-amber-400 animate-bounce'
-                        : 'bg-indigo-400'
-                }`}
-              />
+      <div className="keep-white bg-white text-slate-900 w-full max-w-[1680px] h-[90vh] max-h-[940px] rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+        {/* Clean White Desktop Header with ONLY Mute Speaker, New Session, and Close Controls */}
+        <header className="px-6 lg:px-8 py-4 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 shrink-0">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0">
+              <GraduationCap className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-white truncate">Buddy Live Voice Tutor</h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
-                  Real-Time
-                </span>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h2 className="text-base sm:text-lg font-bold tracking-tight text-slate-900">
+                  AI Voice Tutor
+                </h2>
                 <span
                   data-testid="voice-lifecycle-badge"
-                  className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-slate-800 text-slate-300 border border-slate-700"
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold border ${currentStatus.badgeClass}`}
                 >
-                  {lifecycleState}
+                  <span className={`w-1.5 h-1.5 rounded-full ${currentStatus.dotClass}`} />
+                  {currentStatus.label}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 truncate">Studying: {studyDoc.title}</p>
+              <p className="text-xs text-slate-500 truncate mt-0.5 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>
+                  Context: <strong className="font-semibold text-slate-700">{docTitle}</strong> ·
+                  Automatically mirrors your spoken language &amp; instructions
+                </span>
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {turns.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClearHistory}
-                className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-rose-300 hover:bg-slate-700 transition-colors cursor-pointer"
-                title="Clear voice history for this document"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
+          {/* Approved Controls: Mute Speaker, New Session, Close */}
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
-              onClick={() => setMuted((m) => !m)}
+              onClick={toggleMute}
               data-testid="voice-mute-toggle-btn"
-              className={`p-2 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
-                muted
-                  ? 'bg-red-500/15 border-red-500/30 text-red-300'
-                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-colors flex items-center gap-1.5 cursor-pointer ${
+                isMuted
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
-              title={muted ? 'Unmute voice output' : 'Mute voice output'}
+              title={isMuted ? 'Unmute speaker' : 'Mute speaker'}
             >
-              {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              {isMuted ? (
+                <>
+                  <VolumeX className="w-4 h-4 text-amber-600" />
+                  <span>Unmute Speaker</span>
+                </>
+              ) : (
+                <>
+                  <Volume2 className="w-4 h-4 text-slate-700" />
+                  <span>Mute Speaker</span>
+                </>
+              )}
             </button>
+
+            <button
+              type="button"
+              onClick={handleNewSession}
+              data-testid="voice-new-session-btn"
+              className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="Archive current transcript and start a new voice session"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>New Session</span>
+            </button>
+
             <button
               type="button"
               onClick={handleEndSession}
               data-testid="voice-end-session-top-btn"
-              className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-200 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
-              title="End Session"
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="Close Voice Tutor"
             >
-              <X className="w-3.5 h-3.5" />
-              <span>End Session</span>
+              <PhoneOff className="w-3.5 h-3.5" />
+              <span>Close</span>
             </button>
           </div>
-        </div>
+        </header>
 
-        {/* Standalone Circular Voice Control Stage */}
-        <div className="px-6 py-5 bg-gradient-to-b from-slate-900 via-indigo-950/30 to-slate-900 flex flex-col items-center justify-center text-center border-b border-slate-800/80">
-          <button
-            type="button"
-            onClick={handleCentralOrbClick}
-            data-testid="voice-central-orb-btn"
-            aria-label={statusHeadline}
-            className="relative group focus:outline-none cursor-pointer"
-          >
-            <div
-              className={`absolute -inset-4 rounded-full transition-all duration-500 blur-md ${
-                voiceState === 'listening'
-                  ? 'bg-rose-500/35 scale-110 animate-pulse'
-                  : voiceState === 'speaking'
-                    ? 'bg-emerald-500/35 scale-110 animate-pulse'
-                    : voiceState === 'thinking'
-                      ? 'bg-amber-500/30 scale-105 animate-pulse'
-                      : 'bg-indigo-500/20 group-hover:bg-indigo-500/35 group-hover:scale-105'
-              }`}
-            />
-            <div
-              className={`relative w-24 h-24 sm:w-28 sm:h-28 rounded-full flex flex-col items-center justify-center border-2 transition-all shadow-inner ${
-                voiceState === 'listening'
-                  ? 'bg-rose-950/80 border-rose-400 shadow-rose-500/30'
-                  : voiceState === 'speaking'
-                    ? 'bg-emerald-950/80 border-emerald-400 shadow-emerald-500/30'
-                    : voiceState === 'thinking'
-                      ? 'bg-amber-950/80 border-amber-400 shadow-amber-500/30'
-                      : 'bg-slate-800/90 border-indigo-400/60 group-hover:border-indigo-300'
-              }`}
-            >
-              <LearnMateBuddyAvatar state={buddyAvatarState} outputEnergy={voiceState === 'speaking' ? 0.45 : 0} />
-              <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-200">
-                {voiceState === 'listening' ? (
-                  <>
-                    <Square className="w-2.5 h-2.5 fill-rose-400 text-rose-400" />
-                    <span>Listening</span>
-                  </>
-                ) : voiceState === 'speaking' ? (
-                  <>
-                    <Mic className="w-3 h-3 text-emerald-300" />
-                    <span>Interrupt</span>
-                  </>
-                ) : voiceState === 'thinking' ? (
-                  <span>Thinking...</span>
-                ) : (
-                  <>
-                    <Mic className="w-3 h-3 text-indigo-300" />
-                    <span>Speak</span>
-                  </>
-                )}
-              </span>
-            </div>
-          </button>
+        {/* Two-Column Clean White Desktop View: Left Live Visualizer + Active Paragraphs | Right Recorded Transcript History */}
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 bg-white">
+          {/* LEFT COLUMN (5 cols on desktop): Live Voice Visualizer, Central Mic Control & Real-Time Word-by-Word Paragraphs */}
+          <aside className="lg:col-span-5 border-b lg:border-b-0 lg:border-r border-slate-200 bg-slate-50/50 flex flex-col justify-between p-6 lg:p-8 overflow-y-auto">
+            <div className="space-y-6">
+              {/* Live Voice Stage Card */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 lg:p-8 shadow-2xs text-center space-y-6">
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Live Voice Classroom
+                  </span>
+                  <h3 className="text-lg font-bold text-slate-900">{currentStatus.label}</h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                    {currentStatus.subtitle}
+                  </p>
+                </div>
 
-          <p className="mt-3.5 text-xs sm:text-sm font-semibold text-slate-200">{statusHeadline}</p>
-
-          {liveTranscript && (
-            <div className="mt-2.5 px-4 py-2 rounded-2xl bg-indigo-500/15 border border-indigo-400/30 text-xs text-indigo-100 max-w-md">
-              &ldquo;{liveTranscript}&rdquo;
-            </div>
-          )}
-
-          {micError && (
-            <p className="mt-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl">
-              {micError}
-            </p>
-          )}
-        </div>
-
-        {/* Stable Streaming Conversation Paragraphs */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-slate-950/50 min-h-[200px] max-h-[320px]">
-          {turns.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center py-8 text-slate-400 space-y-3">
-              <p className="text-xs max-w-sm">
-                Tap the circle above and ask a JEE doubt in English or Hinglish, or pick a prompt:
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {[
-                  'Explain the core formula on Page 1 step by step',
-                  'Ask me a quick viva question from this chapter',
-                  'Summarize the most common JEE exam trap here',
-                ].map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => {
-                      stopSpeakingAndRecognition('quick_prompt_select');
-                      const nextEpoch = globalAudioRegistry.beginSession('CONNECTING');
-                      sessionEpochRef.current = nextEpoch;
-                      void handleProcessSpokenQuestion(prompt, nextEpoch);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-400/40 text-xs text-slate-200 transition-colors cursor-pointer"
-                  >
-                    &ldquo;{prompt}&rdquo;
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            turns.map((turn) => (
-              <div
-                key={turn.id}
-                className={`flex flex-col ${turn.role === 'user' ? 'items-end' : 'items-start'}`}
-              >
+                {/* Architectural Acoustic Waveform Visualizer */}
                 <div
-                  className={`max-w-[88%] rounded-2xl px-4 py-3 text-xs sm:text-sm leading-relaxed ${
-                    turn.role === 'user'
-                      ? 'bg-indigo-600 text-white rounded-br-xs'
-                      : 'bg-slate-800/95 text-slate-100 border border-slate-700/80 rounded-bl-xs'
-                  }`}
+                  className="flex items-center justify-center gap-2 h-16 py-2"
+                  aria-hidden="true"
                 >
-                  <div className="flex items-center justify-between gap-3 mb-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider opacity-75">
-                      {turn.role === 'user' ? 'You' : 'Buddy Tutor'}
-                    </span>
-                    <span className="text-[10px] opacity-60">{turn.timestamp}</span>
-                  </div>
+                  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((barIdx) => {
+                    const heights = [
+                      'h-3',
+                      'h-5',
+                      'h-8',
+                      'h-11',
+                      'h-14',
+                      'h-16',
+                      'h-14',
+                      'h-11',
+                      'h-8',
+                      'h-5',
+                      'h-3',
+                    ];
+                    return (
+                      <span
+                        key={barIdx}
+                        className={`w-1.5 rounded-full transition-all duration-300 ${
+                          lifecycleState === 'LISTENING'
+                            ? `bg-emerald-600 ${heights[barIdx]} animate-pulse`
+                            : lifecycleState === 'SPEAKING'
+                            ? `bg-blue-600 ${heights[(barIdx + 3) % heights.length]} animate-pulse`
+                            : lifecycleState === 'PROCESSING'
+                            ? 'bg-amber-500 h-5 animate-pulse'
+                            : 'bg-slate-200 h-3'
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
 
-                  {turn.role === 'assistant' ? (
-                    <div className="prose prose-invert prose-xs max-w-none">
-                      {turn.text ? (
-                        <MathText text={turn.text} />
-                      ) : (
-                        <span className="text-slate-400 italic">Listening to notes...</span>
-                      )}
+                {/* Single Primary Microphone Button */}
+                <div className="flex flex-col items-center gap-3">
+                  <button
+                    type="button"
+                    data-testid="voice-central-orb-btn"
+                    onClick={() => {
+                      if (lifecycleState === 'LISTENING') {
+                        stopListeningAndSubmit();
+                      } else if (lifecycleState === 'SPEAKING') {
+                        stopTeacherSpeechOnly();
+                        startListening();
+                      } else if (lifecycleState !== 'PROCESSING') {
+                        startListening();
+                      }
+                    }}
+                    disabled={lifecycleState === 'PROCESSING'}
+                    className={`w-full max-w-sm py-4 px-6 rounded-2xl font-bold text-sm flex items-center justify-center gap-3 transition-all border cursor-pointer ${
+                      lifecycleState === 'LISTENING'
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700 shadow-md'
+                        : lifecycleState === 'SPEAKING'
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-700 shadow-sm'
+                        : lifecycleState === 'PROCESSING'
+                        ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-wait'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900 shadow-sm'
+                    }`}
+                  >
+                    {lifecycleState === 'LISTENING' ? (
+                      <>
+                        <Mic className="w-5 h-5 animate-pulse" />
+                        <span>Done Speaking (Send to Teacher)</span>
+                      </>
+                    ) : lifecycleState === 'PROCESSING' ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>Teacher is Thinking...</span>
+                      </>
+                    ) : lifecycleState === 'SPEAKING' ? (
+                      <>
+                        <Mic className="w-5 h-5" />
+                        <span>Tap Mic to Interrupt &amp; Speak</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-5 h-5" />
+                        <span>Tap Mic to Speak</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Live Spoken Sentence Caption when Teacher is Speaking */}
+                {activeSpokenSentence && (
+                  <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 text-left">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-blue-700 mb-1">
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Teacher Speaking Aloud Now</span>
+                    </div>
+                    <p className="text-sm text-slate-800 leading-relaxed font-medium">
+                      “{activeSpokenSentence}”
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Live Word-by-Word Student Speech Paragraph Box */}
+              <div
+                className="bg-white rounded-2xl border border-slate-200 p-5 space-y-2.5 shadow-2xs"
+                data-testid="voice-live-student-paragraph"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        lifecycleState === 'LISTENING'
+                          ? 'bg-emerald-600 animate-ping'
+                          : 'bg-slate-300'
+                      }`}
+                    />
+                    Your Spoken Words (Live Word-by-Word Paragraph)
+                  </span>
+                </div>
+                {liveTranscript ? (
+                  <p className="text-[15px] leading-relaxed font-medium text-slate-900">
+                    {liveTranscript}
+                    <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-emerald-600 animate-pulse" />
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    As you speak, your words appear here word-by-word in a complete paragraph. Speak
+                    in English, Hinglish, or Hindi and tell the teacher how you want the topic or
+                    question explained.
+                  </p>
+                )}
+              </div>
+
+              {/* Live Word-by-Word AI Teacher Response Paragraph Box */}
+              {(lifecycleState === 'PROCESSING' || streamingResponse) && (
+                <div
+                  className="bg-white rounded-2xl border border-blue-200 p-5 space-y-2.5 shadow-xs"
+                  data-testid="voice-live-teacher-paragraph"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-600 animate-spin" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+                      AI Teacher Response (Word-by-Word Paragraph)
+                    </span>
+                  </div>
+                  {streamingResponse ? (
+                    <div className="text-[15px] leading-[1.8] text-slate-800">
+                      <MathText text={streamingResponse} />
                     </div>
                   ) : (
-                    <p className="whitespace-pre-wrap">{turn.text}</p>
-                  )}
-
-                  {turn.interrupted && (
-                    <span className="mt-1.5 inline-block text-[10px] font-medium text-amber-300/90">
-                      (Interrupted)
-                    </span>
-                  )}
-
-                  {turn.citations && turn.citations.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-slate-700/70 flex flex-wrap gap-1.5">
-                      {turn.citations.map((cit, idx) => (
-                        <button
-                          key={`${turn.id}-cit-${idx}`}
-                          type="button"
-                          onClick={() => {
-                            if (onJumpToPage) {
-                              onJumpToPage(cit.pageNumber);
-                            }
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-[10px] font-semibold cursor-pointer"
-                        >
-                          <BookOpen className="w-2.5 h-2.5" />
-                          <span>Page {cit.pageNumber}</span>
-                        </button>
-                      ))}
+                    <div className="flex items-center gap-2.5 text-sm text-slate-500 py-1">
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                      <span>Preparing explanation in your spoken language and style...</span>
                     </div>
                   )}
                 </div>
-              </div>
-            ))
-          )}
-          <div ref={turnsEndRef} />
-        </div>
-
-        {/* Bottom Controls + Text Input Fallback */}
-        <div className="p-4 bg-slate-900 border-t border-slate-800 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              {speechSupported ? (
-                <button
-                  type="button"
-                  onClick={handleCentralOrbClick}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    voiceState === 'listening'
-                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                  }`}
-                >
-                  {voiceState === 'listening' ? (
-                    <>
-                      <MicOff className="w-3.5 h-3.5" />
-                      <span>Stop Mic</span>
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="w-3.5 h-3.5" />
-                      <span>{voiceState === 'speaking' ? 'Interrupt & Speak' : 'Speak Now'}</span>
-                    </>
-                  )}
-                </button>
-              ) : (
-                <span className="text-xs text-amber-300">
-                  Voice mic unsupported in this browser — use text input below
-                </span>
               )}
 
-              <button
-                type="button"
-                onClick={handleEndSession}
-                data-testid="voice-end-session-bottom-btn"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-500/40 text-slate-200 hover:text-rose-200 text-xs font-semibold cursor-pointer transition-colors"
-              >
-                <Square className="w-3 h-3" />
-                <span>End Session</span>
-              </button>
+              {errorMsg && (
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
             </div>
 
-            <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={autoLoop}
-                onChange={(e) => setAutoLoop(e.target.checked)}
-                className="rounded border-slate-600 text-indigo-500 focus:ring-indigo-500"
-              />
-              <RotateCcw className="w-3 h-3 text-indigo-400" />
-              <span>Auto-listen after reply</span>
-            </label>
-          </div>
+            <div className="pt-4 mt-4 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-500">
+              <span>All voice turns &amp; KaTeX formulas are recorded automatically</span>
+              <span className="font-semibold text-slate-700">
+                {messages.length} {messages.length === 1 ? 'turn' : 'turns'} recorded
+              </span>
+            </div>
+          </aside>
 
-          <form onSubmit={handleTextFallbackSubmit} className="flex items-center gap-2">
-            <input
-              type="text"
-              value={textFallbackInput}
-              onChange={(e) => setTextFallbackInput(e.target.value)}
-              placeholder="Or type to talk with Buddy..."
-              className="flex-1 px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
-            />
-            <button
-              type="submit"
-              disabled={!textFallbackInput.trim()}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>Send</span>
-            </button>
-          </form>
+          {/* RIGHT COLUMN (7 cols on desktop): Recorded Word-by-Word Paragraph Transcript & Past Session History */}
+          <section className="lg:col-span-7 flex flex-col min-h-0 bg-white">
+            <div className="px-6 lg:px-8 py-3.5 bg-slate-50/70 border-b border-slate-200 flex items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Recorded Conversation Transcript &amp; History
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[11px] font-semibold text-slate-600">
+                  {messages.length} {messages.length === 1 ? 'turn' : 'turns'}
+                </span>
+              </div>
+              <span className="text-xs text-slate-500 hidden sm:inline">
+                Visual KaTeX Formulas · Bold &amp; Italic Highlights
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6">
+              {messages.length === 0 ? (
+                <div className="h-full min-h-[280px] flex flex-col items-center justify-center max-w-lg mx-auto text-center py-8">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 mb-4">
+                    <Mic className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Speak to Start Your Classroom Session
+                  </h3>
+                  <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                    Tap the microphone on the left and talk to your AI Teacher just like a real
+                    classroom instructor. Whether you speak in <strong>English</strong>,{' '}
+                    <strong>Hinglish</strong>, or <strong>Hindi</strong>, or ask for derivations,
+                    numericals, or oral viva questions, your teacher will reply in the exact same
+                    way and record the full word-by-word paragraph transcript here.
+                  </p>
+                </div>
+              ) : (
+                messages.map((msg) => {
+                  const isBeingSpoken = speakingMessageId === msg.id;
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col ${
+                        msg.role === 'user' ? 'items-end' : 'items-start'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5 px-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          {msg.role === 'user' ? 'You (Spoken Paragraph)' : 'AI Teacher (Spoken Paragraph)'}
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {new Date(msg.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+
+                      <div
+                        className={`max-w-[92%] rounded-2xl px-5 py-4 border ${
+                          msg.role === 'user'
+                            ? 'bg-slate-900 text-white border-slate-900 rounded-br-xs'
+                            : isBeingSpoken
+                            ? 'bg-blue-50/40 text-slate-900 border-blue-300 shadow-xs rounded-bl-xs'
+                            : 'bg-slate-50/80 text-slate-900 border-slate-200 rounded-bl-xs'
+                        }`}
+                      >
+                        {msg.role === 'user' ? (
+                          <p className="text-[15px] leading-relaxed font-normal text-white">
+                            {msg.text}
+                          </p>
+                        ) : (
+                          renderMessageContent(msg)
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+
+              {/* Archived Past Voice Sessions */}
+              {archivedSessions.length > 0 && (
+                <div className="pt-6 mt-6 border-t border-slate-200 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                    <History className="w-3.5 h-3.5" />
+                    <span>Previous Recorded Voice Sessions ({archivedSessions.length})</span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {archivedSessions.map((sess) => (
+                      <details
+                        key={sess.id}
+                        className="rounded-xl border border-slate-200 bg-slate-50/60 overflow-hidden"
+                      >
+                        <summary className="px-4 py-3 text-xs font-semibold text-slate-800 cursor-pointer flex items-center justify-between gap-2 select-none">
+                          <span className="truncate">{sess.title}</span>
+                          <span className="text-[11px] text-slate-500 shrink-0">
+                            {sess.turns.length} turns ·{' '}
+                            {new Date(sess.createdAt).toLocaleDateString()}
+                          </span>
+                        </summary>
+                        <div className="p-4 bg-white border-t border-slate-200 space-y-3">
+                          {sess.turns.map((t) => (
+                            <div
+                              key={t.id}
+                              className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1"
+                            >
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                {t.role === 'user' ? 'Student' : 'AI Teacher'}
+                              </div>
+                              <div className="text-xs sm:text-sm text-slate-800 leading-relaxed">
+                                <MathText text={t.text} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div ref={historyEndRef} />
+            </div>
+          </section>
         </div>
       </div>
     </div>

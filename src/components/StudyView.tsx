@@ -27,6 +27,12 @@ import {
   Clock,
   PenTool,
   Plus,
+  Maximize2,
+  Minimize2,
+  Highlighter,
+  Eraser,
+  StickyNote,
+  GripVertical,
 } from 'lucide-react';
 import type {
   StudyDocument,
@@ -36,7 +42,6 @@ import type {
   MistakeInsight,
   RevisionTask,
   SourceControlMode,
-  TeachItBackEvaluation,
 } from '../types/study';
 import { aiStudyClient } from '../services/aiClient';
 import { studyStorage } from '../services/storageService';
@@ -112,9 +117,6 @@ export const StudyView: React.FC<StudyViewProps> = ({
   onCloseExternalVoice,
 }) => {
   const [hubSection, setHubSection] = useState<StudyHubSection>(initialHubSection);
-  const [selectedSyllabusChapterId, setSelectedSyllabusChapterId] = useState<string | undefined>(
-    undefined
-  );
   const [subMode, setSubMode] = useState<StudySubMode>(initialSubMode);
 
   useEffect(() => {
@@ -130,14 +132,26 @@ export const StudyView: React.FC<StudyViewProps> = ({
   const [highlightedQuote, setHighlightedQuote] = useState<string | null>(null);
   const [readerZoomPct, setReaderZoomPct] = useState<number>(100);
   const [viewPdfCanvas, setViewPdfCanvas] = useState<boolean>(false);
-  const [showOverviewDrawer, setShowOverviewDrawer] = useState<boolean>(false);
   const [expandedCitationsMap, setExpandedCitationsMap] = useState<Record<string, boolean>>({});
   const [voiceModalOpen, setVoiceModalOpen] = useState<boolean>(false);
+
+  // Desktop Resizable Split Pane & Full-Screen Toggle State
+  const [readerSplitPct, setReaderSplitPct] = useState<number>(58);
+  const [maximizedPane, setMaximizedPane] = useState<'none' | 'reader' | 'tutor'>('none');
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Inline Reader Annotation State (Highlight, Freehand Pen/Eraser, Page Notes)
+  const [inlineAnnotateActive, setInlineAnnotateActive] = useState<boolean>(false);
+  const [inlineTool, setInlineTool] = useState<'highlight' | 'pen' | 'eraser'>('highlight');
+  const [inlinePenColor, setInlinePenColor] = useState<string>('#4F46E5');
+  const [inlinePageNotes, setInlinePageNotes] = useState<Record<number, string>>({});
+  const [isDrawingInk, setIsDrawingInk] = useState<boolean>(false);
+  const inkCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const tutorScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Tutor state (defaults to "Notes + JEE knowledge" / extended_knowledge per Phase 3 item 5)
+  // Tutor state (defaults to "Notes + JEE knowledge" / extended_knowledge)
   const [tutorMessages, setTutorMessages] = useState<TutorMessage[]>([]);
   const [questionInput, setQuestionInput] = useState('');
   const [lastAskedQuestion, setLastAskedQuestion] = useState<string>('');
@@ -145,12 +159,64 @@ export const StudyView: React.FC<StudyViewProps> = ({
   const [tutorError, setTutorError] = useState<string | null>(null);
   const [sourceControlMode, setSourceControlMode] = useState<SourceControlMode>('extended_knowledge');
 
-  // Teach It Back (Feynman Method) state
-  const [showTeachItBack, setShowTeachItBack] = useState(false);
-  const [teachTopic, setTeachTopic] = useState('');
-  const [teachExplanation, setTeachExplanation] = useState('');
-  const [isEvaluatingTeach, setIsEvaluatingTeach] = useState(false);
-  const [teachResult, setTeachResult] = useState<TeachItBackEvaluation | null>(null);
+  const handleStartSplitDrag = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const relativeX = moveEvent.clientX - rect.left;
+      const pct = Math.round((relativeX / rect.width) * 100);
+      setReaderSplitPct(Math.max(32, Math.min(72, pct)));
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleInkPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!inlineAnnotateActive || inlineTool === 'highlight') return;
+    const canvas = inkCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setIsDrawingInk(true);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const handleInkPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingInk || !inlineAnnotateActive || inlineTool === 'highlight') return;
+    const canvas = inkCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (inlineTool === 'eraser') {
+      ctx.clearRect(x - 12, y - 12, 24, 24);
+    } else {
+      ctx.strokeStyle = inlinePenColor;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+  };
+
+  const handleInkPointerUp = () => {
+    setIsDrawingInk(false);
+  };
 
   useEffect(() => {
     if (externalVoiceOpen) {
@@ -451,29 +517,6 @@ export const StudyView: React.FC<StudyViewProps> = ({
     studyStorage.saveSourceControlMode(mode);
   };
 
-  const handleEvaluateTeachItBack = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!teachExplanation.trim() || isEvaluatingTeach) return;
-    setIsEvaluatingTeach(true);
-    try {
-      const targetConcept =
-        teachTopic.trim() ||
-        activePageTopic?.name ||
-        activeDocument.topics[0]?.name ||
-        activeDocument.title;
-      const evaluation = await aiStudyClient.evaluateTeachItBack({
-        topic: targetConcept,
-        studentExplanation: teachExplanation.trim(),
-        pages: activeDocument.pages,
-      });
-      setTeachResult(evaluation);
-    } catch {
-      // ignore
-    } finally {
-      setIsEvaluatingTeach(false);
-    }
-  };
-
   // --- Diagnostic Quiz Generation & Grading ---
   const handleGenerateDiagnosticQuiz = async (forceRefresh = false) => {
     if (isGeneratingQuiz) return;
@@ -636,7 +679,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
     !isGeneratingAdaptive;
 
   return (
-    <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-8 py-3.5 space-y-5">
+    <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-14 py-6 lg:py-8 space-y-7">
       {/* =====================================================================
           STUDY HUB SUB-NAVIGATION BAR (Matches Image 7 & Section 3)
           Syllabus · Chapter Notes · My Materials · AI Tutor · Create · Resources
@@ -644,7 +687,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
       <div
         role="tablist"
         aria-label="Study Hub Navigation"
-        className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-2 border-b border-line no-scrollbar"
+        className="flex items-center gap-2 sm:gap-3 overflow-x-auto pb-3 border-b border-line no-scrollbar"
       >
         {(
           [
@@ -781,6 +824,45 @@ export const StudyView: React.FC<StudyViewProps> = ({
          ===================================================================== */}
       {(hubSection === 'my_materials' || hubSection === 'ai_tutor') && (
         <>
+          {documents.length === 0 && hubSection === 'my_materials' && (
+            <div
+              data-testid="study-my-materials-empty-banner"
+              className="rounded-2xl border border-dashed border-line bg-white p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+            >
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand">
+                  Personal Materials Library (0 Uploaded Files)
+                </span>
+                <h2 className="text-base font-bold text-ink">
+                  No personal files uploaded yet — showing built-in JEE Syllabus preview below
+                </h2>
+                <p className="text-xs text-muted">
+                  Upload your own PDF chapter, handwritten notes photo, or YouTube lecture to study your personal material, or explore the separate <strong>Syllabus</strong> and <strong>Chapter Notes</strong> tabs.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {onOpenUploadModal && (
+                  <button
+                    type="button"
+                    data-testid="study-empty-upload-btn"
+                    onClick={onOpenUploadModal}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Upload My Material</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setHubSection('syllabus')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-canvas hover:bg-soft text-xs font-bold text-ink cursor-pointer"
+                >
+                  <span>Browse JEE Syllabus →</span>
+                </button>
+              </div>
+            </div>
+          )}
+
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-1 border-b border-line">
         <div className="space-y-1.5">
           <div className="lm-kicker flex items-center gap-2">
@@ -796,11 +878,11 @@ export const StudyView: React.FC<StudyViewProps> = ({
           </div>
           <h1 className="lm-editorial-title text-2xl sm:text-4xl">{cleanDocTitle}</h1>
           <p className="lm-editorial-subtitle text-sm sm:text-base text-body">
-            Read your material on the left and ask the JEE AI Tutor on the right. Select any line to ask about it.
+            Read and annotate your material on the left, and ask the JEE AI Tutor on the right. Drag the center divider to resize.
           </p>
         </div>
 
-        {/* Mode Actions: Chapter Quiz | Adaptive Drill | Voice Tutor (matching wanted/LearnMate JEE Study Workbench-6.png) */}
+        {/* Mode Actions: Chapter Quiz | Adaptive Drill | Voice Tutor */}
         <div className="flex flex-wrap items-center gap-2 pb-2">
           {subMode !== 'explain' && (
             <button
@@ -869,7 +951,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
       </div>
 
       {/* =====================================================================
-          MOBILE "READ / ASK" SEGMENTED SWITCH (<1024px per Phase 3 Item 4)
+          MOBILE "READ / ASK" SEGMENTED SWITCH (<1024px)
          ===================================================================== */}
       {subMode === 'explain' && (
         <div className="lg:hidden flex items-center justify-between gap-2 p-1 rounded-xl bg-white border border-line shadow-2xs">
@@ -903,14 +985,32 @@ export const StudyView: React.FC<StudyViewProps> = ({
       )}
 
       {/* =====================================================================
-          ONE STUDY SCREEN: READER (LEFT 7 COLS) + AI TUTOR (RIGHT 5 COLS)
+          RESIZABLE SIDE-BY-SIDE DESKTOP SPLIT PANE + FULL-SCREEN TOGGLES
          ===================================================================== */}
       {subMode === 'explain' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          {/* LEFT 7 COLUMNS: STUDY MATERIAL READER (PDF / Notes / Scanned Image / YouTube) */}
+        <div
+          ref={splitContainerRef}
+          data-testid="study-resizable-split-pane"
+          className="flex flex-col lg:flex-row items-stretch gap-5 lg:gap-0"
+        >
+          {/* LEFT PANE: STUDY MATERIAL READER + INLINE ANNOTATIONS */}
           <div
-            className={`lg:col-span-7 lm-card-editorial overflow-hidden flex flex-col ${
-              mobilePane === 'ask' ? 'hidden lg:flex' : 'flex'
+            style={{
+              width:
+                maximizedPane === 'reader'
+                  ? '100%'
+                  : maximizedPane === 'tutor'
+                  ? '0%'
+                  : undefined,
+              flexBasis:
+                maximizedPane === 'none' ? `${readerSplitPct}%` : undefined,
+            }}
+            className={`lm-card-editorial overflow-hidden flex flex-col transition-all duration-150 ${
+              maximizedPane === 'tutor'
+                ? 'hidden'
+                : mobilePane === 'ask'
+                ? 'hidden lg:flex'
+                : 'flex'
             }`}
           >
             {/* Reader Top Toolbar */}
@@ -932,11 +1032,15 @@ export const StudyView: React.FC<StudyViewProps> = ({
                     }}
                     className="bg-transparent font-semibold text-ink focus:outline-none cursor-pointer max-w-[160px] sm:max-w-[210px] truncate"
                   >
-                    {documents.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.title}
-                      </option>
-                    ))}
+                    {documents.length > 0 ? (
+                      documents.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.title}
+                        </option>
+                      ))
+                    ) : (
+                      <option value={activeDocument.id}>{activeDocument.title}</option>
+                    )}
                   </select>
                 </div>
 
@@ -998,18 +1102,21 @@ export const StudyView: React.FC<StudyViewProps> = ({
                   </button>
                 )}
 
-                {onOpenPdfWorkspace && (
-                  <button
-                    type="button"
-                    data-testid="study-annotate-btn"
-                    onClick={onOpenPdfWorkspace}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-line hover:border-brand text-xs font-semibold text-brand cursor-pointer"
-                    title="Highlight, draw and add notes in the Annotation Studio"
-                  >
-                    <PenTool className="w-3.5 h-3.5" />
-                    <span>Annotate</span>
-                  </button>
-                )}
+                {/* Inline Annotation Toggle (Merged into Study Reader) */}
+                <button
+                  type="button"
+                  data-testid="study-annotate-btn"
+                  onClick={() => setInlineAnnotateActive((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${
+                    inlineAnnotateActive
+                      ? 'bg-brand text-white border-brand'
+                      : 'bg-white border-line hover:border-brand text-brand'
+                  }`}
+                  title="Toggle inline PDF & page annotations (Highlight, Pen, Eraser, Page Note)"
+                >
+                  <PenTool className="w-3.5 h-3.5" />
+                  <span>{inlineAnnotateActive ? 'Hide Annotations' : 'Annotate'}</span>
+                </button>
 
                 {onOpenUploadModal && (
                   <button
@@ -1022,10 +1129,115 @@ export const StudyView: React.FC<StudyViewProps> = ({
                     <Plus className="w-4 h-4" />
                   </button>
                 )}
+
+                {/* Full-Screen Maximize Reader Toggle */}
+                <button
+                  type="button"
+                  data-testid="maximize-reader-btn"
+                  onClick={() =>
+                    setMaximizedPane((prev) => (prev === 'reader' ? 'none' : 'reader'))
+                  }
+                  className="hidden lg:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-line hover:border-brand text-xs font-semibold text-ink cursor-pointer"
+                  title={maximizedPane === 'reader' ? 'Restore split view' : 'Maximize Reader'}
+                >
+                  {maximizedPane === 'reader' ? (
+                    <>
+                      <Minimize2 className="w-3.5 h-3.5 text-brand" />
+                      <span>Split View</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-3.5 h-3.5 text-brand" />
+                      <span>Full Screen</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 
-            {/* Official YouTube Player + Timestamped Sections (Phase 3 Item 8) */}
+            {/* Inline Annotation Toolbar (Merged directly into Study Document Reader) */}
+            {inlineAnnotateActive && (
+              <div
+                data-testid="inline-reader-annotation-toolbar"
+                className="px-4 py-2.5 bg-brand-soft/40 border-b border-brand/20 flex flex-wrap items-center justify-between gap-2.5 text-xs"
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-bold text-brand uppercase tracking-wider text-[10px] mr-1">
+                    Page {currentPage} Annotations:
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="inline-tool-highlight"
+                    onClick={() => setInlineTool('highlight')}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold border cursor-pointer ${
+                      inlineTool === 'highlight'
+                        ? 'bg-amber-200 border-amber-400 text-amber-950'
+                        : 'bg-white border-line text-ink'
+                    }`}
+                  >
+                    <Highlighter className="w-3.5 h-3.5" />
+                    <span>Select Text to Highlight</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="inline-tool-pen"
+                    onClick={() => setInlineTool('pen')}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold border cursor-pointer ${
+                      inlineTool === 'pen'
+                        ? 'bg-brand text-white border-brand'
+                        : 'bg-white border-line text-ink'
+                    }`}
+                  >
+                    <PenTool className="w-3.5 h-3.5" />
+                    <span>Freehand Ink Pen</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="inline-tool-eraser"
+                    onClick={() => setInlineTool('eraser')}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold border cursor-pointer ${
+                      inlineTool === 'eraser'
+                        ? 'bg-slate-800 text-white border-slate-800'
+                        : 'bg-white border-line text-ink'
+                    }`}
+                  >
+                    <Eraser className="w-3.5 h-3.5" />
+                    <span>Eraser</span>
+                  </button>
+
+                  {inlineTool === 'pen' && (
+                    <div className="inline-flex items-center gap-1 ml-1">
+                      {['#4F46E5', '#DC2626', '#059669', '#D97706'].map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setInlinePenColor(color)}
+                          style={{ backgroundColor: color }}
+                          className={`w-5 h-5 rounded-full border-2 cursor-pointer ${
+                            inlinePenColor === color ? 'border-slate-900 scale-110' : 'border-white'
+                          }`}
+                          aria-label={`Select ink color ${color}`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {onOpenPdfWorkspace && (
+                    <button
+                      type="button"
+                      onClick={onOpenPdfWorkspace}
+                      className="px-2.5 py-1 rounded-lg bg-white border border-line hover:border-brand text-[11px] font-semibold text-brand cursor-pointer"
+                    >
+                      Export Annotated PDF →
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Official YouTube Player + Timestamped Sections */}
             {activeDocument.sourceType === 'youtube' &&
               isValidYouTubeVideoId(activeDocument.videoId) && (
                 <div className="p-4 bg-slate-950 border-b border-line space-y-3">
@@ -1129,11 +1341,23 @@ export const StudyView: React.FC<StudyViewProps> = ({
               </div>
             )}
 
-            {/* Main Reader Content Body */}
+            {/* Main Reader Content Body + Optional Freehand Ink Overlay */}
             <div
-              className="p-6 sm:p-8 bg-white space-y-4 flex-1 min-h-[460px]"
+              className="relative p-6 sm:p-8 lg:p-10 bg-white space-y-5 flex-1 min-h-[580px]"
               onMouseUp={handleReaderSelection}
             >
+              {inlineAnnotateActive && (inlineTool === 'pen' || inlineTool === 'eraser') && (
+                <canvas
+                  ref={inkCanvasRef}
+                  width={960}
+                  height={640}
+                  onPointerDown={handleInkPointerDown}
+                  onPointerMove={handleInkPointerMove}
+                  onPointerUp={handleInkPointerUp}
+                  className="absolute inset-0 w-full h-full z-10 cursor-crosshair touch-none"
+                />
+              )}
+
               <div className="space-y-1 border-b border-soft pb-3">
                 <div className="text-xs font-semibold uppercase tracking-wider text-brand">
                   {formatSourceReferenceLabel(activeDocument, currentPage)}
@@ -1182,17 +1406,70 @@ export const StudyView: React.FC<StudyViewProps> = ({
                   No text was found on this page. If it is a scanned page, click Annotate or upload a photo of your notes.
                 </p>
               )}
+
+              {/* Inline Page Margin Note Box */}
+              {inlineAnnotateActive && (
+                <div className="pt-4 border-t border-line space-y-1.5 relative z-20">
+                  <label className="inline-flex items-center gap-1.5 text-xs font-bold text-ink">
+                    <StickyNote className="w-3.5 h-3.5 text-brand" />
+                    <span>Personal Margin Note for Page {currentPage}</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={inlinePageNotes[currentPage] || ''}
+                    onChange={(e) =>
+                      setInlinePageNotes((prev) => ({
+                        ...prev,
+                        [currentPage]: e.target.value,
+                      }))
+                    }
+                    placeholder="Jot down a key formula, trick, or reminder for this page…"
+                    className="w-full rounded-xl border border-line bg-canvas p-3 text-xs text-ink placeholder:text-muted focus:outline-none focus:border-brand"
+                  />
+                </div>
+              )}
             </div>
           </div>
 
-          {/* RIGHT 5 COLUMNS: STREAMING JEE AI TUTOR (Phase 3 Item 4 & 5) */}
+          {/* DESKTOP DRAGGABLE RESIZE HANDLE */}
+          {maximizedPane === 'none' && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize Document Reader and AI Tutor panes"
+              data-testid="study-split-resizer"
+              onMouseDown={handleStartSplitDrag}
+              className="hidden lg:flex w-4 shrink-0 items-center justify-center cursor-col-resize group select-none"
+              title="Drag to resize Document Reader and AI Tutor"
+            >
+              <div className="w-1 h-16 rounded-full bg-slate-200 group-hover:bg-brand transition-colors flex items-center justify-center">
+                <GripVertical className="w-3.5 h-3.5 text-slate-400 group-hover:text-brand" />
+              </div>
+            </div>
+          )}
+
+          {/* RIGHT PANE: STREAMLINED WRITTEN JEE AI STUDY TUTOR */}
           <aside
             aria-label="Interactive Study Companion"
-            className={`lg:col-span-5 lm-card-editorial overflow-hidden flex flex-col min-h-[580px] lg:sticky lg:top-20 ${
-              mobilePane === 'read' ? 'hidden lg:flex' : 'flex'
+            style={{
+              width:
+                maximizedPane === 'tutor'
+                  ? '100%'
+                  : maximizedPane === 'reader'
+                  ? '0%'
+                  : undefined,
+              flexBasis:
+                maximizedPane === 'none' ? `${100 - readerSplitPct}%` : undefined,
+            }}
+            className={`lm-card-editorial overflow-hidden flex flex-col min-h-[580px] lg:sticky lg:top-20 transition-all duration-150 ${
+              maximizedPane === 'reader'
+                ? 'hidden'
+                : mobilePane === 'read'
+                ? 'hidden lg:flex'
+                : 'flex'
             }`}
           >
-            {/* Tutor Header + Source Mode Toggle ("Notes + JEE knowledge" default vs "Only my notes") */}
+            {/* Streamlined Tutor Header: ONLY Source Mode Toggle ("Notes + JEE knowledge" vs "Only my notes") + Full-Screen Toggle */}
             <div className="px-4 py-3.5 border-b border-line bg-white flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-brand-soft text-brand flex items-center justify-center shrink-0">
@@ -1201,7 +1478,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
                 <div>
                   <h2 className="text-sm font-bold text-ink">AI Study Tutor</h2>
                   <p className="text-[11px] text-muted">
-                    Streaming step-by-step JEE solutions
+                    KaTeX math &amp; highlighted step-by-step JEE solutions
                   </p>
                 </div>
               </div>
@@ -1216,7 +1493,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
                     type="button"
                     data-testid="source-mode-extended"
                     onClick={() => handleToggleSourceControl('extended_knowledge')}
-                    title="Default: Uses your notes first and adds JEE Main formulas & examples when helpful (clearly labelled)"
+                    title="Default: Uses your notes first and adds JEE Main formulas & examples when helpful"
                     className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${
                       sourceControlMode === 'extended_knowledge'
                         ? 'bg-brand text-white shadow-2xs'
@@ -1240,153 +1517,45 @@ export const StudyView: React.FC<StudyViewProps> = ({
                   </button>
                 </div>
 
+                {/* Full-Screen Maximize AI Tutor Toggle */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowTeachItBack((prev) => !prev);
-                    if (!teachTopic && activeDocument.topics[0]) {
-                      setTeachTopic(activeDocument.topics[0].name);
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold transition-colors cursor-pointer ${
-                    showTeachItBack
-                      ? 'bg-warning-soft border-warning text-warning'
-                      : 'border-line text-ink hover:bg-canvas'
-                  }`}
+                  data-testid="maximize-tutor-btn"
+                  onClick={() =>
+                    setMaximizedPane((prev) => (prev === 'tutor' ? 'none' : 'tutor'))
+                  }
+                  className="hidden lg:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-line hover:border-brand text-[11px] font-semibold text-ink cursor-pointer"
+                  title={maximizedPane === 'tutor' ? 'Restore split view' : 'Maximize AI Tutor'}
                 >
-                  Teach It Back
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowOverviewDrawer((prev) => !prev)}
-                  aria-expanded={showOverviewDrawer}
-                  className="px-2.5 py-1 rounded-full border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
-                >
-                  Topics ({activeDocument.topics.length})
+                  {maximizedPane === 'tutor' ? (
+                    <>
+                      <Minimize2 className="w-3.5 h-3.5 text-brand" />
+                      <span>Split View</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-3.5 h-3.5 text-brand" />
+                      <span>Full Screen</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
 
-            {/* Teach It Back Drawer */}
-            {showTeachItBack && (
-              <div className="px-4 py-3.5 bg-warning-soft border-b border-amber-200/80 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-ink">
-                    Teach It Back (Feynman Recall)
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowTeachItBack(false)}
-                    className="text-xs font-semibold text-muted hover:text-ink cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-                <form onSubmit={handleEvaluateTeachItBack} className="space-y-2">
-                  <select
-                    value={teachTopic}
-                    onChange={(e) => setTeachTopic(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-amber-300 text-xs font-semibold text-ink"
-                  >
-                    {activeDocument.topics.map((t) => (
-                      <option key={t.id} value={t.name}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <textarea
-                    rows={2}
-                    value={teachExplanation}
-                    onChange={(e) => setTeachExplanation(e.target.value)}
-                    placeholder="Explain this concept in your own words..."
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-amber-200 text-xs text-ink"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isEvaluatingTeach || !teachExplanation.trim()}
-                    className="px-3.5 py-1.5 rounded-lg bg-warning text-white text-xs font-semibold disabled:opacity-50 cursor-pointer"
-                  >
-                    {isEvaluatingTeach ? 'Evaluating...' : 'Check My Explanation'}
-                  </button>
-                </form>
-                {teachResult && (
-                  <div className="p-3 rounded-lg bg-white border border-amber-200 space-y-1 text-xs">
-                    <div className="font-bold text-ink">
-                      Score: {teachResult.scorePct}% ({teachResult.verdict.replace('_', ' ')})
-                    </div>
-                    <p className="text-slate-600">{teachResult.groundedFeedback}</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Collapsible Topics Drawer */}
-            {showOverviewDrawer && (
-              <div className="px-4 py-3 bg-canvas border-b border-line space-y-2 max-h-56 overflow-y-auto">
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  {activeDocument.overview}
-                </p>
-                <div className="grid grid-cols-1 gap-1.5">
-                  {activeDocument.topics.map((topic) => (
-                    <div
-                      key={topic.id}
-                      className="p-2 rounded-lg bg-white border border-line flex items-center justify-between gap-2"
-                    >
-                      <span className="text-xs font-semibold text-ink truncate">
-                        {topic.name}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowOverviewDrawer(false);
-                          void handleAskTutor(
-                            `Explain ${topic.name} clearly with key formulas.`
-                          );
-                        }}
-                        className="px-2 py-1 rounded bg-brand-soft text-brand text-[11px] font-semibold cursor-pointer shrink-0"
-                      >
-                        Explain →
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Conversation Stream */}
+            {/* Clean Conversation Stream (No starter chips or preset mode pills) */}
             <div
               ref={tutorScrollRef}
-              className="p-4 sm:p-5 space-y-4 flex-1 overflow-y-auto max-h-[480px] bg-white"
+              className="p-4 sm:p-5 space-y-4 flex-1 overflow-y-auto max-h-[540px] bg-white"
             >
               {tutorMessages.length === 0 && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-ink">
-                      Ask about Page {currentPage} ({activePageLabel})
-                    </h3>
-                    <p className="text-xs text-muted leading-relaxed">
-                      Answers stream live, use your uploaded notes first, and clearly label any extra JEE Main context.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    {[
-                      `Explain page ${currentPage} (${activePageLabel}) simply, step by step.`,
-                      `List the key formulas on page ${currentPage} and when to use each in JEE Main.`,
-                      `Give me one JEE Main style question (+4 / −1) from page ${currentPage} and solve it step by step.`,
-                      `What common traps do students fall into on ${activePageTopic?.name || cleanDocTitle}?`,
-                    ].map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => void handleAskTutor(prompt)}
-                        className="p-3 rounded-xl bg-canvas hover:bg-brand-soft/60 border border-line hover:border-brand text-left text-xs font-medium text-ink transition-colors cursor-pointer flex items-center justify-between gap-2"
-                      >
-                        <span>{prompt}</span>
-                        <ArrowRight className="w-3.5 h-3.5 text-muted shrink-0" />
-                      </button>
-                    ))}
-                  </div>
+                <div className="p-6 rounded-2xl bg-canvas border border-dashed border-line text-center space-y-2 my-6">
+                  <Sparkles className="w-6 h-6 text-brand mx-auto" />
+                  <h3 className="text-sm font-bold text-ink">
+                    Ask any doubt about Page {currentPage} ({activePageLabel})
+                  </h3>
+                  <p className="text-xs text-muted max-w-md mx-auto leading-relaxed">
+                    Type your question in your own words below or highlight any sentence in the reader. The AI Tutor replies with KaTeX mathematical expressions and <strong>bold</strong> / <em>italic</em> highlights.
+                  </p>
                 </div>
               )}
 
@@ -1497,42 +1666,6 @@ export const StudyView: React.FC<StudyViewProps> = ({
 
                     {msg.content && !isAskingTutor && (
                       <div className="space-y-2.5 pt-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void handleAskTutor(
-                                'Simplify your previous explanation in plain steps with a short analogy.'
-                              )
-                            }
-                            className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
-                          >
-                            Explain Simpler
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void handleAskTutor(
-                                'Explain the previous concept deeper with rigorous first-principles derivation, boundary conditions, and JEE traps.'
-                              )
-                            }
-                            className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
-                          >
-                            Explain Deeper
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void handleAskTutor(
-                                'Show a JEE Main worked numerical example for this concept.'
-                              )
-                            }
-                            className="px-2.5 py-1 rounded-lg bg-white border border-line text-[11px] font-medium text-muted hover:text-ink cursor-pointer"
-                          >
-                            JEE Example
-                          </button>
-                        </div>
-
                         {/* Phase 6 Section 5: Contextual AI Study Tutor -> Create Integration */}
                         {onOpenContextualCreate && (() => {
                           const msgIdx = tutorMessages.findIndex((m) => m.id === msg.id);

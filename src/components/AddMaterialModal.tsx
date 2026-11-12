@@ -473,37 +473,8 @@ export const AddMaterialModal: React.FC<AddMaterialModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-muted leading-relaxed">
-                  Paste any YouTube lecture URL below. LearnMate automatically discovers available captions/chapters, chunks multi-hour lectures with timestamp preservation, and builds chapter-wise study notes, formulas, flashcards, and quizzes.
+                  Paste any YouTube lecture URL below. LearnMate automatically discovers available captions/chapters, chunks multi-hour lectures with timestamp preservation, and builds chapter-wise study notes, KaTeX formulas, flashcards, and quizzes.
                 </p>
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[11px] font-semibold text-muted">Try verified marathon:</span>
-                  <button
-                    type="button"
-                    data-testid="preset-youtube-12hr-physics"
-                    onClick={() => {
-                      setYoutubeUrl('https://www.youtube.com/watch?v=jee12hrphys');
-                      setYoutubeTitle('JEE Main Complete Physics 12-Hour Revision Marathon');
-                      setLocalError(null);
-                      onClearError();
-                    }}
-                    className="px-2.5 py-1 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:border-brand text-[11px] font-semibold text-ink cursor-pointer transition-colors"
-                  >
-                    12-Hr Physics Marathon (720m)
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="preset-youtube-6hr-chem"
-                    onClick={() => {
-                      setYoutubeUrl('https://www.youtube.com/watch?v=jee6hrochem');
-                      setYoutubeTitle('Complete Organic Chemistry 6.5-Hour Marathon');
-                      setLocalError(null);
-                      onClearError();
-                    }}
-                    className="px-2.5 py-1 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:border-brand text-[11px] font-semibold text-ink cursor-pointer transition-colors"
-                  >
-                    6.5-Hr Organic Chem Marathon (390m)
-                  </button>
-                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -198,6 +198,26 @@
   font-family: var(--font-serif);
 }
 
+.font-handwriting-kalam {
+  font-family: 'Kalam', cursive, sans-serif;
+}
+
+.font-handwriting-caveat {
+  font-family: 'Caveat', cursive, sans-serif;
+}
+
+.font-handwriting-patrick {
+  font-family: 'Patrick Hand', cursive, sans-serif;
+}
+
+.font-handwriting-indie {
+  font-family: 'Indie Flower', cursive, sans-serif;
+}
+
+.font-handwriting-shadows {
+  font-family: 'Shadows Into Light', cursive, sans-serif;
+}
+
 .lm-editorial-title {
   font-family: var(--font-serif);
   font-weight: 800;

@@ -10,14 +10,15 @@ import {
 } from '../../utils/pyqCorpusEngine.ts';
 import { validateQuestionRecord } from '../../ingestion/validators/index.ts';
 import type { UnifiedQuestionRecord } from '../../ingestion/types.ts';
+import { BITSAT_AND_VITEEE_PYQ_QUESTIONS } from '../../utils/commercialScaleEngine.ts';
 
 export function createPyqAndCbtRouter(): Router {
   const router = Router();
 
-  // GET /api/pyq/questions — Paginated PYQ query endpoint
+  // GET /api/pyq/questions — Paginated PYQ query endpoint (JEE Main, JEE Advanced, BITSAT, VITEEE)
   router.get('/questions', (req, res) => {
     try {
-      const exam = (req.query.exam as 'jee_main' | 'jee_advanced' | 'all') || 'all';
+      const exam = (req.query.exam as 'jee_main' | 'jee_advanced' | 'bitsat' | 'viteee' | 'all') || 'all';
       const subject = (req.query.subject as 'Physics' | 'Chemistry' | 'Mathematics' | 'All') || 'All';
       const year = req.query.year && req.query.year !== 'All' ? Number(req.query.year) : 'All';
       const chapterId = (req.query.chapterId as string) || 'All';
@@ -27,14 +28,38 @@ export function createPyqAndCbtRouter(): Router {
       const page = Math.max(1, Number(req.query.page) || 1);
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 25));
 
-      let matched = filterPyqQuestions({
-        exam,
-        subject,
-        year,
-        chapterId,
-        difficulty,
-        searchQuery,
-      });
+      let matched: Array<PyqCorpusQuestion | (typeof BITSAT_AND_VITEEE_PYQ_QUESTIONS)[number]> =
+        exam === 'bitsat' || exam === 'viteee'
+          ? []
+          : filterPyqQuestions({
+              exam: exam === 'all' ? 'all' : exam,
+              subject,
+              year,
+              chapterId,
+              difficulty,
+              searchQuery,
+            });
+
+      if (exam === 'bitsat' || exam === 'viteee' || exam === 'all') {
+        const extra = BITSAT_AND_VITEEE_PYQ_QUESTIONS.filter((q) => {
+          if (exam !== 'all' && q.exam !== exam) return false;
+          if (subject !== 'All' && q.subject !== subject) return false;
+          if (year !== 'All' && q.year !== year) return false;
+          if (chapterId !== 'All' && q.chapterId !== chapterId) return false;
+          if (searchQuery.trim()) {
+            const sq = searchQuery.toLowerCase();
+            if (
+              !q.prompt.toLowerCase().includes(sq) &&
+              !q.chapterName.toLowerCase().includes(sq) &&
+              !q.conceptTested.toLowerCase().includes(sq)
+            ) {
+              return false;
+            }
+          }
+          return true;
+        });
+        matched = [...matched, ...extra];
+      }
 
       if (format && format !== 'All') {
         matched = matched.filter((q) => q.format === format || q.questionType === format);

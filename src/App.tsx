@@ -19,8 +19,15 @@ import { SampleChapterPage } from './components/SampleChapterPage';
 import { FirstRunSetupModal, type FirstRunAnswers } from './components/FirstRunSetupModal';
 import { LegalPage } from './components/LegalPage';
 import { AppGuideAndSearchModal } from './components/AppGuideAndSearchModal';
-import { DynamicCompanion } from './components/DynamicCompanion';
 import type { UtilityTab } from './components/CompactStudyUtilitiesWidget';
+import {
+  StudyToolsWorkspaceView,
+  type StudyToolSubTab,
+} from './components/StudyToolsWorkspaceView';
+import { WeeklyMentorReportModal } from './components/WeeklyMentorReportModal';
+import { AdminCommercialConsoleModal } from './components/AdminCommercialConsoleModal';
+import { PwaOfflineAndJobsBar } from './components/PwaOfflineAndJobsBar';
+import type { BackgroundJobRecord } from './utils/commercialScaleEngine';
 import { buildSampleChapterDocument, SAMPLE_CHAPTER_ID } from './data/sampleChapter';
 import {
   JEE_SYLLABUS_CHAPTERS,
@@ -56,6 +63,7 @@ const VALID_TABS: ActiveTab[] = [
   'study',
   'revision',
   'practice',
+  'study-tools',
   'analytics',
   'resources',
   'create',
@@ -120,6 +128,7 @@ function normalizeTab(tab: string): ActiveTab {
   if (tab === 'learn' || tab === 'ai-tutor') return 'study';
   if (tab === 'explore') return 'resources';
   if (tab === 'saved') return 'analytics';
+  if (tab === 'tools' || tab === 'calculator' || tab === 'graph') return 'study-tools';
   if (VALID_TABS.includes(tab as ActiveTab)) {
     return tab as ActiveTab;
   }
@@ -150,6 +159,14 @@ export function App() {
   const [guideModalView, setGuideModalView] = useState<'search' | 'guide'>('search');
   const [externalUtilityTab, setExternalUtilityTab] = useState<UtilityTab | null>(null);
 
+  // Study Tools Lab, Weekly Mentor Report, Commercial Console & Background Jobs State
+  const [studyToolsSubTab, setStudyToolsSubTab] = useState<StudyToolSubTab>('graph2d');
+  const [pendingPlotExpression, setPendingPlotExpression] = useState<string | null>(null);
+  const [pendingPlotLabel, setPendingPlotLabel] = useState<string | null>(null);
+  const [mentorReportOpen, setMentorReportOpen] = useState<boolean>(false);
+  const [commercialConsoleOpen, setCommercialConsoleOpen] = useState<boolean>(false);
+  const [activeJobs, setActiveJobs] = useState<BackgroundJobRecord[]>([]);
+
   // Universal Add Material Modal state (Phase 3 Item 1)
   const [addMaterialOpen, setAddMaterialOpen] = useState(false);
   const [addMaterialMode, setAddMaterialMode] = useState<AddMaterialMode>('pdf');
@@ -164,6 +181,7 @@ export function App() {
 
   // Modals & Phase 6 Contextual Create Transfer State
   const [voiceTutorOpen, setVoiceTutorOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [contextualCreateTransfer, setContextualCreateTransfer] =
     useState<ContextualCreateTransferPayload | null>(null);
 
@@ -338,18 +356,12 @@ export function App() {
 
   useEffect(() => {
     if (isAutostartTestMode) {
-      let docs = studyStorage.getDocuments();
-      if (docs.length === 0) {
-        const sample = buildSampleChapterDocument();
-        studyStorage.saveDocument(sample);
-        studyStorage.setActiveDocumentId(sample.id);
-        docs = studyStorage.getDocuments();
-      }
+      const docs = studyStorage.getDocuments();
       const existingProfile = studyStorage.getStudentProfile();
       if (!existingProfile.setupCompleted || existingProfile.ageBand !== '16_17') {
         const updatedProfile = studyStorage.saveStudentProfile({
           ...existingProfile,
-          fullName: existingProfile.fullName || 'Aarav Sharma',
+          fullName: existingProfile.fullName || 'Student',
           schoolClass: 'Class 12',
           ageBand: '16_17',
           setupCompleted: true,
@@ -409,18 +421,12 @@ export function App() {
   }, [isAutostartTestMode]);
 
   const handleEnterDemoWorkspace = () => {
-    let docs = studyStorage.getDocuments();
-    if (docs.length === 0) {
-      const sample = buildSampleChapterDocument();
-      studyStorage.saveDocument(sample);
-      studyStorage.setActiveDocumentId(sample.id);
-      docs = studyStorage.getDocuments();
-    }
+    const docs = studyStorage.getDocuments();
     const existingProfile = studyStorage.getStudentProfile();
     if (!existingProfile.setupCompleted) {
       const updatedProfile = studyStorage.saveStudentProfile({
         ...existingProfile,
-        fullName: existingProfile.fullName || 'Aarav Sharma',
+        fullName: existingProfile.fullName || 'Student',
         schoolClass: 'Class 12',
         ageBand: '16_17',
         setupCompleted: true,
@@ -553,13 +559,61 @@ export function App() {
     }
   };
 
+  const registerBackgroundJob = (
+    kind: BackgroundJobRecord['kind'],
+    title: string,
+    stepLabel: string
+  ): string => {
+    const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const now = new Date().toISOString();
+    const job: BackgroundJobRecord = {
+      jobId,
+      uid: user?.uid || 'guest-student',
+      kind,
+      title,
+      status: 'running',
+      progressPct: 25,
+      stepLabel,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setActiveJobs((prev) => [job, ...prev.slice(0, 4)]);
+    return jobId;
+  };
+
+  const updateBackgroundJobState = (
+    jobId: string,
+    patch: Partial<Pick<BackgroundJobRecord, 'status' | 'progressPct' | 'stepLabel'>>
+  ) => {
+    setActiveJobs((prev) =>
+      prev.map((j) =>
+        j.jobId === jobId
+          ? {
+              ...j,
+              ...patch,
+              updatedAt: new Date().toISOString(),
+            }
+          : j
+      )
+    );
+  };
+
   const handleUploadPdf = async (file: File) => {
     setErrorMessage(null);
     setIsProcessing(true);
+    const jobId = registerBackgroundJob(
+      'rag_index',
+      `Indexing ${file.name}`,
+      'Extracting pages & formulas…'
+    );
 
     try {
       const extracted = await extractPagesFromPdf(file, async (pageImageDataUrl, pageNum) => {
         try {
+          updateBackgroundJobState(jobId, {
+            progressPct: 45,
+            stepLabel: `Running OCR on scanned page ${pageNum}…`,
+          });
           const res = await aiStudyClient.scanNotes({
             imageDataUrl: pageImageDataUrl,
             title: `${file.name.replace(/\.pdf$/i, '')} — Page ${pageNum}`,
@@ -578,6 +632,10 @@ export function App() {
         );
       }
 
+      updateBackgroundJobState(jobId, {
+        progressPct: 75,
+        stepLabel: 'Analyzing chapter topics & syllabus tags…',
+      });
       const analysis = await aiStudyClient
         .analyzeDocument(file.name, extracted.pages)
         .catch(() => ({
@@ -605,12 +663,21 @@ export function App() {
       const updatedDocs = studyStorage.getDocuments();
       setDocuments(updatedDocs);
       setActiveDoc(newDoc);
+      updateBackgroundJobState(jobId, {
+        status: 'completed',
+        progressPct: 100,
+        stepLabel: `Indexed ${extracted.pageCount} pages`,
+      });
       setAddMaterialOpen(false);
       setAddMaterialPreselectedFile(null);
       setStudyInitialHubSection('my_materials');
       setStudyInitialMode('explain');
       goToApp('study');
     } catch (err: any) {
+      updateBackgroundJobState(jobId, {
+        status: 'failed',
+        stepLabel: err?.message || 'PDF indexing failed',
+      });
       setErrorMessage(err?.message || 'Failed to process PDF file.');
     } finally {
       setIsProcessing(false);
@@ -620,6 +687,11 @@ export function App() {
   const handleUploadPhotoNotes = async (imageDataUrl: string, title: string) => {
     setErrorMessage(null);
     setIsProcessing(true);
+    const jobId = registerBackgroundJob(
+      'handwritten_ocr',
+      `OCR Scan: ${title || 'Handwritten Notes'}`,
+      'Extracting handwritten text & KaTeX equations…'
+    );
 
     try {
       const ocrRes = await aiStudyClient.scanNotes({
@@ -634,6 +706,10 @@ export function App() {
         );
       }
 
+      updateBackgroundJobState(jobId, {
+        progressPct: 75,
+        stepLabel: 'Structuring pages & key concepts…',
+      });
       const pages = splitTextIntoPages(cleanText);
       const docTitle = ocrRes.title || title || 'Scanned Notes';
       const analysis = await aiStudyClient
@@ -670,12 +746,21 @@ export function App() {
       const updatedDocs = studyStorage.getDocuments();
       setDocuments(updatedDocs);
       setActiveDoc(newDoc);
+      updateBackgroundJobState(jobId, {
+        status: 'completed',
+        progressPct: 100,
+        stepLabel: 'Handwritten notes ready',
+      });
       setAddMaterialOpen(false);
       setAddMaterialPreselectedFile(null);
       setStudyInitialHubSection('my_materials');
       setStudyInitialMode('explain');
       goToApp('study');
     } catch (err: any) {
+      updateBackgroundJobState(jobId, {
+        status: 'failed',
+        stepLabel: err?.message || 'OCR scan failed',
+      });
       setErrorMessage(err?.message || 'Could not scan these notes.');
     } finally {
       setIsProcessing(false);
@@ -749,6 +834,11 @@ export function App() {
     }
 
     setIsProcessing(true);
+    const jobId = registerBackgroundJob(
+      'youtube_marathon',
+      `YouTube Lecture: ${title || 'Importing'}`,
+      'Extracting transcript & generating study pages…'
+    );
     try {
       const result = await aiStudyClient.analyzeYouTubeVideo(
         trimmed,
@@ -772,11 +862,20 @@ export function App() {
       studyStorage.setActiveDocumentId(newDoc.id);
       setDocuments(studyStorage.getDocuments());
       setActiveDoc(newDoc);
+      updateBackgroundJobState(jobId, {
+        status: 'completed',
+        progressPct: 100,
+        stepLabel: `${result.pages.length} lecture pages ready`,
+      });
       setAddMaterialOpen(false);
       setStudyInitialHubSection('my_materials');
       setStudyInitialMode('explain');
       goToApp('study');
     } catch (err: any) {
+      updateBackgroundJobState(jobId, {
+        status: 'failed',
+        stepLabel: err?.message || 'YouTube import failed',
+      });
       setErrorMessage(err?.message || 'Failed to import YouTube lecture.');
     } finally {
       setIsProcessing(false);
@@ -811,6 +910,20 @@ export function App() {
     setStudyInitialHubSection('ai_tutor');
     setStudyInitialMode('explain');
     goToApp('study');
+  };
+
+  const handlePlotFormulaInStudyTools = (expression: string, formulaTitle = 'Plotted Formula') => {
+    setPendingPlotExpression(expression);
+    setPendingPlotLabel(formulaTitle);
+    setStudyToolsSubTab('graph2d');
+    goToApp('study-tools');
+  };
+
+  const handleOpenStudyToolsWorkspace = (
+    subTab: StudyToolSubTab | 'space3d' = 'graph2d'
+  ) => {
+    setStudyToolsSubTab(subTab === 'space3d' ? 'surface3d' : subTab);
+    goToApp('study-tools');
   };
 
   const handleDeleteDocument = (docId: string) => {
@@ -924,12 +1037,24 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-canvas text-ink pb-20 lg:pb-0 overflow-x-hidden">
+    <div
+      className={`min-h-screen flex flex-col bg-canvas text-ink pb-20 lg:pb-0 overflow-x-hidden transition-[padding] duration-200 ${
+        sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
+      }`}
+    >
+      {/* Offline PWA & Background Job Progress Bar */}
+      <PwaOfflineAndJobsBar
+        activeJobs={activeJobs}
+        onDismissJob={(jobId) =>
+          setActiveJobs((prev) => prev.filter((j) => j.jobId !== jobId))
+        }
+      />
+
       <Navbar
         activeTab={activeTab}
         onSelectTab={handleSelectTab}
-        hasActiveDoc={!!effectiveDoc}
-        activeDoc={effectiveDoc}
+        hasActiveDoc={!!activeDoc}
+        activeDoc={activeDoc}
         onOpenAddMaterial={(mode = 'pdf') => openAddMaterialModal(mode)}
         user={user}
         isAuthReady={isAuthReady}
@@ -962,12 +1087,19 @@ export function App() {
         }}
         externalUtilityTab={externalUtilityTab}
         onConsumeExternalUtilityTab={() => setExternalUtilityTab(null)}
+        onOpenVoiceTutor={() => setVoiceTutorOpen(true)}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+        onPlotFormulaInStudyTools={handlePlotFormulaInStudyTools}
+        onOpenStudyToolsWorkspace={handleOpenStudyToolsWorkspace}
+        onOpenMentorReportModal={() => setMentorReportOpen(true)}
+        onOpenCommercialConsoleModal={() => setCommercialConsoleOpen(true)}
       />
 
-      {/* Main Content Container */}
+      {/* Main Content Container (Full-bleed widescreen up to 1920px) */}
       <main className="flex-1 min-w-0">
         {(activeTab === 'dashboard' || activeTab === 'home') && (
-          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
             <StudentDashboardView
               studentName={
                 user?.displayName
@@ -991,6 +1123,9 @@ export function App() {
                 setStudyInitialHubSection(section);
                 goToApp('study');
               }}
+              onOpenMentorReportModal={() => setMentorReportOpen(true)}
+              onOpenCommercialConsoleModal={() => setCommercialConsoleOpen(true)}
+              onOpenStudyToolsWorkspace={handleOpenStudyToolsWorkspace}
             />
           </div>
         )}
@@ -1006,7 +1141,7 @@ export function App() {
               setActiveDoc(doc);
             }}
             initialSubMode={studyInitialMode}
-            initialHubSection={studyInitialHubSection}
+            initialHubSection={documents.length === 0 && studyInitialHubSection === 'my_materials' ? 'syllabus' : studyInitialHubSection}
             initialQuestion={pendingDoubtQuestion}
             onConsumeInitialQuestion={() => setPendingDoubtQuestion(null)}
             onAttemptSaved={refreshDocumentsState}
@@ -1027,9 +1162,11 @@ export function App() {
         )}
 
         {activeTab === 'revision' && effectiveDoc && (
-          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
             <QuickReviseView
               activeDocument={effectiveDoc}
+              hasUploadedDocuments={documents.length > 0}
+              onOpenUploadModal={() => openAddMaterialModal('pdf')}
               initialSubTab={reviseInitialSubTab}
               onNavigateToCitation={() => {
                 setStudyInitialHubSection('my_materials');
@@ -1048,7 +1185,7 @@ export function App() {
         )}
 
         {activeTab === 'practice' && (
-          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
             <PracticeWorkspaceView
               documents={documents}
               activeDoc={activeDoc}
@@ -1067,8 +1204,27 @@ export function App() {
           </div>
         )}
 
+        {activeTab === 'study-tools' && (
+          <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
+            <StudyToolsWorkspaceView
+              initialTool={studyToolsSubTab}
+              initialPlotExpression={pendingPlotExpression}
+              initialPlotLabel={pendingPlotLabel}
+              onConsumeInitialPlot={() => {
+                setPendingPlotExpression(null);
+                setPendingPlotLabel(null);
+              }}
+              onAskAiTutor={handleAskDoubtFromHome}
+              onOpenReviseHandwritten={() => {
+                setReviseInitialSubTab('handwritten');
+                goToApp('revision');
+              }}
+            />
+          </div>
+        )}
+
         {(activeTab === 'resources' || activeTab === 'explore') && (
-          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
             <ResourcesView
               onImportReferenceNotes={(title, content) => {
                 void handleSubmitTextNotes(title, content, 'text');
@@ -1118,7 +1274,7 @@ export function App() {
         )}
 
         {activeTab === 'pdf-workspace' && (
-          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
             <PdfWorkspaceView
               documents={documents}
               activeDoc={activeDoc}
@@ -1136,7 +1292,7 @@ export function App() {
         )}
 
         {activeTab === 'analytics' && (
-          <div className="max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
             <ProgressView
               documents={documents}
               attempts={studyStorage.getQuizAttempts()}
@@ -1185,7 +1341,18 @@ export function App() {
         }}
         onOpenUtilityTab={(tab) => {
           setGuideModalOpen(false);
-          setExternalUtilityTab(tab);
+          if (tab === 'formulas') {
+            setExternalUtilityTab(tab);
+          } else {
+            const subMap: Record<string, StudyToolSubTab> = {
+              graph: 'graph2d',
+              matrix: 'matrix',
+              space3d: 'surface3d',
+              geometry: 'geometry',
+              calculator: 'scientific',
+            };
+            handleOpenStudyToolsWorkspace(subMap[tab] || 'graph2d');
+          }
         }}
         onOpenStudySection={(section) => {
           setGuideModalOpen(false);
@@ -1253,6 +1420,21 @@ export function App() {
         }}
       />
 
+      {/* Weekly Mentor & Parent Progress Report Modal */}
+      <WeeklyMentorReportModal
+        isOpen={mentorReportOpen}
+        onClose={() => setMentorReportOpen(false)}
+        studentName={user?.displayName || studentProfile.fullName || 'Student'}
+        studentProfile={studentProfile}
+        documents={documents}
+      />
+
+      {/* Commercial Plans, Token Quotas, Semantic Cache & System Health Modal */}
+      <AdminCommercialConsoleModal
+        isOpen={commercialConsoleOpen}
+        onClose={() => setCommercialConsoleOpen(false)}
+      />
+
       {/* Live Voice AI Tutor Modal */}
       {effectiveDoc && (
         <VoiceTutorModal
@@ -1262,9 +1444,6 @@ export function App() {
           weakTopics={studentProfile.weakAreas}
         />
       )}
-
-      {/* Floating Study Companion: Pomodoro Timer + Khanmigo Socratic Clue Coins + OCR Doubt + 15m ShardZ */}
-      <DynamicCompanion activeDoc={effectiveDoc} />
     </div>
   );
 }

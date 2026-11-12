@@ -117,6 +117,8 @@ export interface QuizAttemptAnswer {
 export type ExamTypeId =
   | 'jee_main'
   | 'jee_advanced'
+  | 'bitsat'
+  | 'viteee'
   | 'neet_ug'
   | 'cuet'
   | 'board_exams'

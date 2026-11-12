@@ -23,6 +23,9 @@ import {
   Youtube,
   Type,
   Info,
+  Calculator,
+  Calendar,
+  ShieldCheck,
 } from 'lucide-react';
 import { StudyDocument, StudentAcademicProfile } from '../types/study';
 import { studyStorage } from '../services/storageService';
@@ -65,6 +68,11 @@ interface StudentDashboardViewProps {
   onOpenProfileModal?: () => void;
   onSaveDocument?: (doc: StudyDocument) => void;
   onOpenStudySection?: (section: 'my_materials' | 'syllabus' | 'chapter_notes' | 'ai_tutor' | 'resources') => void;
+  onOpenMentorReportModal?: () => void;
+  onOpenCommercialConsoleModal?: () => void;
+  onOpenStudyToolsWorkspace?: (
+    subTab?: 'graph2d' | 'matrix' | 'space3d' | 'geometry' | 'scientific'
+  ) => void;
 }
 
 const SUBJECT_STYLE: Record<
@@ -118,6 +126,9 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   onOpenProfileModal,
   onSaveDocument,
   onOpenStudySection,
+  onOpenMentorReportModal,
+  onOpenCommercialConsoleModal,
+  onOpenStudyToolsWorkspace,
 }) => {
   const [doubtInput, setDoubtInput] = useState('');
   const [doubtLang, setDoubtLang] = useState<'en' | 'hi'>(
@@ -308,9 +319,9 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   };
 
   return (
-    <div className="space-y-6" data-testid="student-home-view">
+    <div className="space-y-8" data-testid="student-home-view">
       {/* 1. Compact Header: Greeting + Exam Track Switcher + Countdown */}
-      <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
+      <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-line/60">
         <div>
           <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-ink">
             {greetingFor(now)}
@@ -353,6 +364,39 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {onOpenStudyToolsWorkspace && (
+            <button
+              type="button"
+              onClick={() => onOpenStudyToolsWorkspace('graph2d')}
+              data-testid="home-open-study-tools-btn"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
+            >
+              <Calculator className="w-3.5 h-3.5 text-brand" />
+              <span>Study Tools Lab</span>
+            </button>
+          )}
+          {onOpenMentorReportModal && (
+            <button
+              type="button"
+              onClick={onOpenMentorReportModal}
+              data-testid="home-open-mentor-report-btn"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
+            >
+              <Calendar className="w-3.5 h-3.5 text-brand" />
+              <span>Weekly Report</span>
+            </button>
+          )}
+          {onOpenCommercialConsoleModal && (
+            <button
+              type="button"
+              onClick={onOpenCommercialConsoleModal}
+              data-testid="home-open-commercial-console-btn"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-ink transition-colors cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-brand" />
+              <span>Plans &amp; Quota</span>
+            </button>
+          )}
           {countdown && (
             <div
               data-testid="home-compact-countdown"
@@ -392,14 +436,14 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
       )}
 
       {/* Main 2-column grid matching Image 10 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* LEFT COLUMN (7 cols): My Tasks + Continue with + My Materials + Add Material */}
-        <div className="lg:col-span-7 space-y-5">
+        <div className="lg:col-span-7 space-y-7">
           {/* 1. My Tasks (AI Practice Coach Daily Plan) */}
           <section
             aria-labelledby="my-tasks-heading"
             data-testid="home-my-tasks-card"
-            className="lm-card-editorial p-5 space-y-3.5"
+            className="lm-card-editorial p-6 lg:p-7 space-y-4"
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -634,19 +678,32 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                     Study Built-In JEE Syllabus Notes or Add Your Own Material
                   </h2>
                 </div>
-                {onAddSampleChapter && !sampleIsAdded && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={onAddSampleChapter}
-                    data-testid="home-try-sample-btn"
-                    className="px-3.5 py-1.5 rounded-xl bg-brand-soft text-brand text-xs font-bold hover:bg-brand hover:text-white transition-colors cursor-pointer"
+                    onClick={() => onOpenAddMaterial('pdf')}
+                    data-testid="home-upload-material-btn"
+                    className="px-3.5 py-1.5 rounded-xl bg-brand text-white text-xs font-bold hover:bg-brand-strong transition-colors cursor-pointer"
                   >
-                    + Add Probability Sample Chapter
+                    + Upload Material
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onOpenStudySection) {
+                        onOpenStudySection('syllabus');
+                      } else {
+                        onNavigateTab('study');
+                      }
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl border border-line bg-white hover:bg-soft text-xs font-bold text-ink transition-colors cursor-pointer"
+                  >
+                    Open JEE Syllabus →
+                  </button>
+                </div>
               </div>
               <p className="text-xs text-muted">
-                You don&apos;t need to upload a file to start. Open any Physics, Chemistry, or Mathematics chapter in <strong>Study → Chapter Notes</strong> or solve official past papers in <strong>Practice</strong>.
+                Your personal library is completely clean. Upload your own PDF, handwritten photo notes, or YouTube lecture, or study from the separate built-in <strong>JEE Syllabus Notes</strong>.
               </p>
             </section>
           )}
@@ -655,7 +712,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           <section
             aria-labelledby="my-materials-heading"
             data-testid="home-materials-library"
-            className="lm-card-editorial p-5 space-y-4"
+            className="lm-card-editorial p-6 lg:p-7 space-y-4"
           >
             <div className="flex items-center justify-between gap-2">
               <h2 id="my-materials-heading" className="font-display text-base font-bold text-ink">
@@ -807,11 +864,11 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
         </div>
 
         {/* RIGHT COLUMN (5 cols): Compact Streak/XP/Level/Daily Challenge + Ask a Doubt + Due Today + Last Mock */}
-        <div className="lg:col-span-5 space-y-5">
+        <div className="lg:col-span-5 space-y-7">
           {/* 1. Compact Streak, XP, Level & Daily Challenge Card (matching Image 10) */}
           <section
             data-testid="home-rewards-summary-card"
-            className="lm-card-editorial p-5 space-y-4"
+            className="lm-card-editorial p-6 lg:p-7 space-y-4"
           >
             <div className="grid grid-cols-2 gap-3">
               <div className="p-3 rounded-xl border border-line bg-canvas flex items-center gap-2.5">
@@ -885,7 +942,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           <section
             aria-labelledby="ask-a-doubt-heading"
             data-testid="home-ask-doubt-box"
-            className="lm-card-editorial p-5 space-y-3"
+            className="lm-card-editorial p-6 lg:p-7 space-y-3.5"
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -970,17 +1027,22 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             </div>
 
             {dueTodayItems.length === 0 ? (
-              <div className="rounded-xl border border-line bg-canvas p-3.5 flex items-center justify-between gap-3 text-xs">
+              <div
+                data-testid="home-due-today-empty"
+                className="rounded-xl border border-dashed border-line bg-canvas p-4 flex items-center justify-between gap-3 text-xs"
+              >
                 <div>
-                  <p className="font-bold text-ink">Revise Electrochemistry - Key Formulas</p>
-                  <p className="text-[11px] text-muted">Spaced repetition · Due today</p>
+                  <p className="font-bold text-ink">No flashcards or revision tasks due right now</p>
+                  <p className="text-[11px] text-muted">
+                    Review flashcards or generate a revision plan in Revise to schedule spaced repetition.
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => onNavigateTab('revision')}
                   className="px-3 py-1.5 rounded-lg border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-xs font-semibold text-brand shrink-0 cursor-pointer"
                 >
-                  Revise →
+                  Open Revise →
                 </button>
               </div>
             ) : (
@@ -1010,7 +1072,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             )}
           </section>
 
-          {/* 4. Last Mock Summary Card (matching Image 10 & wanted/LearnMate JEE study dashboard-3.png) */}
+          {/* 4. Last Mock Summary Card */}
           <section
             aria-labelledby="last-mock-heading"
             data-testid="home-last-mock-card"
@@ -1046,17 +1108,22 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                 )}
               </div>
             ) : (
-              <div className="rounded-xl border border-line bg-canvas p-3.5 flex items-center justify-between gap-3">
+              <div
+                data-testid="home-last-mock-empty"
+                className="rounded-xl border border-dashed border-line bg-canvas p-4 flex items-center justify-between gap-3"
+              >
                 <div>
-                  <p className="text-xs font-bold text-ink">JEE Main Full Test - 1</p>
-                  <p className="text-[11px] text-muted">Score: 182/300 · Rank: 94.2%ile · 180 min</p>
+                  <p className="text-xs font-bold text-ink">No mock test attempted yet</p>
+                  <p className="text-[11px] text-muted">
+                    Take a JEE Main or JEE Advanced CBT mock in Practice to track your score and percentile.
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => onNavigateTab('practice')}
                   className="px-3 py-1.5 rounded-lg lm-btn-accent text-xs font-semibold shrink-0 cursor-pointer"
                 >
-                  Open Mock →
+                  Start Mock →
                 </button>
               </div>
             )}

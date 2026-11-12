@@ -211,8 +211,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
-      <header className="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
+      <header className="sticky top-0 z-40 border-b border-line bg-white/95 backdrop-blur">
+        <div className="mx-auto flex h-18 max-w-[1600px] items-center gap-4 px-6 sm:px-8 lg:px-12 xl:px-16">
           <a href="#landing" className="flex shrink-0 items-center gap-2 sm:gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand text-white">
               <GraduationCap className="h-5 w-5" />
@@ -294,7 +294,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             className="pointer-events-none absolute -bottom-32 -left-20 h-72 w-72 rounded-full bg-violet-100 blur-3xl"
             aria-hidden="true"
           />
-          <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 py-12 sm:px-6 sm:py-20 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="relative mx-auto grid max-w-[1600px] items-center gap-12 lg:gap-16 px-6 py-16 sm:px-8 sm:py-24 lg:px-12 xl:px-16 lg:grid-cols-[1.08fr_0.92fr]">
             <div className="space-y-6">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-soft px-3 py-1 text-xs font-bold text-brand">
@@ -399,8 +399,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* Worked example */}
-        <section id="worked-example" className="border-b border-line py-12 sm:py-16">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-6">
+        <section id="worked-example" className="border-b border-line py-16 sm:py-20">
+          <div className="mx-auto max-w-[1600px] px-6 sm:px-8 lg:px-12 xl:px-16 space-y-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <SectionHeading
                 kicker="No login needed"
@@ -410,7 +410,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <LanguageToggle value={language} onChange={setLanguage} />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-6 lg:grid-cols-2">
               {exampleMcq && (
                 <SampleQuestionCard question={exampleMcq} language={language} compact />
               )}
@@ -419,11 +419,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               )}
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+            <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
               {exampleFlashcard && (
                 <SampleFlashcardCard card={exampleFlashcard} language={language} />
               )}
-              <div className="rounded-2xl border border-dashed border-line bg-white/60 p-5 flex flex-col justify-center gap-2">
+              <div className="rounded-2xl border border-dashed border-line bg-white/60 p-6 flex flex-col justify-center gap-3">
                 <p className="text-sm font-semibold text-ink">Want the whole chapter?</p>
                 <p className="text-xs leading-relaxed text-muted">
                   The free sample includes four concepts, four JEE-style questions, six flashcards
@@ -443,14 +443,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* How it works */}
-        <section id="how-it-works" className="border-b border-line bg-white py-12 sm:py-16">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-8">
+        <section id="how-it-works" className="border-b border-line bg-white py-16 sm:py-20">
+          <div className="mx-auto max-w-[1600px] px-6 sm:px-8 lg:px-12 xl:px-16 space-y-10">
             <SectionHeading
               kicker="How it works"
               title="Four steps from your chapter to a revision plan"
               description="LearnMate does not replace your books or coaching. It helps you get more out of the material you already have."
             />
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {STEPS.map(({ icon: Icon, title, body }, index) => (
                 <div key={title} className="lm-card-editorial p-5 space-y-3">
                   <div className="flex items-center justify-between">
@@ -470,8 +470,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* Honest limits */}
-        <section className="border-b border-line py-12 sm:py-16">
-          <div className="mx-auto grid max-w-6xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <section className="border-b border-line py-16 sm:py-20">
+          <div className="mx-auto grid max-w-[1600px] gap-10 px-6 sm:px-8 lg:px-12 xl:px-16 lg:grid-cols-[0.9fr_1.1fr]">
             <div className="space-y-4">
               <SectionHeading
                 kicker="Honest limits"
@@ -509,16 +509,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* Privacy */}
-        <section className="border-b border-line bg-white py-12 sm:py-16">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-8">
+        <section className="border-b border-line bg-white py-16 sm:py-20">
+          <div className="mx-auto max-w-[1600px] px-6 sm:px-8 lg:px-12 xl:px-16 space-y-10">
             <SectionHeading
               kicker="Privacy"
               title="Private by default, not as an afterthought"
               description="Most students are under 18. Their notes and mistakes are not content for ads, feeds or leaderboards."
             />
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {PRIVACY_POINTS.map(({ icon: Icon, title, body }) => (
-                <div key={title} className="rounded-2xl border border-line bg-canvas p-5 space-y-2.5">
+                <div key={title} className="rounded-2xl border border-line bg-canvas p-6 space-y-3">
                   <span className="grid h-9 w-9 place-items-center rounded-lg bg-white text-brand shadow-xs">
                     <Icon className="h-4.5 w-4.5" />
                   </span>
@@ -550,21 +550,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* Free official resources */}
-        <section className="border-b border-line py-12 sm:py-16">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-8">
+        <section className="border-b border-line py-16 sm:py-20">
+          <div className="mx-auto max-w-[1600px] px-6 sm:px-8 lg:px-12 xl:px-16 space-y-10">
             <SectionHeading
               kicker="Free official resources"
               title="Good material you can use without paying"
               description="These links open the official sites in a new tab. LearnMate is not connected to any of them."
             />
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               {RESOURCES.map((resource) => (
                 <a
                   key={resource.title}
                   href={resource.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="group lm-card-editorial flex flex-col gap-2 p-5 transition-colors hover:border-brand-200"
+                  className="group lm-card-editorial flex flex-col gap-2 p-6 transition-colors hover:border-brand-200"
                 >
                   <span className="flex items-center justify-between text-sm font-bold text-ink">
                     {resource.title}
@@ -578,8 +578,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* FAQ */}
-        <section id="faq" className="border-b border-line bg-white py-12 sm:py-16">
-          <div className="mx-auto grid max-w-6xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.8fr_1.2fr]">
+        <section id="faq" className="border-b border-line bg-white py-16 sm:py-20">
+          <div className="mx-auto grid max-w-[1600px] gap-10 px-6 sm:px-8 lg:px-12 xl:px-16 lg:grid-cols-[0.8fr_1.2fr]">
             <SectionHeading
               kicker="FAQ"
               title="Questions students and parents ask"
@@ -591,7 +591,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             />
             <div className="divide-y divide-line rounded-2xl border border-line bg-canvas">
               {FAQS.map((faq) => (
-                <details key={faq.question} className="group px-5 py-4">
+                <details key={faq.question} className="group px-6 py-4">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
                     {faq.question}
                     <Plus className="h-4 w-4 shrink-0 text-brand transition-transform group-open:rotate-45" />
@@ -604,8 +604,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* Final CTA */}
-        <section className="py-12 sm:py-16">
-          <div className="mx-auto max-w-4xl px-4 sm:px-6">
+        <section className="py-16 sm:py-20">
+          <div className="mx-auto max-w-[1360px] px-6 sm:px-8 lg:px-12">
             <div className="relative overflow-hidden rounded-3xl bg-linear-to-br from-brand via-indigo-600 to-violet-600 p-6 text-white shadow-lg sm:p-10">
               <div
                 className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl"
@@ -658,7 +658,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </main>
 
       <footer className="border-t border-line bg-white">
-        <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-8 sm:px-6">
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-5 px-6 py-10 sm:px-8 lg:px-12 xl:px-16">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-semibold text-muted">
             <span className="font-display text-sm font-extrabold text-ink">LearnMate</span>
             <button

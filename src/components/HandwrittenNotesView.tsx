@@ -1,19 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
   Bookmark,
+  Camera,
   CheckCircle2,
   Download,
   FileText,
   Layers,
+  Loader2,
   PenTool,
   Sparkles,
   Trash2,
+  Upload,
   Video,
   AlertTriangle,
 } from 'lucide-react';
-import type { OnePageRevisionSheet, StudyDocument, ThemeMode } from '../types/study';
+import type { OnePageRevisionSheet, StudyDocument, StudyPage, ThemeMode } from '../types/study';
 import { studyStorage } from '../services/storageService';
+import { aiStudyClient } from '../services/aiClient';
+import { extractPagesFromPdf } from '../utils/pdfExtractor';
 import {
   buildHandwrittenNotesDocument,
   type HandwrittenInkColor,
@@ -28,6 +33,25 @@ import {
 } from '../utils/pdfGenerator';
 import { MathText } from './MathText';
 import { DiagramRenderer } from './DiagramRenderer';
+
+export type HandwritingFontFamily =
+  | 'kalam'
+  | 'caveat'
+  | 'patrick'
+  | 'indie'
+  | 'shadows';
+
+const HANDWRITING_FONTS: Array<{
+  id: HandwritingFontFamily;
+  label: string;
+  cssClass: string;
+}> = [
+  { id: 'kalam', label: 'Kalam (Natural Indian Student Pen)', cssClass: 'font-handwriting-kalam' },
+  { id: 'caveat', label: 'Caveat (Neat Cursive Exam Script)', cssClass: 'font-handwriting-caveat' },
+  { id: 'patrick', label: 'Patrick Hand (Clean Block Print)', cssClass: 'font-handwriting-patrick' },
+  { id: 'indie', label: 'Indie Flower (Rounded Study Notes)', cssClass: 'font-handwriting-indie' },
+  { id: 'shadows', label: 'Shadows Into Light (Fine Gel Pen)', cssClass: 'font-handwriting-shadows' },
+];
 
 interface HandwrittenNotesViewProps {
   document?: StudyDocument;
@@ -50,7 +74,8 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
   onNavigateToPage: onNavigateToPageProp,
   onNavigateToCitation,
 }) => {
-  const studyDoc = (docProp || activeDocument) as StudyDocument;
+  const [localScannedDoc, setLocalScannedDoc] = useState<StudyDocument | null>(null);
+  const studyDoc = (localScannedDoc || docProp || activeDocument) as StudyDocument;
   const onNavigateToPage =
     onNavigateToPageProp ||
     (onNavigateToCitation ? (pageNum: number) => onNavigateToCitation(pageNum) : undefined);
@@ -68,11 +93,17 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
   const [notebookStyle, setNotebookStyle] = useState<HandwrittenNotebookStyle>('ruled');
   const [density, setDensity] = useState<HandwrittenNoteDensity>('full');
   const [inkColor, setInkColor] = useState<HandwrittenInkColor>('indigo_ink');
+  const [handwritingFont, setHandwritingFont] = useState<HandwritingFontFamily>('kalam');
   const [selectedTopic, setSelectedTopic] = useState<string>(
     studyDoc.topics[0]?.name || studyDoc.title
   );
   const [pageRangeStart, setPageRangeStart] = useState<number>(1);
   const [pageRangeEnd, setPageRangeEnd] = useState<number>(Math.min(12, studyDoc.pageCount));
+
+  // Direct OCR Upload (Handwritten Photo / Scanned PDF -> Digital KaTeX + Handwritten Notebook)
+  const [isScanningUpload, setIsScanningUpload] = useState(false);
+  const [scannedDigitalPreview, setScannedDigitalPreview] = useState<string | null>(null);
+  const ocrInputRef = useRef<HTMLInputElement | null>(null);
 
   const [savedNotes, setSavedNotes] = useState<HandwrittenNoteDocument[]>(() =>
     studyStorage.getHandwrittenNotes(studyDoc.id)
@@ -113,17 +144,21 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
     setSelectedTopic(studyDoc.topics[0]?.name || studyDoc.title);
   }, [studyDoc.id, studyDoc.pageCount, studyDoc.title, studyDoc.topics]);
 
-  const handleGenerateNotes = (overrideWorkflow?: HandwrittenWorkflowSource) => {
+  const handleGenerateNotes = (
+    overrideWorkflow?: HandwrittenWorkflowSource,
+    overrideDoc?: StudyDocument
+  ) => {
+    const targetDoc = overrideDoc || studyDoc;
     const targetWorkflow = overrideWorkflow || workflowSource;
-    const startP = Math.max(1, Math.min(studyDoc.pageCount, pageRangeStart));
-    const endP = Math.max(startP, Math.min(studyDoc.pageCount, pageRangeEnd));
+    const startP = Math.max(1, Math.min(targetDoc.pageCount, pageRangeStart));
+    const endP = Math.max(startP, Math.min(targetDoc.pageCount, pageRangeEnd));
     const selectedPageNumbers: number[] = [];
     for (let p = startP; p <= endP; p++) {
       selectedPageNumbers.push(p);
     }
 
     const generated = buildHandwrittenNotesDocument({
-      document: studyDoc,
+      document: targetDoc,
       workflowSource: targetWorkflow,
       onePageRevision,
       selectedPageNumbers,
@@ -134,8 +169,108 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
     });
     setActiveNoteDoc(generated);
     setActiveNotebookPageIndex(0);
-    setToastMessage('Generated AI handwritten-style notebook pages!');
+    setToastMessage('Generated handwritten-style notebook pages with KaTeX math & bold/italic highlights!');
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleScanHandwrittenFile = async (file: File) => {
+    setIsScanningUpload(true);
+    setToastMessage(null);
+    try {
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        const extracted = await extractPagesFromPdf(file, async (pageImageDataUrl, pageNum) => {
+          try {
+            const res = await aiStudyClient.scanNotes({
+              imageDataUrl: pageImageDataUrl,
+              title: `${file.name.replace(/\.pdf$/i, '')} — Page ${pageNum}`,
+            });
+            return {
+              title: res.title,
+              content: res.cleanContent,
+            };
+          } catch {
+            return null;
+          }
+        });
+        const cleanTitle = file.name.replace(/\.pdf$/i, '');
+        const doc: StudyDocument = {
+          id: `doc-hw-pdf-${Date.now()}`,
+          title: cleanTitle,
+          sourceType: 'pdf',
+          pageCount: extracted.pageCount,
+          pages: extracted.pages,
+          pdfDataUrl: extracted.pdfDataUrl,
+          createdAt: new Date().toISOString(),
+          lastStudiedAt: new Date().toISOString(),
+          topics: [{ id: 't-1', name: cleanTitle, summary: cleanTitle, keyConcepts: [cleanTitle], sourcePages: [1] }],
+          overview: `Scanned handwritten PDF (${extracted.pageCount} pages).`,
+        };
+        studyStorage.saveDocument(doc);
+        setLocalScannedDoc(doc);
+        setScannedDigitalPreview(
+          extracted.pages
+            .slice(0, 3)
+            .map((p: StudyPage) => `### **${p.title || `Page ${p.pageNumber}`}**\n${p.content}`)
+            .join('\n\n')
+        );
+        handleGenerateNotes('study_material', doc);
+      } else if (file.type.startsWith('image/')) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('Failed to read image file'));
+          reader.readAsDataURL(file);
+        });
+        const cleanTitle =
+          file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() ||
+          'Scanned Handwritten Notes';
+        const ocr = await aiStudyClient.scanNotes({
+          imageDataUrl: dataUrl,
+          title: cleanTitle,
+        });
+        const pages: StudyPage[] = [
+          {
+            pageNumber: 1,
+            title: ocr.title || cleanTitle,
+            content: ocr.cleanContent || ocr.summary || cleanTitle,
+          },
+        ];
+        const doc: StudyDocument = {
+          id: `doc-hw-img-${Date.now()}`,
+          title: ocr.title || cleanTitle,
+          sourceType: 'scanned_notes',
+          scannedImageDataUrl: dataUrl,
+          pageCount: 1,
+          pages,
+          createdAt: new Date().toISOString(),
+          lastStudiedAt: new Date().toISOString(),
+          topics: (ocr.keyConcepts || [cleanTitle]).slice(0, 4).map((c, idx) => ({
+            id: `t-hw-${idx}`,
+            name: c,
+            summary: c,
+            keyConcepts: [c],
+            sourcePages: [1],
+          })),
+          overview: ocr.summary || cleanTitle,
+        };
+        studyStorage.saveDocument(doc);
+        setLocalScannedDoc(doc);
+        setScannedDigitalPreview(
+          doc.pages
+            .map((p: StudyPage) => `### **${p.title || `Section ${p.pageNumber}`}**\n${p.content}`)
+            .join('\n\n')
+        );
+        handleGenerateNotes('study_material', doc);
+      }
+    } catch (err) {
+      setToastMessage(
+        err instanceof Error
+          ? err.message
+          : 'Could not extract handwritten material. Please try another photo or PDF.'
+      );
+    } finally {
+      setIsScanningUpload(false);
+    }
   };
 
   const handleSaveToLibrary = () => {
@@ -169,6 +304,10 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
       Math.min(activeNotebookPageIndex, Math.max(0, activeNoteDoc.pages.length - 1))
     ] || activeNoteDoc.pages[0];
 
+  const activeFontClass =
+    HANDWRITING_FONTS.find((f) => f.id === handwritingFont)?.cssClass ||
+    'font-handwriting-kalam';
+
   const inkTextClass = useDarkSheet
     ? inkColor === 'emerald_notes'
       ? 'text-emerald-200'
@@ -196,7 +335,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
 
   return (
     <div data-testid="handwritten-notes-view" className="space-y-6">
-      {/* Top Disclosure & Workflow Controls */}
+      {/* Top Disclosure & Dual Workflow Controls */}
       <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-5 shadow-2xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -205,23 +344,55 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                 data-testid="handwritten-disclosure-badge"
                 className="px-2.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-[11px] font-bold uppercase tracking-wider"
               >
-                AI-Generated Handwritten-Style Study Notes
+                AI Handwritten Notes &amp; OCR Studio
               </span>
               <span className="text-xs text-muted dark:text-slate-400">
-                KaTeX Math · Boxed Formulas · Highlighted Terms · Printable PDF
+                5 Realistic Handwriting Fonts · KaTeX Math · Bold/Italic Highlights · Scan Photo/PDF
               </span>
             </div>
             <h2 className="text-lg sm:text-xl font-bold text-ink dark:text-slate-100 flex items-center gap-2">
               <PenTool className="w-5 h-5 text-brand dark:text-indigo-400" />
-              <span>Handwritten Notebook Studio</span>
+              <span>Handwritten Notebook &amp; OCR Studio</span>
             </h2>
             <p className="text-xs text-muted dark:text-slate-400">
-              Convert your YouTube lectures, One-Page Revision Sheets, or 60-page PDF chapters into
-              structured, high-readability notebook sheets.
+              Upload any handwritten photo or PDF to extract KaTeX digital notes, or convert your Sticky Notes, Revision Sheets, and Lectures into realistic student handwriting.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={ocrInputRef}
+              type="file"
+              accept="image/*,application/pdf,.pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  void handleScanHandwrittenFile(file);
+                }
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              disabled={isScanningUpload}
+              data-testid="upload-handwritten-ocr-btn"
+              onClick={() => ocrInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-brand/40 bg-brand-soft/60 hover:bg-brand hover:text-white text-xs font-bold text-brand transition-colors cursor-pointer disabled:opacity-60"
+            >
+              {isScanningUpload ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Scanning Handwritten Material…</span>
+                </>
+              ) : (
+                <>
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Scan Handwritten Photo / PDF</span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               data-testid="save-handwritten-note-btn"
@@ -245,7 +416,32 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
           </div>
         </div>
 
-        {/* 3 Supported Workflows Selector + Notebook Customization */}
+        {/* Extracted Digital KaTeX Preview when a student scans a handwritten photo/PDF */}
+        {scannedDigitalPreview && (
+          <div
+            data-testid="scanned-handwritten-digital-preview"
+            className="p-4 rounded-2xl border border-brand-200 bg-brand-soft/30 space-y-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-brand flex items-center gap-1.5">
+                <Upload className="w-3.5 h-3.5" />
+                <span>Extracted Digital Notes from Uploaded Handwritten Material (KaTeX + Highlights)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setScannedDigitalPreview(null)}
+                className="text-xs font-semibold text-muted hover:text-ink cursor-pointer"
+              >
+                Hide Digital Preview
+              </button>
+            </div>
+            <div className="p-3.5 rounded-xl bg-white border border-line text-xs sm:text-sm text-ink max-h-56 overflow-y-auto leading-relaxed">
+              <MathText text={scannedDigitalPreview} />
+            </div>
+          </div>
+        )}
+
+        {/* 3 Supported Workflows Selector */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           {/* Workflow A */}
           <button
@@ -263,10 +459,10 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
           >
             <div className="flex items-center gap-2 text-xs font-bold text-ink dark:text-slate-100">
               <Video className="w-4 h-4 text-rose-500" />
-              <span>Workflow A: Lecture to Notes</span>
+              <span>Workflow A: Lecture to Handwritten</span>
             </div>
             <p className="text-[11px] text-muted dark:text-slate-400 mt-1">
-              Timestamped lecture sections, derivations &amp; boxed equations.
+              Timestamped lecture sections, derivations &amp; boxed KaTeX equations.
             </p>
           </button>
 
@@ -286,10 +482,10 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
           >
             <div className="flex items-center gap-2 text-xs font-bold text-ink dark:text-slate-100">
               <Sparkles className="w-4 h-4 text-amber-500" />
-              <span>Workflow B: Revision Sheet to Notes</span>
+              <span>Workflow B: Revision &amp; Sticky Notes to Handwritten</span>
             </div>
             <p className="text-[11px] text-muted dark:text-slate-400 mt-1">
-              One-click conversion from your One-Page Revision Sheet.
+              One-click conversion from your Quick Revision Sheet &amp; Sticky Notes.
             </p>
           </button>
 
@@ -309,7 +505,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
           >
             <div className="flex items-center gap-2 text-xs font-bold text-ink dark:text-slate-100">
               <FileText className="w-4 h-4 text-brand dark:text-indigo-400" />
-              <span>Workflow C: PDF / Material to Notes</span>
+              <span>Workflow C: PDF / Scanned Material to Handwritten</span>
             </div>
             <p className="text-[11px] text-muted dark:text-slate-400 mt-1">
               Select page range (up to 60 pages), topic, and concise vs. full depth.
@@ -317,8 +513,27 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
           </button>
         </div>
 
-        {/* Customization Controls Bar */}
+        {/* Customization Controls Bar (Including 5 Handwriting Fonts) */}
         <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-muted dark:text-slate-400 mb-1">
+              Handwriting Font Style
+            </label>
+            <select
+              aria-label="Handwriting font style"
+              data-testid="hw-font-style-select"
+              value={handwritingFont}
+              onChange={(e) => setHandwritingFont(e.target.value as HandwritingFontFamily)}
+              className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100"
+            >
+              {HANDWRITING_FONTS.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-muted dark:text-slate-400 mb-1">
               Paper Style
@@ -473,7 +688,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
           data-testid="handwritten-notebook-canvas"
           className={`relative rounded-3xl border-2 ${
             useDarkSheet ? 'border-slate-700' : 'border-amber-200/80'
-          } shadow-md overflow-hidden ${paperBackgroundStyle}`}
+          } shadow-md overflow-hidden ${paperBackgroundStyle} ${activeFontClass}`}
         >
           {/* Left Vertical Red Margin Rule */}
           <div
@@ -492,14 +707,14 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
           >
             <div>
               <div
-                className={`text-[10px] font-bold uppercase tracking-widest ${
+                className={`text-[10px] font-sans font-bold uppercase tracking-widest ${
                   useDarkSheet ? 'text-rose-400' : 'text-rose-600'
                 }`}
               >
-                AI-Generated Handwritten-Style Study Notes · {activeNoteDoc.subject}
+                Handwritten Study Notebook · {activeNoteDoc.subject}
               </div>
               <h3
-                className={`font-serif italic text-xl sm:text-2xl font-bold tracking-tight ${inkTextClass}`}
+                className={`text-2xl sm:text-3xl font-bold tracking-tight ${inkTextClass}`}
               >
                 {activeNoteDoc.title}
               </h3>
@@ -531,7 +746,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                 {notebookStyle === 'cornell' && (
                   <div className="sm:col-span-3 pr-3 space-y-2 border-b sm:border-b-0 border-rose-200/60 pb-2 sm:pb-0">
                     <div
-                      className={`text-[11px] font-bold uppercase tracking-wider ${
+                      className={`text-[11px] font-sans font-bold uppercase tracking-wider ${
                         useDarkSheet ? 'text-rose-300' : 'text-rose-700'
                       }`}
                     >
@@ -539,7 +754,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                     </div>
                     {sec.marginCallout && (
                       <div
-                        className={`p-2.5 rounded-xl border text-xs font-serif italic ${
+                        className={`p-2.5 rounded-xl border text-sm ${
                           useDarkSheet
                             ? 'bg-amber-950/50 border-amber-800 text-amber-200'
                             : 'bg-amber-100/85 border-amber-300/80 text-amber-950'
@@ -551,7 +766,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onNavigateToPage?.(sec.sourcePage)}
-                      className={`inline-flex items-center gap-1 text-[11px] font-bold hover:underline cursor-pointer ${
+                      className={`inline-flex items-center gap-1 text-[11px] font-sans font-bold hover:underline cursor-pointer ${
                         useDarkSheet ? 'text-indigo-400' : 'text-indigo-700'
                       }`}
                     >
@@ -569,13 +784,13 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                       useDarkSheet ? 'border-amber-500/40' : 'border-amber-400/70'
                     }`}
                   >
-                    <h4 className={`font-serif italic text-lg font-bold ${inkTextClass}`}>
+                    <h4 className={`text-xl font-bold ${inkTextClass}`}>
                       <MathText text={sec.heading} variant="inline" />
                     </h4>
                     <button
                       type="button"
                       onClick={() => onNavigateToPage?.(sec.sourcePage)}
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md border text-[11px] font-semibold cursor-pointer ${
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md border font-sans text-[11px] font-semibold cursor-pointer ${
                         useDarkSheet
                           ? 'bg-indigo-950/70 border-indigo-800 text-indigo-300'
                           : 'bg-indigo-50 border-indigo-200 text-indigo-700'
@@ -590,7 +805,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                   {sec.highlightedTerms.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span
-                        className={`text-[11px] font-bold uppercase tracking-wider ${
+                        className={`text-[11px] font-sans font-bold uppercase tracking-wider ${
                           useDarkSheet ? 'text-amber-300' : 'text-amber-900'
                         }`}
                       >
@@ -599,7 +814,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                       {sec.highlightedTerms.map((term, tIdx) => (
                         <span
                           key={tIdx}
-                          className={`px-2.5 py-0.5 rounded-md text-xs font-serif italic font-semibold shadow-2xs ${
+                          className={`px-2.5 py-0.5 rounded-md text-sm font-bold shadow-2xs ${
                             useDarkSheet
                               ? 'bg-yellow-500/20 text-yellow-100'
                               : 'bg-yellow-200/90 text-[#0F172A]'
@@ -612,7 +827,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                   )}
 
                   {/* Handwritten-Style Bullet Points */}
-                  <ul className={`space-y-2 font-serif text-sm sm:text-base leading-relaxed ${inkTextClass}`}>
+                  <ul className={`space-y-2.5 text-base sm:text-lg leading-relaxed ${inkTextClass}`}>
                     {sec.bulletPoints.map((bp, bIdx) => (
                       <li key={bIdx} className="flex items-start gap-2.5">
                         <span
@@ -643,14 +858,14 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                           }`}
                         >
                           <div
-                            className={`text-[10px] font-bold uppercase tracking-wider ${
+                            className={`text-[10px] font-sans font-bold uppercase tracking-wider ${
                               useDarkSheet ? 'text-indigo-300' : 'text-indigo-700'
                             }`}
                           >
                             ★ Boxed Formula · {f.label}
                           </div>
                           <div
-                            className={`text-xs sm:text-sm font-semibold overflow-x-auto ${
+                            className={`text-sm sm:text-base font-semibold overflow-x-auto ${
                               useDarkSheet ? 'text-slate-100' : 'text-[#0F172A]'
                             }`}
                           >
@@ -664,7 +879,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                   {/* Exam Trap Warning Callout */}
                   {sec.examTrapWarning && (
                     <div
-                      className={`p-3 rounded-2xl border flex items-start gap-2.5 text-xs ${
+                      className={`p-3 rounded-2xl border flex items-start gap-2.5 text-sm ${
                         useDarkSheet
                           ? 'bg-rose-950/40 border-rose-800 text-rose-200'
                           : 'bg-rose-50/95 border-rose-300 text-rose-950'
@@ -676,7 +891,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                         }`}
                       />
                       <div>
-                        <span className="font-bold uppercase tracking-wider">JEE Exam Trap Caution: </span>
+                        <span className="font-sans text-xs font-bold uppercase tracking-wider">JEE Exam Trap Caution: </span>
                         <MathText text={sec.examTrapWarning} variant="inline" />
                       </div>
                     </div>
@@ -686,7 +901,7 @@ export const HandwrittenNotesView: React.FC<HandwrittenNotesViewProps> = ({
                   {sec.diagramSpec && (
                     <div className="pt-2">
                       <div
-                        className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 ${
+                        className={`text-[11px] font-sans font-bold uppercase tracking-wider mb-1.5 ${
                           useDarkSheet ? 'text-slate-400' : 'text-slate-600'
                         }`}
                       >

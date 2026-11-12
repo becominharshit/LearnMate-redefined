@@ -836,13 +836,15 @@ export function scorePyqQuestionResponse(
     matrixRowSelection?: Record<string, string>;
   }
 ): SinglePyqScoreOutcome {
+  const isMulti =
+    question.questionType === 'mcq_multiple' || question.format === 'multiple_mcq';
   const rule =
-    question.markingRule ||
+    (isMulti && question.markingRule?.format !== 'multiple_mcq'
+      ? MARKING_RULES.jee_adv_multi
+      : question.markingRule) ||
     MARKING_RULES[question.markingRuleId] ||
     Object.values(MARKING_RULES).find((r) => r.id === question.markingRuleId) ||
-    (question.questionType === 'mcq_multiple' || question.format === 'multiple_mcq'
-      ? MARKING_RULES.jee_adv_multi
-      : MARKING_RULES.jee_main_mcq);
+    (isMulti ? MARKING_RULES.jee_adv_multi : MARKING_RULES.jee_main_mcq);
   const maxMarks = rule.fullMarks;
 
   // 1. Dropped / Bonus question: everyone gets full marks according to NTA/JAB rule

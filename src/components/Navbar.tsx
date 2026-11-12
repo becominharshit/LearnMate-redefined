@@ -4,13 +4,11 @@ import {
   ListChecks,
   Target,
   Sparkles,
-  Bell,
   ChevronDown,
   Search,
   BarChart3,
   LogIn,
   LogOut,
-  Clock,
   GraduationCap,
   LayoutDashboard,
   Compass,
@@ -21,9 +19,21 @@ import {
   Sun,
   Moon,
   HelpCircle,
+  Mic,
+  PanelLeftClose,
+  PanelLeftOpen,
+  FileText,
+  Calculator,
+  Calendar,
+  ShieldCheck,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { StudyDocument, LearnMateNotification, StudentAcademicProfile, ThemeMode } from '../types/study';
+import {
+  StudyDocument,
+  LearnMateNotification,
+  StudentAcademicProfile,
+  ThemeMode,
+} from '../types/study';
 import { EXAM_BLUEPRINTS } from '../utils/examSimulatorEngine';
 import { getNextJeeCountdown } from '../utils/jeeCalendar';
 import { CompactStudyUtilitiesWidget, type UtilityTab } from './CompactStudyUtilitiesWidget';
@@ -35,6 +45,7 @@ export type ActiveTab =
   | 'study'
   | 'revision'
   | 'practice'
+  | 'study-tools'
   | 'resources'
   | 'explore'
   | 'ai-tutor'
@@ -65,6 +76,15 @@ interface NavbarProps {
   onOpenAppGuideModal?: () => void;
   externalUtilityTab?: UtilityTab | null;
   onConsumeExternalUtilityTab?: () => void;
+  onOpenVoiceTutor?: () => void;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
+  onPlotFormulaInStudyTools?: (expression: string, formulaTitle?: string) => void;
+  onOpenStudyToolsWorkspace?: (
+    subTab?: 'graph2d' | 'matrix' | 'surface3d' | 'geometry' | 'scientific'
+  ) => void;
+  onOpenMentorReportModal?: () => void;
+  onOpenCommercialConsoleModal?: () => void;
 }
 
 type NavItem = {
@@ -73,33 +93,55 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const DESKTOP_NAV: NavItem[] = [
+const DESKTOP_PRIMARY_NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'study', label: 'Study', icon: BookOpen },
   { id: 'practice', label: 'Practice', icon: Target },
   { id: 'revision', label: 'Revise', icon: ListChecks },
+  { id: 'study-tools', label: 'Study Tools', icon: Calculator },
   { id: 'analytics', label: 'Progress', icon: BarChart3 },
+];
+
+const DESKTOP_SECONDARY_NAV: NavItem[] = [
+  { id: 'resources', label: 'Resources', icon: Compass },
+  { id: 'create', label: 'Creative Studio', icon: Sparkles },
 ];
 
 const MOBILE_PRIMARY_NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'study', label: 'Study', icon: BookOpen },
   { id: 'practice', label: 'Practice', icon: Target },
-  { id: 'revision', label: 'Revise', icon: ListChecks },
+  { id: 'study-tools', label: 'Tools', icon: Calculator },
 ];
 
 function isTabActive(item: ActiveTab, activeTab: ActiveTab): boolean {
+  if (item === 'resources') {
+    return activeTab === 'resources' || activeTab === 'explore';
+  }
+  if (item === 'create') {
+    return activeTab === 'create';
+  }
   return (
     activeTab === item ||
-    (item === 'study' &&
-      (activeTab === 'pdf-workspace' ||
-        activeTab === 'ai-tutor' ||
-        activeTab === 'resources' ||
-        activeTab === 'explore' ||
-        activeTab === 'create')) ||
+    (item === 'study' && (activeTab === 'pdf-workspace' || activeTab === 'ai-tutor')) ||
     (item === 'dashboard' && activeTab === 'home')
   );
 }
+
+const SECTION_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
+  home: { title: 'Dashboard', subtitle: 'Daily study overview & JEE preparation' },
+  dashboard: { title: 'Dashboard', subtitle: 'Daily study overview & JEE preparation' },
+  study: { title: 'Study Workbench', subtitle: 'Document reader, annotations & AI Tutor' },
+  'ai-tutor': { title: 'Study Workbench', subtitle: 'Document reader, annotations & AI Tutor' },
+  'pdf-workspace': { title: 'Study Workbench', subtitle: 'PDF Annotation Studio' },
+  practice: { title: 'Practice Hub', subtitle: 'Official JEE Main, Advanced, BITSAT & VITEEE PYQs & CBT Mocks' },
+  revision: { title: 'Revision Studio', subtitle: 'Handwritten notes, Formula Book & active recall' },
+  'study-tools': { title: 'Study Tools Lab', subtitle: 'Desmos-grade 2D Graphing, Matrix, 3D Vector, Geometry & Scientific Suite' },
+  analytics: { title: 'Progress & Mastery', subtitle: 'Accuracy trends & chapter mastery telemetry' },
+  resources: { title: 'Official Resources', subtitle: 'NTA JEE syllabus & verified reference library' },
+  explore: { title: 'Official Resources', subtitle: 'NTA JEE syllabus & verified reference library' },
+  create: { title: 'Creative Studio', subtitle: 'Interactive visual diagrams & concept animations' },
+};
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
@@ -113,8 +155,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   documents = [],
   onSelectDocumentFromSearch,
-  notifications = [],
-  onMarkNotificationsRead,
   onOpenProfileModal,
   studentProfile,
   themeMode = 'light',
@@ -123,47 +163,28 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAppGuideModal,
   externalUtilityTab,
   onConsumeExternalUtilityTab,
+  onOpenVoiceTutor,
+  sidebarCollapsed = false,
+  onToggleSidebar,
+  onPlotFormulaInStudyTools,
+  onOpenStudyToolsWorkspace,
+  onOpenMentorReportModal,
+  onOpenCommercialConsoleModal,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [languageRegister, setLanguageRegister] = useState<'English' | 'Hinglish' | 'Hindi'>(() => {
-    try {
-      const saved = localStorage.getItem('learnmate_language_register_v1');
-      if (saved === 'Hinglish' || saved === 'Hindi') return saved;
-    } catch {
-      // ignore
-    }
-    return 'English';
-  });
-  const [isOnline, setIsOnline] = useState<boolean>(() =>
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  );
-
-  useEffect(() => {
-    const onOnline = () => setIsOnline(true);
-    const onOffline = () => setIsOnline(false);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
-    return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
-    };
-  }, []);
 
   const isDark = themeMode === 'dark';
-
-  const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
-      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setNotifOpen(false);
         setProfileOpen(false);
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -180,7 +201,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, [onOpenSearchModal]);
 
   const countdown = useMemo(() => getNextJeeCountdown(), []);
-  const unreadCount = notifications.filter((n) => !n.read).length;
 
   const filteredDocs = searchQuery.trim()
     ? documents.filter(
@@ -211,35 +231,71 @@ export const Navbar: React.FC<NavbarProps> = ({
     'w-full px-4 py-2.5 text-left text-sm text-ink hover:bg-soft flex items-center gap-3 cursor-pointer transition-colors';
 
   const meActive = profileOpen || activeTab === 'analytics';
+  const activeMeta = SECTION_TITLES[activeTab] || SECTION_TITLES.dashboard;
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-b border-line lm-no-print">
-        <div className="max-w-[1440px] mx-auto px-3 sm:px-4 lg:px-6 h-15 flex items-center gap-1.5">
-          {/* Brand */}
+      {/* =====================================================================
+          LEFT COLLAPSIBLE DESKTOP SIDEBAR (lg and above)
+         ===================================================================== */}
+      <aside
+        aria-label="Desktop Workspace Navigation"
+        data-testid="desktop-left-sidebar"
+        className={`hidden lg:flex fixed inset-y-0 left-0 z-40 flex-col bg-white dark:bg-[#0B1020] border-r border-line transition-[width] duration-200 lm-no-print ${
+          sidebarCollapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        {/* Top Brand + Collapse Button */}
+        <div
+          className={`h-16 px-4 border-b border-line flex items-center ${
+            sidebarCollapsed ? 'justify-center' : 'justify-between'
+          } gap-2 shrink-0`}
+        >
           <button
             type="button"
             onClick={() => onSelectTab('dashboard')}
             data-testid="navbar-brand-btn"
-            className="flex items-center gap-2 shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-brand rounded-xl"
+            className="flex items-center gap-2.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-brand rounded-xl min-w-0"
             aria-label="LearnMate home"
           >
-            <span className="w-8 h-8 rounded-xl bg-brand text-white grid place-items-center shadow-xs">
-              <GraduationCap className="w-4 h-4" />
+            <span className="w-9 h-9 rounded-xl bg-brand text-white grid place-items-center shadow-xs shrink-0">
+              <GraduationCap className="w-5 h-5" />
             </span>
-            <span className="hidden sm:flex items-center gap-1.5">
-              <span className="font-display font-extrabold text-base tracking-tight text-ink">
-                LearnMate
+            {!sidebarCollapsed && (
+              <span className="flex items-center gap-2 truncate">
+                <span className="font-display font-extrabold text-lg tracking-tight text-ink">
+                  LearnMate
+                </span>
+                <span className="px-1.5 py-0.5 rounded-md bg-brand-soft text-brand text-[10px] font-bold tracking-wider">
+                  JEE
+                </span>
               </span>
-              <span className="px-1.5 py-0.5 rounded-md bg-brand-soft text-brand text-[10px] font-bold tracking-wider">
-                JEE
-              </span>
-            </span>
+            )}
           </button>
 
-          {/* Desktop 5 Primary Destinations: Home · Study · Practice · Revise · Progress */}
-          <nav aria-label="Main navigation" className="hidden lg:flex items-center gap-0.5 ml-1">
-            {DESKTOP_NAV.map((item) => {
+          {!sidebarCollapsed && onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              data-testid="sidebar-collapse-toggle-btn"
+              aria-label="Collapse sidebar"
+              title="Collapse desktop sidebar"
+              className="p-2 rounded-xl text-muted hover:text-ink hover:bg-soft transition-colors cursor-pointer shrink-0"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Primary Desktop Navigation Links */}
+        <div className="flex-1 overflow-y-auto py-5 px-3 space-y-6">
+          <nav aria-label="Main navigation" className="space-y-1.5">
+            {!sidebarCollapsed && (
+              <div className="px-3 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">
+                Workspaces
+              </div>
+            )}
+            {DESKTOP_PRIMARY_NAV.map((item) => {
               const Icon = item.icon;
               const active = isTabActive(item.id, activeTab);
               return (
@@ -249,37 +305,164 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onSelectTab(item.id)}
                   data-testid={`nav-tab-${item.id}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                  title={sidebarCollapsed ? item.label : undefined}
+                  className={`w-full flex items-center ${
+                    sidebarCollapsed ? 'justify-center px-2 py-3' : 'gap-3 px-3.5 py-2.5'
+                  } rounded-xl text-sm font-bold transition-colors cursor-pointer ${
                     active
                       ? 'bg-brand-soft text-brand border border-brand/20'
                       : 'text-muted hover:text-ink hover:bg-soft'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5 shrink-0" />
-                  {item.label}
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
                 </button>
               );
             })}
           </nav>
 
-          {/* Right Global Utilities: + Add Material · Search (Ctrl+K) · Study Tools · Focus 25:00 · Theme · Notifications · Help (?) · Profile */}
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          {/* Secondary Studio & Reference Links */}
+          <div className="pt-4 border-t border-line space-y-1.5">
+            {!sidebarCollapsed && (
+              <div className="px-3 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">
+                Reference &amp; Studio
+              </div>
+            )}
+            {DESKTOP_SECONDARY_NAV.map((item) => {
+              const Icon = item.icon;
+              const active = isTabActive(item.id, activeTab);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelectTab(item.id)}
+                  data-testid={`nav-tab-${item.id}`}
+                  aria-current={active ? 'page' : undefined}
+                  title={sidebarCollapsed ? item.label : undefined}
+                  className={`w-full flex items-center ${
+                    sidebarCollapsed ? 'justify-center px-2 py-3' : 'gap-3 px-3.5 py-2.5'
+                  } rounded-xl text-sm font-semibold transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-brand-soft text-brand border border-brand/20'
+                      : 'text-muted hover:text-ink hover:bg-soft'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Sidebar Footer: Active Exam Target & Expand Button when collapsed */}
+        <div className="p-3 border-t border-line space-y-2">
+          {!sidebarCollapsed && countdown && (
+            <div className="px-3 py-2.5 rounded-xl bg-canvas border border-line flex items-center gap-2.5 text-xs">
+              <Flame className="w-4 h-4 text-warning shrink-0" />
+              <div className="min-w-0">
+                <div className="font-bold text-ink truncate">{targetExamLabel}</div>
+                <div className="text-[11px] text-muted truncate">
+                  {countdown.inProgress
+                    ? `${countdown.label} is live`
+                    : `${countdown.daysLeft} days remaining`}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sidebarCollapsed && onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              data-testid="sidebar-expand-toggle-btn"
+              aria-label="Expand sidebar"
+              title="Expand desktop sidebar"
+              className="w-full py-2.5 rounded-xl text-muted hover:text-ink hover:bg-soft flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </aside>
+
+      {/* =====================================================================
+          CLEAN WIDESCREEN TOP HEADER BAR (5 Approved Utility Controls)
+         ===================================================================== */}
+      <header className="sticky top-0 z-30 w-full bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-b border-line lm-no-print">
+        <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 h-16 flex items-center justify-between gap-4">
+          {/* Left Context: Mobile Brand + Desktop Section Breadcrumb */}
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Mobile Brand */}
+            <button
+              type="button"
+              onClick={() => onSelectTab('dashboard')}
+              className="lg:hidden flex items-center gap-2 shrink-0 cursor-pointer"
+              aria-label="LearnMate home"
+            >
+              <span className="w-8 h-8 rounded-xl bg-brand text-white grid place-items-center shadow-xs">
+                <GraduationCap className="w-4 h-4" />
+              </span>
+              <span className="font-display font-extrabold text-base tracking-tight text-ink">
+                LearnMate
+              </span>
+            </button>
+
+            {/* Desktop Workspace Title & Active Document Context */}
+            <div className="hidden lg:flex items-center gap-3 min-w-0">
+              <span className="font-display text-base font-bold text-ink whitespace-nowrap">
+                {activeMeta.title}
+              </span>
+              {activeDoc ? (
+                <>
+                  <span className="text-line-strong">/</span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-canvas border border-line text-xs font-medium text-body truncate max-w-md">
+                    <FileText className="w-3.5 h-3.5 text-brand shrink-0" />
+                    <span className="truncate">{activeDoc.title.replace(/\.pdf$/i, '')}</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-line-strong">·</span>
+                  <span className="text-xs text-muted truncate">{activeMeta.subtitle}</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Right Global Utilities (ONLY the 5 approved controls: Add Material, Voice Tutor, Global Search, Formula Book, Profile) */}
+          <div className="ml-auto flex items-center gap-2.5 lg:gap-3 shrink-0">
+            {/* 1. + Add Material Button */}
             {onOpenAddMaterial && (
               <button
                 type="button"
                 onClick={() => onOpenAddMaterial('pdf')}
                 data-testid="navbar-add-material-btn"
                 aria-label="Add Material"
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
               >
-                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <Plus className="w-4 h-4 shrink-0" />
                 <span>
                   Add<span className="hidden sm:inline"> Material</span>
                 </span>
               </button>
             )}
 
-            {/* Global Search (Ctrl+K) */}
+            {/* 2. AI Voice Tutor Button */}
+            {onOpenVoiceTutor && (
+              <button
+                type="button"
+                onClick={onOpenVoiceTutor}
+                data-testid="navbar-voice-tutor-btn"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                title="Open AI Voice Tutor"
+              >
+                <Mic className="w-4 h-4 text-brand shrink-0" />
+                <span className="hidden sm:inline">Voice Tutor</span>
+              </button>
+            )}
+
+            {/* 3. Global Search (Ctrl+K) */}
             {onOpenSearchModal && (
               <button
                 type="button"
@@ -287,145 +470,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                 data-testid="navbar-search-btn"
                 aria-label="Search (Ctrl+K)"
                 title="Search chapters, notes, PYQs, materials & tools (Ctrl+K)"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer"
               >
-                <Search className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden xl:inline">Search (Ctrl+K)</span>
+                <Search className="w-4 h-4 shrink-0" />
+                <span className="hidden md:inline">Search (Ctrl+K)</span>
               </button>
             )}
 
-            {/* Study Tools & Docked 25:00 Focus Timer */}
+            {/* 4. Unified Formula Book Button */}
             <CompactStudyUtilitiesWidget
               activeDocument={activeDoc}
               externalOpenTab={externalUtilityTab}
               onConsumeExternalOpen={onConsumeExternalUtilityTab}
+              onPlotFormulaInStudyTools={onPlotFormulaInStudyTools}
+              onOpenStudyToolsWorkspace={onOpenStudyToolsWorkspace}
             />
-
-            {/* Pedagogical Language Register Selector (English | Coaching Hinglish | Hindi) */}
-            <select
-              aria-label="Pedagogical Language Register"
-              data-testid="navbar-language-register-select"
-              value={languageRegister}
-              onChange={(e) => {
-                const next = e.target.value as 'English' | 'Hinglish' | 'Hindi';
-                setLanguageRegister(next);
-                try {
-                  localStorage.setItem('learnmate_language_register_v1', next);
-                  window.dispatchEvent(
-                    new CustomEvent('learnmate:language-register-change', {
-                      detail: { languageRegister: next },
-                    })
-                  );
-                } catch {
-                  // ignore
-                }
-              }}
-              title="Toggle AI Tutor & Voice Pedagogical Register (Academic English, Coaching Hinglish, or Pure Hindi)"
-              className="hidden md:inline-block px-2 py-1.5 rounded-xl border border-line bg-white dark:bg-[#121A2E] text-[11px] font-bold text-ink cursor-pointer"
-            >
-              <option value="English">EN · Academic</option>
-              <option value="Hinglish">HI-EN · Hinglish</option>
-              <option value="Hindi">HI · हिन्दी</option>
-            </select>
-
-            {/* Offline PWA Status Pill */}
-            {!isOnline && (
-              <span
-                data-testid="navbar-offline-pwa-badge"
-                className="px-2 py-1 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold"
-                title="Offline PWA Mode Active — 58 NTA Chapters & PYQs cached locally"
-              >
-                Offline Ready
-              </span>
-            )}
-
-            {/* Light / Night Owl Theme Toggle */}
-            {onToggleTheme && (
-              <button
-                type="button"
-                onClick={onToggleTheme}
-                data-testid="navbar-theme-toggle-btn"
-                aria-label={isDark ? 'Switch to Light mode' : 'Switch to Night Owl mode'}
-                title={isDark ? 'Switch to Light mode' : 'Switch to Night Owl mode'}
-                className="w-8 h-8 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
-              >
-                {isDark ? (
-                  <Sun className="w-4 h-4 text-amber-400" />
-                ) : (
-                  <Moon className="w-4 h-4 text-indigo-600" />
-                )}
-              </button>
-            )}
-
-            {/* Notifications */}
-            <div ref={notifRef} className="relative">
-              <button
-                type="button"
-                onClick={() => {
-                  setNotifOpen((prev) => !prev);
-                  if (!notifOpen && unreadCount > 0) onMarkNotificationsRead?.();
-                }}
-                aria-label="Notifications"
-                data-testid="navbar-notifications-btn"
-                className="relative w-8 h-8 rounded-xl hover:bg-soft border border-line bg-white dark:bg-[#121A2E] flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
-              >
-                <Bell className="w-4 h-4" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-danger text-white text-[10px] font-bold flex items-center justify-center">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-
-              {notifOpen && (
-                <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-24px)] bg-white dark:bg-[#121A2E] rounded-2xl shadow-xl border border-line overflow-hidden z-50">
-                  <div className="px-4 py-3 border-b border-line">
-                    <span className="font-display text-sm font-bold text-ink">Notifications</span>
-                  </div>
-                  <div className="max-h-72 overflow-y-auto divide-y divide-line">
-                    {notifications.length > 0 ? (
-                      notifications.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => {
-                            if (item.actionTab) onSelectTab(item.actionTab as ActiveTab);
-                            setNotifOpen(false);
-                          }}
-                          className="w-full px-4 py-3 text-left hover:bg-soft transition-colors flex items-start gap-3 cursor-pointer"
-                        >
-                          <span className="w-8 h-8 rounded-full bg-brand-soft text-brand flex items-center justify-center shrink-0">
-                            <Clock className="w-4 h-4" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block text-sm font-semibold text-ink">{item.title}</span>
-                            <span className="block text-xs text-muted leading-snug mt-0.5">
-                              {item.message}
-                            </span>
-                          </span>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="p-6 text-sm text-muted text-center">You&apos;re all caught up.</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* App Guide / Help (?) Button */}
-            {onOpenAppGuideModal && (
-              <button
-                type="button"
-                onClick={onOpenAppGuideModal}
-                data-testid="navbar-app-guide-btn"
-                aria-label="Open App Guide"
-                title="App Guide & Feature Directory"
-                className="w-8 h-8 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft flex items-center justify-center text-muted hover:text-ink transition-colors cursor-pointer"
-              >
-                <HelpCircle className="w-4 h-4" />
-              </button>
-            )}
 
             {isAuthReady && !user && onLogin && (
               <button
@@ -439,14 +498,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Profile Avatar Menu */}
+            {/* 5. Profile Avatar Menu */}
             <div ref={profileRef} className="relative">
               <button
                 type="button"
                 onClick={() => setProfileOpen((prev) => !prev)}
                 data-testid="navbar-profile-btn"
                 aria-label="Open profile menu"
-                className="flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full bg-white dark:bg-[#121A2E] hover:bg-soft border border-line transition-colors cursor-pointer"
+                className="flex items-center gap-2 pl-1.5 pr-2.5 py-1.5 rounded-full bg-white dark:bg-[#121A2E] hover:bg-soft border border-line transition-colors cursor-pointer"
               >
                 {user?.photoURL ? (
                   <img
@@ -460,7 +519,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {avatarInitial}
                   </span>
                 )}
-                <ChevronDown className="w-3 h-3 text-muted" />
+                <ChevronDown className="w-3.5 h-3.5 text-muted" />
               </button>
 
               {profileOpen && (
@@ -486,36 +545,38 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   )}
 
-                  <div className="px-3 py-2 border-b border-line">
-                    <label className="flex items-center gap-2 bg-soft rounded-xl px-3 py-2">
-                      <Search className="w-4 h-4 text-muted shrink-0" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search your materials…"
-                        className="bg-transparent text-sm text-ink placeholder:text-muted focus:outline-none w-full"
-                      />
-                    </label>
-                    {filteredDocs.length > 0 && (
-                      <div className="mt-2 max-h-36 overflow-y-auto rounded-xl border border-line bg-white dark:bg-[#0B1020] divide-y divide-line">
-                        {filteredDocs.map((doc) => (
-                          <button
-                            key={doc.id}
-                            type="button"
-                            onClick={() => {
-                              onSelectDocumentFromSearch?.(doc);
-                              setProfileOpen(false);
-                              setSearchQuery('');
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs text-ink hover:bg-soft truncate cursor-pointer"
-                          >
-                            {doc.title}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {documents.length > 0 && (
+                    <div className="px-3 py-2 border-b border-line">
+                      <label className="flex items-center gap-2 bg-soft rounded-xl px-3 py-2">
+                        <Search className="w-4 h-4 text-muted shrink-0" />
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search your materials…"
+                          className="bg-transparent text-sm text-ink placeholder:text-muted focus:outline-none w-full"
+                        />
+                      </label>
+                      {filteredDocs.length > 0 && (
+                        <div className="mt-2 max-h-36 overflow-y-auto rounded-xl border border-line bg-white dark:bg-[#0B1020] divide-y divide-line">
+                          {filteredDocs.map((doc) => (
+                            <button
+                              key={doc.id}
+                              type="button"
+                              onClick={() => {
+                                onSelectDocumentFromSearch?.(doc);
+                                setProfileOpen(false);
+                                setSearchQuery('');
+                              }}
+                              className="w-full px-3 py-2 text-left text-xs text-ink hover:bg-soft truncate cursor-pointer"
+                            >
+                              {doc.title}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -525,6 +586,46 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <BarChart3 className="w-4 h-4 text-muted" />
                     Progress
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => go('study-tools')}
+                    data-testid="open-study-tools-menu-btn"
+                    className={menuItemClass}
+                  >
+                    <Calculator className="w-4 h-4 text-brand" />
+                    Study Tools Lab (Desmos Suite)
+                  </button>
+
+                  {onOpenMentorReportModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenMentorReportModal();
+                        setProfileOpen(false);
+                      }}
+                      data-testid="open-mentor-report-menu-btn"
+                      className={menuItemClass}
+                    >
+                      <Calendar className="w-4 h-4 text-brand" />
+                      Weekly Mentor &amp; Parent Report
+                    </button>
+                  )}
+
+                  {onOpenCommercialConsoleModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenCommercialConsoleModal();
+                        setProfileOpen(false);
+                      }}
+                      data-testid="open-commercial-console-menu-btn"
+                      className={menuItemClass}
+                    >
+                      <ShieldCheck className="w-4 h-4 text-brand" />
+                      Plans, Quotas &amp; System Health
+                    </button>
+                  )}
 
                   {onOpenProfileModal && (
                     <button
@@ -660,7 +761,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Mobile bottom tab bar: Home · Study · Practice · Revise · Me */}
       <nav
-        aria-label="Main navigation"
+        aria-label="Mobile navigation"
         className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-t border-line pb-[env(safe-area-inset-bottom)] lm-no-print"
       >
         <div className="grid grid-cols-5">

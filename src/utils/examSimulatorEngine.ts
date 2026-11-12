@@ -47,6 +47,36 @@ export const EXAM_BLUEPRINTS: Record<ExamTypeId, ExamBlueprint> = {
     negativeMarks: 1,
     supportsTimedMode: true
   },
+  bitsat: {
+    id: 'bitsat',
+    shortName: 'BITSAT',
+    fullName: 'BITSAT — BITS Pilani Online Test Pattern',
+    categoryBadge: 'BITS Pilani / Goa / Hyderabad',
+    patternNote: 'High-Speed CBT Pattern • +3 Correct, −1 Negative Marking • Physics, Chemistry, Math & Logical Reasoning',
+    subjects: ['Physics', 'Chemistry', 'Mathematics'],
+    sections: ['Part I — Physics', 'Part II — Chemistry', 'Part IV — Mathematics'],
+    questionTypes: ['Single Choice Speed MCQ'],
+    defaultQuestionCount: 15,
+    defaultDurationMinutes: 20,
+    correctMarks: 3,
+    negativeMarks: 1,
+    supportsTimedMode: true
+  },
+  viteee: {
+    id: 'viteee',
+    shortName: 'VITEEE',
+    fullName: 'VITEEE — VIT Engineering Entrance Exam',
+    categoryBadge: 'VIT Vellore / Chennai',
+    patternNote: 'No Negative Marking Pattern • +1 Correct, 0 Negative Marking • High-Accuracy PCM & Aptitude',
+    subjects: ['Physics', 'Chemistry', 'Mathematics'],
+    sections: ['Mathematics (40 Q)', 'Physics (35 Q)', 'Chemistry (35 Q)'],
+    questionTypes: ['Single Choice Objective (+1, 0)'],
+    defaultQuestionCount: 15,
+    defaultDurationMinutes: 18,
+    correctMarks: 1,
+    negativeMarks: 0,
+    supportsTimedMode: true
+  },
   neet_ug: {
     id: 'neet_ug',
     shortName: 'NEET UG',

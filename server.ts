@@ -26,6 +26,7 @@ import {
 import { createAiTutorRouter } from './src/server/routes/aiTutorRoutes.ts';
 import { createPyqAndCbtRouter } from './src/server/routes/pyqAndCbtRoutes.ts';
 import { createStorageRouter } from './src/server/routes/storageRoutes.ts';
+import { createCommercialAndScaleRouter } from './src/server/routes/commercialAndScaleRoutes.ts';
 import { attachVoiceLiveWebSocketServer } from './src/server/ws/voiceLiveServer.ts';
 import { registerCoreStudyRoutes } from './src/server/coreStudyEngine.ts';
 
@@ -113,11 +114,12 @@ async function startServer() {
     res.json(rateLimiter.getTokenBudgetStatus(uid));
   });
 
-  // Mount Phase 1 Modular Routers
+  // Mount Phase 1 & Commercial Scalability Modular Routers
   app.use('/api/tutor', createAiTutorRouter());
   app.use('/api/pyq', createPyqAndCbtRouter());
   app.use('/api/cbt', createPyqAndCbtRouter());
   app.use('/api/storage', createStorageRouter());
+  app.use('/api', createCommercialAndScaleRouter({ rateLimiter }));
 
   // Mount Core Study, Revision, Practice, YouTube & Vertex Routes
   registerCoreStudyRoutes(app);
