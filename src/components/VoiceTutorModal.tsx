@@ -364,6 +364,7 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
   const transcriptAccumRef = useRef<string>('');
   const silenceTimerRef = useRef<number | null>(null);
   const speechQueueAbortRef = useRef<boolean>(false);
+  const inFlightQueryRef = useRef<boolean>(false);
   const historyEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -431,6 +432,7 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
 
   const teardownAllVoiceResources = useCallback(() => {
     sessionActiveRef.current = false;
+    inFlightQueryRef.current = false;
     speechQueueAbortRef.current = true;
 
     if (silenceTimerRef.current !== null) {
@@ -603,6 +605,8 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
     async (queryText: string) => {
       const cleanQuery = queryText.trim();
       if (!cleanQuery || !isMountedRef.current) return;
+      if (inFlightQueryRef.current) return;
+      inFlightQueryRef.current = true;
 
       if (!sessionActiveRef.current) {
         sessionActiveRef.current = true;
@@ -748,6 +752,8 @@ Student Spoken Words: ${cleanQuery}`;
         setErrorMsg(err?.message || 'Failed to generate teacher explanation. Tap the mic to retry.');
         setStreamingResponse('');
         setLifecycleState('ERROR');
+      } finally {
+        inFlightQueryRef.current = false;
       }
     },
     [doc, weakTopics, speakTeacherExplanation, startListening]
@@ -845,8 +851,22 @@ Student Spoken Words: ${cleanQuery}`;
       }
     }
 
+    const handleVisibilityOrHide = () => {
+      if (document.visibilityState === 'hidden') {
+        teardownAllVoiceResources();
+        setLifecycleState('IDLE');
+      }
+    };
+    const handlePageHide = () => {
+      teardownAllVoiceResources();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityOrHide);
+    window.addEventListener('pagehide', handlePageHide);
+
     return () => {
       isMountedRef.current = false;
+      document.removeEventListener('visibilitychange', handleVisibilityOrHide);
+      window.removeEventListener('pagehide', handlePageHide);
       teardownAllVoiceResources();
     };
   }, [isOpen, teardownAllVoiceResources, handleUserQuery]);
@@ -1132,7 +1152,7 @@ Student Spoken Words: ${cleanQuery}`;
               <div className="bg-white rounded-2xl border border-slate-200 p-6 lg:p-8 shadow-2xs text-center space-y-6">
                 <div className="space-y-1">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    Live Voice Classroom
+                    Speech &amp; AI Stream Classroom
                   </span>
                   <h3 className="text-lg font-bold text-slate-900">{currentStatus.label}</h3>
                   <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">

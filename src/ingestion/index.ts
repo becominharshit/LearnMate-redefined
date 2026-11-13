@@ -104,6 +104,22 @@ export function unifiedToPyqCorpusQuestion(
       ? 'Hard'
       : 'Medium';
 
+  const isOfficialVerified =
+    Boolean(record.metadata.provenanceVerified) &&
+    (record.solution.type === 'OFFICIAL' || record.solution.type === 'VERIFIED');
+
+  const sourceCategory: PyqCorpusQuestion['sourceCategory'] = isOfficialVerified
+    ? 'OFFICIAL_VERIFIED'
+    : 'OFFICIAL_RECONSTRUCTED_PENDING_REVIEW';
+
+  const collectionKind: PyqCorpusQuestion['collectionKind'] = isOfficialVerified
+    ? 'official_pyq'
+    : 'reconstructed_pyq';
+
+  const solutionOrigin: PyqCorpusQuestion['solutionOrigin'] = isOfficialVerified
+    ? 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)'
+    : 'LearnMate Reconstructed Editorial Solution (Pending Official Archive Audit)';
+
   return {
     id: record.id,
     canonicalHash: record.metadata.canonicalHash || `qhash-${record.id}`,
@@ -125,6 +141,20 @@ export function unifiedToPyqCorpusQuestion(
     questionType,
     questionNumber,
     officialQuestionId: record.metadata.externalId || record.id.toUpperCase(),
+    sourceCategory,
+    collectionKind,
+    verificationMetadata: {
+      provenanceVerified: isOfficialVerified,
+      verificationConfidence: isOfficialVerified ? 0.95 : 0.6,
+      reviewerStatus: isOfficialVerified ? 'verified_official' : 'pending_review',
+      officialExamId: record.exam,
+      officialYear: record.year,
+      officialSession: record.session,
+      officialShift: `Shift ${record.shift}`,
+      solutionSource: record.metadata.source || 'External PYQ Ingestion',
+      licenseStatus: isOfficialVerified ? 'PUBLIC_EXAM_RECORD' : 'UNVERIFIED',
+      isFakeShiftAssignment: false,
+    },
     prompt: record.question.text,
     stem: record.question.text,
     options: record.options.map((o) => o.text),
@@ -136,8 +166,7 @@ export function unifiedToPyqCorpusQuestion(
     markingRule: rule,
     markingRuleId: rule.id,
     answerKeyVersion: record.metadata.answerKeyVersion || 'final-key-v1.0',
-    solutionOrigin:
-      'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    solutionOrigin,
     detailedSolution:
       record.solution.text || 'Solution pending expert verification.',
     solutionExplanation:

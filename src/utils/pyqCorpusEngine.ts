@@ -20,6 +20,7 @@ import type { ExamTrackId } from '../data/jeeSyllabusAndNotes';
 import { DEFAULT_JEE_75_QUESTION_PAPER } from './jeeQuestionBank';
 import type { JeeQuestion } from '../types/jeeExam';
 import { normalizePdfText, triggerPdfDownload } from './pdfGenerator';
+import { getExamRuleVersion, normalizeNumericalResponse } from './examRegistry';
 
 export type PyqQuestionFormat =
   | 'single_mcq'
@@ -30,6 +31,37 @@ export type PyqQuestionFormat =
   | 'matrix_match';
 
 export type AnswerKeySpecialStatus = 'normal' | 'dropped_bonus' | 'multiple_keys_accepted';
+
+export type QuestionSourceCategory =
+  | 'OFFICIAL_VERIFIED'
+  | 'OFFICIAL_RECONSTRUCTED_PENDING_REVIEW'
+  | 'ORIGINAL_EDITORIAL'
+  | 'AI_GENERATED_REVIEWED'
+  | 'AI_GENERATED_UNVERIFIED'
+  | 'SOURCE_RESTRICTED'
+  | 'REJECTED';
+
+export type CorpusCollectionKind =
+  | 'official_pyq'
+  | 'reconstructed_pyq'
+  | 'original_practice'
+  | 'ai_practice'
+  | 'mixed_simulation';
+
+export interface QuestionVerificationMetadata {
+  provenanceVerified: boolean;
+  verificationConfidence: number; // 0.0 to 1.0
+  reviewerStatus: 'verified_official' | 'editorial_reviewed' | 'pending_review' | 'ai_unverified' | 'rejected';
+  officialExamId?: string;
+  officialYear?: number;
+  officialSession?: string;
+  officialShift?: string;
+  solutionSource: string;
+  licenseStatus: 'PUBLIC_EXAM_RECORD' | 'ORIGINAL_EDITORIAL_MIT' | 'OPEN_DATASET_CC_BY_4' | 'UNVERIFIED';
+  rightsStatus?: 'PUBLIC_EXAM_RECORD' | 'ORIGINAL_EDITORIAL_MIT' | 'OPEN_LICENSE_CC_BY_4' | 'PENDING_RIGHTS_REVIEW' | 'RESTRICTED';
+  sourceVerificationUrl?: string;
+  isFakeShiftAssignment: boolean;
+}
 
 export interface PyqMarkingRule {
   id: string;
@@ -53,6 +85,7 @@ export interface MatrixMatchColItem {
 
 export interface PyqCorpusQuestion {
   id: string;
+  legacyIds?: string[];
   canonicalHash: string;
   paperId: string;
   exam: ExamTrackId;
@@ -77,6 +110,9 @@ export interface PyqCorpusQuestion {
     | 'matrix_match';
   questionNumber: number;
   officialQuestionId: string;
+  sourceCategory: QuestionSourceCategory;
+  collectionKind: CorpusCollectionKind;
+  verificationMetadata: QuestionVerificationMetadata;
   prompt: string;
   stem: string;
   options?: string[];
@@ -100,7 +136,11 @@ export interface PyqCorpusQuestion {
   markingRule: PyqMarkingRule;
   markingRuleId: string;
   answerKeyVersion: string;
-  solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)';
+  solutionOrigin:
+    | 'LearnMate Original Editorial Solution'
+    | 'LearnMate Reconstructed Editorial Solution (Pending Official Archive Audit)'
+    | 'Official Final Answer Key + LearnMate Editorial Solution'
+    | 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)';
   detailedSolution: string;
   solutionExplanation: string;
   keyFormula: string;
@@ -120,11 +160,16 @@ export interface OfficialPyqPaperMetadata {
   exam: ExamTrackId;
   title: string;
   year: number;
-  session: 'January' | 'April' | 'May' | 'July' | 'June' | 'Paper 1' | 'Paper 2';
+  session: 'January' | 'April' | 'May' | 'July' | 'June' | 'Paper 1' | 'Paper 2' | 'Editorial Mock';
   examDate: string;
-  shift: 'Shift 1 (Morning)' | 'Shift 2 (Evening)' | 'Paper 1 (Morning)' | 'Paper 2 (Afternoon)';
+  shift: 'Shift 1 (Morning)' | 'Shift 2 (Evening)' | 'Paper 1 (Morning)' | 'Paper 2 (Afternoon)' | 'Original Editorial Mock';
   paperNumber: 1 | 2;
   language: 'English';
+  collectionKind: CorpusCollectionKind;
+  isOfficialPastPaper: boolean;
+  isCompleteOfficialPaper: boolean;
+  ruleVersionId: string;
+  expectedOfficialQuestions: number;
   officialConductingBody: string;
   officialSourceUrl: string;
   accessMethod: 'Generated Paper & Solutions PDF + Interactive CBT Simulation';
@@ -137,7 +182,7 @@ export interface OfficialPyqPaperMetadata {
   markingSummary: string;
   syllabusVersionId: string;
   syllabusVersion: string;
-  publicationStatus: 'published' | 'review' | 'draft';
+  publicationStatus: 'published' | 'incomplete_pending_official_import' | 'review' | 'draft';
   questionIds: string[];
 }
 
@@ -348,24 +393,29 @@ type RawAdvQuestion = Omit<
   | 'solutionExplanation'
   | 'commonTrap'
   | 'difficulty'
+  | 'sourceCategory'
+  | 'collectionKind'
+  | 'verificationMetadata'
 >;
 
 /**
- * Authoritative JEE Advanced PYQ Questions (Multiple-Correct, Single-Choice & Non-Negative Integer)
+ * LearnMate Original Editorial JEE Advanced Practice Problems (Multiple-Correct, Single-Choice & Non-Negative Integer).
+ * Honestly classified as ORIGINAL_EDITORIAL — NOT claimed as official IIT archive releases until verified against JAB PDFs.
  */
 const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
   {
-    id: 'adv-2024-p1-phy-1',
+    id: 'orig-adv-phy-1',
+    legacyIds: ['adv-2024-p1-phy-1', 'JEEADV-2024-P1-PHY-Q1'],
     canonicalHash: buildCanonicalQuestionHash(
       'Physics',
       'A thin uniform ring and a solid sphere of identical mass M and radius R start from rest at the top of a rough incline'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
     paperNumber: 1,
     subject: 'Physics',
     section: 'Section 1',
@@ -374,7 +424,7 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     topicName: 'Pure Rolling on Inclined Plane',
     format: 'multiple_mcq',
     questionNumber: 1,
-    officialQuestionId: 'JEEADV-2024-P1-PHY-Q1',
+    officialQuestionId: 'LM-EDITORIAL-ADV-PHY-Q1',
     prompt:
       'A uniform solid sphere and a thin uniform ring, both of mass M and radius R, are released from rest from the same height h on a rough inclined plane of inclination θ. Assume both bodies roll without slipping. Which of the following statements is/are CORRECT?',
     options: [
@@ -386,27 +436,28 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     correctOptionIndices: [0, 1, 3],
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_multi,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       '1. Acceleration a_cm = g sin θ / (1 + k²/R²). Since (k²/R²)_sphere = 2/5 < (k²/R²)_ring = 1, a_sphere = (5/7)g sin θ > a_ring = (1/2)g sin θ, so the sphere reaches the bottom in less time (Option A is correct).\n2. Since static friction does zero work in pure rolling, total mechanical energy is conserved for both: K_total = Mgh for both (Option B is correct).\n3. v_cm = √[2gh/(1 + k²/R²)], which is larger for the sphere than the ring (Option C is incorrect).\n4. Static friction f_s = Mg sin θ / (1 + R²/k²): for ring f_s = ½ Mg sin θ, for sphere f_s = (2/7) Mg sin θ, so f_ring > f_sphere (Option D is correct).',
     keyFormula: 'a_cm = g sin θ / (1 + k²/R²),  f_s = Mg sin θ / (1 + R²/k²)',
     commonMistakeTrap: 'Confusing total kinetic energy K_total = Mgh with translational kinetic energy ½Mv_cm².',
-    sourceProvenance: 'JEE Advanced 2024 Paper 1 · Section 1 (One or More Than One Correct)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified against IIT Madras Final Answer Key' }],
+    sourceProvenance: 'LearnMate Original Editorial Archive (JEE Advanced Pattern · Section 1 Multi-Correct)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Editorial review complete; classified honestly as ORIGINAL_EDITORIAL' }],
   },
   {
-    id: 'adv-2024-p1-phy-2',
+    id: 'orig-adv-phy-2',
+    legacyIds: ['adv-2024-p1-phy-2', 'JEEADV-2024-P1-PHY-Q2'],
     canonicalHash: buildCanonicalQuestionHash(
       'Physics',
       'In a Young double slit experiment using monochromatic light of wavelength 600 nm, a thin mica sheet'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
     paperNumber: 1,
     subject: 'Physics',
     section: 'Section 3',
@@ -415,34 +466,35 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     topicName: 'Optical Path Shift in YDSE',
     format: 'numerical_integer',
     questionNumber: 2,
-    officialQuestionId: 'JEEADV-2024-P1-PHY-Q2',
+    officialQuestionId: 'LM-EDITORIAL-ADV-PHY-Q2',
     prompt:
       'In a Young’s double-slit experiment using monochromatic light of wavelength λ = 600 nm, a transparent sheet of refractive index μ = 1.5 and thickness t = 6 μm is placed in front of one of the slits. Find the number of fringe widths by which the central bright fringe shifts.',
     numericalAnswer: 5,
     numericalTolerance: 0,
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_integer,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       'Number of fringes shifted N = Δx_optical / λ = (μ − 1)t / λ.\nSubstituting μ = 1.5, t = 6 × 10⁻⁶ m, and λ = 600 × 10⁻⁹ m = 0.6 × 10⁻⁶ m:\nN = (1.5 − 1) × 6 μm / (0.6 μm) = 3.0 / 0.6 = 5.',
     keyFormula: 'N_fringes = (μ − 1)t / λ',
     commonMistakeTrap: 'Mismatching micrometer (10⁻⁶ m) and nanometer (10⁻⁹ m) units.',
-    sourceProvenance: 'JEE Advanced 2024 Paper 1 · Section 3 (Non-Negative Integer)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified against Final Answer Key' }],
+    sourceProvenance: 'LearnMate Original Editorial Archive (JEE Advanced Pattern · Section 3 Integer)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Editorial review complete' }],
   },
   {
-    id: 'adv-2024-p1-chem-1',
+    id: 'orig-adv-chem-1',
+    legacyIds: ['adv-2024-p1-chem-1', 'JEEADV-2024-P1-CHE-Q3'],
     canonicalHash: buildCanonicalQuestionHash(
       'Chemistry',
       'Among the following coordination entities, which species is/are diamagnetic and exhibit square planar geometry'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
     paperNumber: 1,
     subject: 'Chemistry',
     section: 'Section 1',
@@ -451,7 +503,7 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     topicName: 'Hybridization, Geometry & Magnetism of d8 Complexes',
     format: 'multiple_mcq',
     questionNumber: 3,
-    officialQuestionId: 'JEEADV-2024-P1-CHE-Q3',
+    officialQuestionId: 'LM-EDITORIAL-ADV-CHE-Q3',
     prompt:
       'Which of the following statements regarding coordination complexes of Nickel and Platinum is/are CORRECT? (Atomic numbers: Ni = 28, Pt = 78)',
     options: [
@@ -463,27 +515,28 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     correctOptionIndices: [0, 1, 3],
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_multi,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       '• [Ni(CN)₄]²⁻ has Ni²⁺ (3d⁸) with strong-field CN⁻, giving dsp² square planar diamagnetic complex (Option A correct).\n• [Ni(CO)₄] has Ni(0) (3d⁸ 4s² → 3d¹⁰ in presence of CO), giving sp³ tetrahedral diamagnetic complex (Option B correct).\n• [PtCl₄]²⁻ has 5d⁸ Pt²⁺; 4d and 5d metals have large Δ_o/Δ_sp and form low-spin dsp² square planar diamagnetic complexes even with halide ligands (Option C incorrect).\n• [NiCl₄]²⁻ has 3d⁸ Ni²⁺ with weak-field Cl⁻, giving sp³ tetrahedral paramagnetic complex with 2 unpaired electrons (Option D correct).',
     keyFormula: 'μ_spin = √[n(n + 2)] BM; 4d/5d d⁸ complexes are always square planar dsp²',
     commonMistakeTrap: 'Treating Cl⁻ on 5d⁸ Pt²⁺ as weak-field tetrahedral like 3d⁸ Ni²⁺.',
-    sourceProvenance: 'JEE Advanced 2024 Paper 1 · Section 1 (One or More Than One Correct)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified against Final Answer Key' }],
+    sourceProvenance: 'LearnMate Original Editorial Archive (JEE Advanced Pattern · Section 1 Multi-Correct)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Editorial review complete' }],
   },
   {
-    id: 'adv-2024-p1-chem-2',
+    id: 'orig-adv-chem-2',
+    legacyIds: ['adv-2024-p1-chem-2', 'JEEADV-2024-P1-CHE-Q4'],
     canonicalHash: buildCanonicalQuestionHash(
       'Chemistry',
       'For an ideal gas undergoing reversible isothermal expansion at 300 K from 2 L to 20 L'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
     paperNumber: 1,
     subject: 'Chemistry',
     section: 'Section 2',
@@ -492,34 +545,35 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     topicName: 'Entropy & Gibbs Energy in Isothermal Expansion',
     format: 'single_mcq',
     questionNumber: 4,
-    officialQuestionId: 'JEEADV-2024-P1-CHE-Q4',
+    officialQuestionId: 'LM-EDITORIAL-ADV-CHE-Q4',
     prompt:
       'Two moles of an ideal gas undergo a reversible isothermal expansion at 300 K from an initial volume of 2 L to a final volume of 20 L. Given R = 8.314 J·mol⁻¹·K⁻¹ and ln 10 = 2.303, what is ΔG for this process?',
     options: ['−11.49 kJ', '+11.49 kJ', '0 kJ', '−5.74 kJ'],
     correctOptionIndices: [0],
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_single,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       'For an isothermal process of an ideal gas, ΔH = 0 and ΔS_sys = nR ln(V₂/V₁).\nTherefore ΔG = ΔH − TΔS = −nRT ln(V₂/V₁) = −2.303 × 2 × 8.314 × 300 × log₁₀(20/2) = −11,488 J ≈ −11.49 kJ.',
     keyFormula: 'ΔG_isothermal = −nRT ln(V₂/V₁) = nRT ln(P₂/P₁)',
     commonMistakeTrap: 'Confusing ΔG = 0 (at phase/chemical equilibrium at constant T and P) with ΔG for an isothermal pressure/volume change where P is not constant.',
-    sourceProvenance: 'JEE Advanced 2024 Paper 1 · Section 2 (Single Correct MCQ)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified against Final Answer Key' }],
+    sourceProvenance: 'LearnMate Original Editorial Archive (JEE Advanced Pattern · Section 2 Single MCQ)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Editorial review complete' }],
   },
   {
-    id: 'adv-2024-p1-math-1',
+    id: 'orig-adv-math-1',
+    legacyIds: ['adv-2024-p1-math-1', 'JEEADV-2024-P1-MAT-Q5'],
     canonicalHash: buildCanonicalQuestionHash(
       'Mathematics',
-      'Let f(x) be a twice differentiable function on R such that f(0)=0, f(x)=x^2 sin(1/x) and definite integral properties'
+      'Let A be a 3 x 3 non-singular matrix with det(A) = 2 and B = adj(adj A)'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
     paperNumber: 1,
     subject: 'Mathematics',
     section: 'Section 1',
@@ -528,7 +582,7 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     topicName: 'Adjoint, Transpose & Orthogonal Matrix Properties',
     format: 'multiple_mcq',
     questionNumber: 5,
-    officialQuestionId: 'JEEADV-2024-P1-MAT-Q5',
+    officialQuestionId: 'LM-EDITORIAL-ADV-MAT-Q5',
     prompt:
       'Let A be a 3 × 3 non-singular matrix with det(A) = 2. Let B = adj(adj A). Which of the following statements is/are CORRECT?',
     options: [
@@ -540,27 +594,28 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     correctOptionIndices: [0, 1, 2, 3],
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_multi,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       'For an n × n matrix A with n = 3:\n1. adj(adj A) = |A|^(n−2) A = |A|¹ A = 2A. Hence B = 2A (Option B is correct).\n2. det(B) = |A|^((n−1)²) = 2⁴ = 16 (Option A is correct).\n3. det(3 B⁻¹) = 3³ · det(B⁻¹) = 27 / det(B) = 27 / 16 (Option C is correct).\n4. Since B = 2A, B⁻¹ = ½ A⁻¹, so A B⁻¹ = ½ I₃, whose trace is ½ × 3 = 3/2 (Option D is correct).',
     keyFormula: 'adj(adj A) = |A|^(n−2) A,   |adj(adj A)| = |A|^((n−1)²)',
     commonMistakeTrap: 'Writing det(3 B⁻¹) = 3 / det(B) instead of 3³ / det(B).',
-    sourceProvenance: 'JEE Advanced 2024 Paper 1 · Section 1 (One or More Than One Correct)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified against Final Answer Key' }],
+    sourceProvenance: 'LearnMate Original Editorial Archive (JEE Advanced Pattern · Section 1 Multi-Correct)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Editorial review complete' }],
   },
   {
-    id: 'adv-2024-p1-math-2',
+    id: 'orig-adv-math-2',
+    legacyIds: ['adv-2024-p1-math-2', 'JEEADV-2024-P1-MAT-Q6'],
     canonicalHash: buildCanonicalQuestionHash(
       'Mathematics',
-      'Evaluate the definite integral from 0 to pi of x sin^3(x) / (1 + cos^2(x)) dx'
+      'Definite integral from 0 to pi/2 of sqrt(sin x) / (sqrt(sin x) + sqrt(cos x)) dx'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
     paperNumber: 1,
     subject: 'Mathematics',
     section: 'Section 3',
@@ -569,109 +624,125 @@ const JEE_ADVANCED_QUESTIONS_RAW: RawAdvQuestion[] = [
     topicName: 'Definite Integral via King’s Property',
     format: 'numerical_integer',
     questionNumber: 6,
-    officialQuestionId: 'JEEADV-2024-P1-MAT-Q6',
+    officialQuestionId: 'LM-EDITORIAL-ADV-MAT-Q6',
     prompt:
       'If I = ∫_0^(π/2) [ √(sin x) / (√(sin x) + √(cos x)) ] dx = π / k, find the positive integer k.',
     numericalAnswer: 4,
     numericalTolerance: 0,
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_integer,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       'Applying King’s property ∫_0^a f(x) dx = ∫_0^a f(a − x) dx with a = π/2 swaps sin x and cos x:\nI = ∫_0^(π/2) √(cos x) / [√(sin x) + √(cos x)] dx.\nAdding the two expressions gives 2I = ∫_0^(π/2) 1 dx = π/2 ⇒ I = π/4. Comparing with π/k gives k = 4.',
     keyFormula: '∫_0^(π/2) f(sin x) / [f(sin x) + f(cos x)] dx = π / 4',
     commonMistakeTrap: 'Forgetting to divide π/2 by 2 after adding 2I.',
-    sourceProvenance: 'JEE Advanced 2024 Paper 1 · Section 3 (Non-Negative Integer)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified against Final Answer Key' }],
+    sourceProvenance: 'LearnMate Original Editorial Archive (JEE Advanced Pattern · Section 3 Integer)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Editorial review complete' }],
   },
 ];
 
 /**
- * Converts existing JEE Main verified questions + extended archive into unified PyqCorpusQuestions
+ * Builds the honest JEE Main & JEE Advanced question and paper library:
+ * - LearnMate Original 75-Q Editorial Mock (2027 Pattern): classified strictly as ORIGINAL_EDITORIAL
+ * - 6 Historical NTA Shift Paper skeletons (2021–2025): metadata catalog only (`incomplete_pending_official_import`)
+ *   with ZERO mock questions falsely stamped into historical shift records
+ * - LearnMate Original Editorial JEE Advanced Problem Pack: classified strictly as ORIGINAL_EDITORIAL
+ * Preserves legacy IDs via `legacyIds` + `resolveCorpusQuestionById()` so saved user attempts remain linked.
  */
 function buildCompletePyqCorpus(): {
   papers: OfficialPyqPaperMetadata[];
   questions: PyqCorpusQuestion[];
 } {
-  const mainShiftConfigs: Array<{
+  const historicalShiftSkeletons: Array<{
     paperId: string;
     title: string;
     year: number;
     session: 'January' | 'April' | 'June' | 'July';
     examDate: string;
     shift: 'Shift 1 (Morning)' | 'Shift 2 (Evening)';
+    ruleVersionId: string;
   }> = [
     {
       paperId: 'paper-jee-main-2025-jan-s1',
-      title: 'JEE (Main) 2025 · January Session · 22 Jan Shift 1',
+      title: 'JEE (Main) 2025 · January Session · 22 Jan Shift 1 (Catalog Entry — Pending Official Import)',
       year: 2025,
       session: 'January',
       examDate: '2025-01-22',
       shift: 'Shift 1 (Morning)',
+      ruleVersionId: 'jee-main-2025-2026-v1',
     },
     {
       paperId: 'paper-jee-main-2025-apr-s2',
-      title: 'JEE (Main) 2025 · April Session · 04 Apr Shift 2',
+      title: 'JEE (Main) 2025 · April Session · 04 Apr Shift 2 (Catalog Entry — Pending Official Import)',
       year: 2025,
       session: 'April',
       examDate: '2025-04-04',
       shift: 'Shift 2 (Evening)',
+      ruleVersionId: 'jee-main-2025-2026-v1',
     },
     {
       paperId: 'paper-jee-main-2024-jan-s1',
-      title: 'JEE (Main) 2024 · January Session · 27 Jan Shift 1',
+      title: 'JEE (Main) 2024 · January Session · 27 Jan Shift 1 (Catalog Entry — Pending Official Import)',
       year: 2024,
       session: 'January',
       examDate: '2024-01-27',
       shift: 'Shift 1 (Morning)',
+      ruleVersionId: 'jee-main-2022-2024-v1',
     },
     {
       paperId: 'paper-jee-main-2023-apr-s1',
-      title: 'JEE (Main) 2023 · April Session · 10 Apr Shift 1',
+      title: 'JEE (Main) 2023 · April Session · 10 Apr Shift 1 (Catalog Entry — Pending Official Import)',
       year: 2023,
       session: 'April',
       examDate: '2023-04-10',
       shift: 'Shift 1 (Morning)',
+      ruleVersionId: 'jee-main-2022-2024-v1',
     },
     {
       paperId: 'paper-jee-main-2022-jun-s1',
-      title: 'JEE (Main) 2022 · June Session · 25 Jun Shift 1',
+      title: 'JEE (Main) 2022 · June Session · 25 Jun Shift 1 (Catalog Entry — Pending Official Import)',
       year: 2022,
       session: 'June',
       examDate: '2022-06-25',
       shift: 'Shift 1 (Morning)',
+      ruleVersionId: 'jee-main-2022-2024-v1',
     },
     {
       paperId: 'paper-jee-main-2021-jul-s2',
-      title: 'JEE (Main) 2021 · July Session · 20 Jul Shift 2',
+      title: 'JEE (Main) 2021 · July Session · 20 Jul Shift 2 (Catalog Entry — Pending Official Import)',
       year: 2021,
       session: 'July',
       examDate: '2021-07-20',
       shift: 'Shift 2 (Evening)',
+      ruleVersionId: 'jee-main-2021-v1',
     },
   ];
 
+  const EDITORIAL_MAIN_PAPER_ID = 'paper-jee-main-2027-editorial-mock-1';
+
   const mainQuestions: PyqCorpusQuestion[] = DEFAULT_JEE_75_QUESTION_PAPER.map(
     (q: JeeQuestion, idx: number) => {
-      const shiftCfg = mainShiftConfigs[idx % mainShiftConfigs.length];
       const chapterId = mapChapterToSyllabusId(q.subject, q.topic);
       const isNumerical = q.type === 'numerical';
+      const isIntegerAnswer =
+        isNumerical && typeof q.correctNumericValue === 'number' && Number.isInteger(q.correctNumericValue);
       const rule = isNumerical ? MARKING_RULES.jee_main_numerical : MARKING_RULES.jee_main_mcq;
-      const shiftLabel = `JEE Main ${shiftCfg.year} · ${shiftCfg.session} · ${shiftCfg.shift}`;
+      const shiftLabel = 'LearnMate Original Editorial · JEE Main 2027 Pattern';
       const trap = `Review ${q.topic} sign conventions and units carefully.`;
       const diffCap: 'Easy' | 'Medium' | 'Hard' =
         q.difficulty === 'easy' ? 'Easy' : q.difficulty === 'hard' ? 'Hard' : 'Medium';
 
       return {
-        id: `pyq-main-${q.id}`,
+        id: `orig-main-${q.id}`,
+        legacyIds: [`pyq-main-${q.id}`, q.id],
         canonicalHash: buildCanonicalQuestionHash(q.subject, q.question),
-        paperId: shiftCfg.paperId,
+        paperId: EDITORIAL_MAIN_PAPER_ID,
         exam: 'jee_main',
-        year: shiftCfg.year,
-        session: shiftCfg.session,
-        examDate: shiftCfg.examDate,
-        shift: shiftCfg.shift,
+        year: 2027,
+        session: 'Editorial Mock',
+        examDate: '2027-01-20',
+        shift: 'Original Editorial Mock',
         shiftLabel,
         paperNumber: 1,
         subject: q.subject,
@@ -680,10 +751,22 @@ function buildCompletePyqCorpus(): {
         chapterName: q.topic,
         chapterTitle: q.topic,
         topicName: q.topic,
-        format: isNumerical ? 'numerical_decimal' : 'single_mcq',
+        format: isNumerical ? (isIntegerAnswer ? 'numerical_integer' : 'numerical_decimal') : 'single_mcq',
         questionType: isNumerical ? 'numerical' : 'mcq_single',
         questionNumber: idx + 1,
-        officialQuestionId: `NTA-JEEM-${shiftCfg.year}-${q.id.toUpperCase()}`,
+        officialQuestionId: `LM-EDITORIAL-JEEM27-${q.id.toUpperCase()}`,
+        sourceCategory: 'ORIGINAL_EDITORIAL',
+        collectionKind: 'original_practice',
+        verificationMetadata: {
+          provenanceVerified: false,
+          verificationConfidence: 0.9,
+          reviewerStatus: 'editorial_reviewed',
+          solutionSource: 'LearnMate Editorial Physics/Chemistry/Mathematics Team',
+          licenseStatus: 'ORIGINAL_EDITORIAL_MIT',
+          rightsStatus: 'ORIGINAL_EDITORIAL_MIT',
+          sourceVerificationUrl: 'https://jeemain.nta.nic.in/',
+          isFakeShiftAssignment: false,
+        },
         prompt: q.question,
         stem: q.question,
         options: q.options,
@@ -695,21 +778,20 @@ function buildCompletePyqCorpus(): {
         keyStatus: 'normal',
         markingRule: rule,
         markingRuleId: rule.id,
-        answerKeyVersion: `nta-final-key-${shiftCfg.year}-v1`,
-        solutionOrigin:
-          'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+        answerKeyVersion: 'learnmate-editorial-2027-v1',
+        solutionOrigin: 'LearnMate Original Editorial Solution',
         detailedSolution: q.explanation,
         solutionExplanation: q.explanation,
         keyFormula: q.topic,
         commonMistakeTrap: trap,
         commonTrap: trap,
         difficulty: diffCap,
-        sourceProvenance: `${shiftLabel} · Verified against NTA Final Answer Key`,
+        sourceProvenance: 'LearnMate Original Editorial Question (Aligned to JEE Main 2027 75-Q NTA Pattern)',
         versionHistory: [
           {
             version: '1.0',
-            date: shiftCfg.examDate,
-            note: 'Published & verified against final answer key',
+            date: '2026-11-12',
+            note: 'Classified honestly as ORIGINAL_EDITORIAL (removed synthetic historical NTA shift mapping)',
           },
         ],
       };
@@ -723,7 +805,7 @@ function buildCompletePyqCorpus(): {
         : raw.format === 'single_mcq'
         ? 'mcq_single'
         : 'numerical';
-    const shiftLabel = `JEE Advanced ${raw.year} · ${raw.session}`;
+    const shiftLabel = 'LearnMate Original Editorial · JEE Advanced Pattern';
     return {
       ...raw,
       shiftLabel,
@@ -735,68 +817,123 @@ function buildCompletePyqCorpus(): {
       solutionExplanation: raw.detailedSolution,
       commonTrap: raw.commonMistakeTrap,
       difficulty: 'Hard',
+      sourceCategory: 'ORIGINAL_EDITORIAL',
+      collectionKind: 'original_practice',
+      verificationMetadata: {
+        provenanceVerified: false,
+        verificationConfidence: 0.85,
+        reviewerStatus: 'editorial_reviewed',
+        solutionSource: 'LearnMate Editorial JEE Advanced Team',
+        licenseStatus: 'ORIGINAL_EDITORIAL_MIT',
+        rightsStatus: 'ORIGINAL_EDITORIAL_MIT',
+        sourceVerificationUrl: 'https://jeeadv.ac.in/',
+        isFakeShiftAssignment: false,
+      },
     };
   });
 
   const allQuestions = [...mainQuestions, ...enrichedAdvQuestions];
 
   const papers: OfficialPyqPaperMetadata[] = [
-    ...mainShiftConfigs.map((cfg) => {
-      const paperQs = allQuestions.filter((q) => q.paperId === cfg.paperId);
-      return {
-        id: cfg.paperId,
-        exam: 'jee_main' as ExamTrackId,
-        title: cfg.title,
-        year: cfg.year,
-        session: cfg.session,
-        examDate: cfg.examDate,
-        shift: cfg.shift,
-        paperNumber: 1 as const,
-        language: 'English' as const,
-        officialConductingBody: 'National Testing Agency (NTA)',
-        officialSourceUrl: 'https://jeemain.nta.nic.in/',
-        accessMethod: 'Generated Paper & Solutions PDF + Interactive CBT Simulation' as const,
-        paperVersion: `v${cfg.year}.1`,
-        answerKeyVersion: `nta-final-key-${cfg.year}-v1`,
-        durationMinutes: 180,
-        totalMarks: paperQs.length * 4,
-        totalQuestions: paperQs.length,
-        instructions: [
-          'Total duration of this JEE (Main) paper is 180 minutes (3 hours).',
-          'Section A consists of Multiple-Choice Questions (MCQs) with 4 options, of which only 1 option is correct (+4 for correct, −1 for wrong, 0 for unattempted).',
-          'Section B consists of Numerical Value questions (+4 for correct, −1 for wrong, 0 for unattempted).',
-          'The Question Palette on the right displays the status of each question using color and shape indicators.',
-        ],
-        markingSummary: '+4 Correct · −1 Incorrect · 0 Unattempted',
-        syllabusVersionId: 'nta-jee-main-syllabus-v2025-2026',
-        syllabusVersion: 'NTA JEE Main v2025.1',
-        publicationStatus: 'published' as const,
-        questionIds: paperQs.map((q) => q.id),
-      };
-    }),
     {
-      id: 'paper-jee-adv-2024-p1',
-      exam: 'jee_advanced',
-      title: 'JEE (Advanced) 2024 · Paper 1 (Official Pattern Archive)',
-      year: 2024,
-      session: 'Paper 1',
-      examDate: '2024-05-26',
-      shift: 'Paper 1 (Morning)',
+      id: EDITORIAL_MAIN_PAPER_ID,
+      exam: 'jee_main',
+      title: 'JEE (Main) 2027 · LearnMate Original 75-Q Editorial Mock #1',
+      year: 2027,
+      session: 'Editorial Mock',
+      examDate: '2027-01-20',
+      shift: 'Original Editorial Mock',
       paperNumber: 1,
       language: 'English',
-      officialConductingBody: 'IIT Madras · Joint Admission Board (JAB)',
+      collectionKind: 'original_practice',
+      isOfficialPastPaper: false,
+      isCompleteOfficialPaper: false,
+      ruleVersionId: 'jee-main-2027-p1-v1',
+      expectedOfficialQuestions: 75,
+      officialConductingBody: 'LearnMate Editorial Practice (NTA JEE Main 2027 Blueprint)',
+      officialSourceUrl: 'https://jeemain.nta.nic.in/',
+      accessMethod: 'Generated Paper & Solutions PDF + Interactive CBT Simulation',
+      paperVersion: 'v2027.1-editorial',
+      answerKeyVersion: 'learnmate-editorial-2027-v1',
+      durationMinutes: 180,
+      totalMarks: mainQuestions.length * 4,
+      totalQuestions: mainQuestions.length,
+      instructions: [
+        'Pattern: Official JEE (Main) 2027 Paper 1 blueprint — 75 compulsory questions (25 Physics + 25 Chemistry + 25 Mathematics), 180 minutes, 300 marks.',
+        'Section A: 20 single-choice MCQs per subject (+4 correct, −1 incorrect, 0 unattempted).',
+        'Section B: 5 compulsory numerical value questions per subject (+4 correct, −1 incorrect, 0 unattempted).',
+        'Provenance Notice: These are LearnMate Original Editorial practice questions calibrated to the JEE Main 2027 syllabus — not claimed to be historical NTA shift papers.',
+      ],
+      markingSummary: '+4 Correct · −1 Incorrect (Sec A & B) · 0 Unattempted',
+      syllabusVersionId: 'nta-jee-main-syllabus-v2025-2026',
+      syllabusVersion: 'NTA JEE Main v2025.1',
+      publicationStatus: 'published',
+      questionIds: mainQuestions.map((q) => q.id),
+    },
+    ...historicalShiftSkeletons.map((cfg) => ({
+      id: cfg.paperId,
+      exam: 'jee_main' as ExamTrackId,
+      title: cfg.title,
+      year: cfg.year,
+      session: cfg.session,
+      examDate: cfg.examDate,
+      shift: cfg.shift,
+      paperNumber: 1 as const,
+      language: 'English' as const,
+      collectionKind: 'official_pyq' as const,
+      isOfficialPastPaper: true,
+      isCompleteOfficialPaper: false,
+      ruleVersionId: cfg.ruleVersionId,
+      expectedOfficialQuestions: cfg.year <= 2024 ? 90 : 75,
+      officialConductingBody: 'National Testing Agency (NTA)',
+      officialSourceUrl: 'https://jeemain.nta.nic.in/',
+      accessMethod: 'Generated Paper & Solutions PDF + Interactive CBT Simulation' as const,
+      paperVersion: `v${cfg.year}.catalog`,
+      answerKeyVersion: 'pending-official-import',
+      durationMinutes: 180,
+      totalMarks: 300,
+      totalQuestions: 0,
+      instructions: [
+        'Official historical shift catalog slot. No questions are fabricated or substituted into this shift.',
+        'Use the Verified Open-Source Question Bank Importer (Admin / Ingestion Pipeline) or launch an Assembled Mixed Simulation instead.',
+      ],
+      markingSummary:
+        cfg.year <= 2024
+          ? 'Historical 2021–2024 Blueprint (20 MCQ + 5/10 Sec B Numerical)'
+          : '+4 Correct · −1 Incorrect (Sec A & B Compulsory)',
+      syllabusVersionId: 'nta-jee-main-syllabus-v2025-2026',
+      syllabusVersion: 'NTA JEE Main v2025.1',
+      publicationStatus: 'incomplete_pending_official_import' as const,
+      questionIds: [],
+    })),
+    {
+      id: 'paper-jee-adv-editorial-p1',
+      exam: 'jee_advanced',
+      title: 'JEE (Advanced) Pattern · LearnMate Original Editorial Pack (6 Core + 3 Archetypes)',
+      year: 2025,
+      session: 'Paper 1',
+      examDate: '2025-05-18',
+      shift: 'Original Editorial Mock',
+      paperNumber: 1,
+      language: 'English',
+      collectionKind: 'original_practice',
+      isOfficialPastPaper: false,
+      isCompleteOfficialPaper: false,
+      ruleVersionId: 'jee-adv-2025-p1-v1',
+      expectedOfficialQuestions: 51,
+      officialConductingBody: 'LearnMate Editorial Practice (IIT JAB JEE Advanced Blueprint)',
       officialSourceUrl: 'https://jeeadv.ac.in/',
       accessMethod: 'Generated Paper & Solutions PDF + Interactive CBT Simulation',
-      paperVersion: 'v2024.1',
-      answerKeyVersion: 'final-key-v1.0',
+      paperVersion: 'v2025.1-editorial',
+      answerKeyVersion: 'learnmate-editorial-adv-v1',
       durationMinutes: 180,
       totalMarks: enrichedAdvQuestions.reduce((s, q) => s + q.markingRule.fullMarks, 0),
       totalQuestions: enrichedAdvQuestions.length,
       instructions: [
-        'Total duration of JEE (Advanced) Paper 1 is 180 minutes (3 hours).',
+        'Original editorial problem pack modelled on JEE (Advanced) Paper 1 sections (Multi-Correct partial credit, Single-Correct, Non-Negative Integer, Comprehension, and Matrix-Match).',
         'Section 1 (One or More Than One Correct): +4 if all correct options are chosen; +3/+2/+1 partial marks if no incorrect option is chosen; −2 if any incorrect option is chosen; 0 if unattempted.',
         'Section 2 (Single Correct MCQ): +3 if the only correct option is chosen; −1 for incorrect response; 0 if unattempted.',
-        'Section 3 (Non-Negative Integer): +4 if the exact non-negative integer is entered; 0 in all other cases (no negative marking).',
+        'Section 3 (Non-Negative Integer): +4 if the exact non-negative integer is entered; 0 in all other cases.',
       ],
       markingSummary: 'Sec 1: +4/−2 (Partial +3/+2/+1) · Sec 2: +3/−1 · Sec 3: +4/0',
       syllabusVersionId: 'iit-jab-jee-advanced-syllabus-v2025-2026',
@@ -813,6 +950,69 @@ const BUILT_CORPUS = buildCompletePyqCorpus();
 
 export const OFFICIAL_PYQ_PAPERS: OfficialPyqPaperMetadata[] = BUILT_CORPUS.papers;
 export const OFFICIAL_PYQ_QUESTIONS: PyqCorpusQuestion[] = BUILT_CORPUS.questions;
+
+/**
+ * Resolves a corpus question by either its current ID or a preserved legacy ID
+ * so previously saved user attempts never break across provenance cleanups.
+ */
+export function resolveCorpusQuestionById(
+  idOrLegacyId: string,
+  extraQuestions: PyqCorpusQuestion[] = []
+): PyqCorpusQuestion | undefined {
+  const pool = [...OFFICIAL_PYQ_QUESTIONS, ...JEE_ADVANCED_ARCHETYPE_QUESTIONS, ...extraQuestions];
+  return pool.find(
+    (q) => q.id === idOrLegacyId || (q.legacyIds && q.legacyIds.includes(idOrLegacyId))
+  );
+}
+
+/**
+ * Non-destructive migration helper for previously saved user CBT/quiz attempts
+ * referencing historical synthetic `pyq-main-*` or raw `jee-*` question IDs.
+ */
+export function migrateLegacyAttemptQuestionIds<T extends { questionId: string; migratedFromLegacyId?: string }>(
+  attempts: T[],
+  extraQuestions: PyqCorpusQuestion[] = []
+): Array<T & { migratedFromLegacyId?: string }> {
+  return attempts.map((attempt) => {
+    const resolved = resolveCorpusQuestionById(attempt.questionId, extraQuestions);
+    if (!resolved || resolved.id === attempt.questionId) {
+      return attempt;
+    }
+    return {
+      ...attempt,
+      migratedFromLegacyId: attempt.migratedFromLegacyId || attempt.questionId,
+      questionId: resolved.id,
+    };
+  });
+}
+
+/**
+ * Exposes the 5 cleanly separated collections required by Academic Provenance Governance.
+ */
+export function getCorpusCollections(extraQuestions: PyqCorpusQuestion[] = []): {
+  officialVerifiedPyqs: PyqCorpusQuestion[];
+  reconstructedPendingReview: PyqCorpusQuestion[];
+  originalEditorialPractice: PyqCorpusQuestion[];
+  aiGeneratedPractice: PyqCorpusQuestion[];
+  rejectedOrRestricted: PyqCorpusQuestion[];
+} {
+  const pool = [...OFFICIAL_PYQ_QUESTIONS, ...JEE_ADVANCED_ARCHETYPE_QUESTIONS, ...extraQuestions];
+  return {
+    officialVerifiedPyqs: pool.filter((q) => q.sourceCategory === 'OFFICIAL_VERIFIED'),
+    reconstructedPendingReview: pool.filter(
+      (q) => q.sourceCategory === 'OFFICIAL_RECONSTRUCTED_PENDING_REVIEW'
+    ),
+    originalEditorialPractice: pool.filter((q) => q.sourceCategory === 'ORIGINAL_EDITORIAL'),
+    aiGeneratedPractice: pool.filter(
+      (q) =>
+        q.sourceCategory === 'AI_GENERATED_REVIEWED' ||
+        q.sourceCategory === 'AI_GENERATED_UNVERIFIED'
+    ),
+    rejectedOrRestricted: pool.filter(
+      (q) => q.sourceCategory === 'SOURCE_RESTRICTED' || q.sourceCategory === 'REJECTED'
+    ),
+  };
+}
 
 /**
  * Deterministic scoring function for any JEE Main or JEE Advanced question,
@@ -855,7 +1055,7 @@ export function scorePyqQuestionResponse(
       marksAwarded: maxMarks,
       maxMarks,
       penaltyApplied: 0,
-      explanationNote: 'Question dropped in final official key: full marks (+4) awarded to all candidates.',
+      explanationNote: `Question dropped in final official key: full marks (+${maxMarks}) awarded to all candidates.`,
     };
   }
 
@@ -935,8 +1135,23 @@ export function scorePyqQuestionResponse(
     }
 
     const expected = question.numericalAnswer ?? 0;
-    const tol = question.numericalTolerance ?? 0.01;
-    const isExactMatch = Math.abs(parsed - expected) <= tol;
+    const isJeeMainNearestInteger =
+      question.exam === 'jee_main' &&
+      (question.format === 'numerical_integer' || Number.isInteger(expected));
+    const isIntegerRule =
+      isJeeMainNearestInteger ||
+      (question.format === 'numerical_integer' && Number.isInteger(expected));
+    const tol = question.numericalTolerance ?? (isIntegerRule ? 0 : 0.05);
+    const norm = normalizeNumericalResponse(
+      parsed,
+      isIntegerRule ? 'nearest_integer' : 'decimal_2dp'
+    );
+    const normalizedInput = isIntegerRule
+      ? norm.roundedNearestInteger ?? Math.round(parsed)
+      : parsed;
+    const isExactMatch = isIntegerRule
+      ? Math.abs(normalizedInput - Math.round(expected)) === 0
+      : Math.abs(normalizedInput - expected) <= tol;
 
     if (isExactMatch) {
       return {
@@ -1038,6 +1253,154 @@ export function scorePyqQuestionResponse(
     maxMarks,
     penaltyApplied: penalty,
     explanationNote: `Incorrect option selected: −${penalty} marks.`,
+  };
+}
+
+export interface BatchCbtOutcome extends SinglePyqScoreOutcome {
+  subject: JeeSubject;
+  section: PyqCorpusQuestion['section'];
+  chapterId: string;
+  chapterName: string;
+  sourceCategory: QuestionSourceCategory;
+  ignoredDueToSectionBCap?: boolean;
+}
+
+/**
+ * Evaluates a full CBT response batch using versioned exam rules:
+ * - Enforces JEE Main 2027 (75 compulsory; -1 in Sec A & Sec B; nearest-integer rounding)
+ * - Enforces archival 2021 (0 negative in Sec B, first 5 attempted of 10 per subject)
+ * - Enforces archival 2022–2024 (-1 negative in Sec B, first 5 attempted of 10 per subject)
+ * - Enforces JEE Advanced partial credit (+4 / -2 with +3/+2/+1) & non-negative integer (+4 / 0)
+ */
+export function scoreCbtSubmissionBatch(
+  questions: PyqCorpusQuestion[],
+  responses: Array<{
+    questionId: string;
+    selectedOptionIndices?: number[];
+    numericalValue?: number | string | null;
+    matrixMapping?: Record<string, string>;
+    matrixRowSelection?: Record<string, string>;
+  }>,
+  options?: {
+    ruleVersionId?: string;
+    sectionBRuleMode?: 'compulsory_2026' | 'archival_2024';
+  }
+): {
+  ruleVersionId: string;
+  totalMarks: number;
+  maxMarks: number;
+  ignoredOverflowQuestionIds: string[];
+  outcomes: BatchCbtOutcome[];
+} {
+  const ruleVersionId =
+    options?.ruleVersionId ||
+    (options?.sectionBRuleMode === 'archival_2024' ? 'jee-main-2022-2024-v1' : 'jee-main-2027-p1-v1');
+  const ruleSpec = getExamRuleVersion(ruleVersionId);
+  const secBSpec = ruleSpec.sectionsPerSubject.find((s) => s.sectionId === 'B');
+  const isArchivalSectionBCap =
+    ruleSpec.examId === 'jee_main' &&
+    secBSpec !== undefined &&
+    secBSpec.totalQuestionsPerSubject > secBSpec.compulsoryAttemptCount;
+  const maxSectionBAttempts = secBSpec?.compulsoryAttemptCount ?? 5;
+
+  const responseById = new Map<string, (typeof responses)[number]>();
+  for (const r of responses) {
+    const resolved = resolveCorpusQuestionById(r.questionId, questions);
+    responseById.set(resolved?.id || r.questionId, r);
+  }
+
+  const secBAttemptedPerSubject: Record<string, number> = {};
+  const secBIncludedPerSubject: Record<string, number> = {};
+  const ignoredOverflowQuestionIds: string[] = [];
+  const outcomes: BatchCbtOutcome[] = [];
+  let totalMarks = 0;
+  let maxMarks = 0;
+
+  for (const q of questions) {
+    const resp: Partial<(typeof responses)[number]> = responseById.get(q.id) ?? {};
+    const isSectionB =
+      q.section === 'B' ||
+      (q.exam === 'jee_main' &&
+        (q.format === 'numerical_integer' ||
+          q.format === 'numerical_decimal' ||
+          q.questionType === 'numerical'));
+
+    // Override rule when evaluating under an explicit JEE Main historical or 2027 version
+    let questionWithRule = q;
+    if (ruleSpec.examId === 'jee_main' && isSectionB && secBSpec) {
+      const targetRule: PyqMarkingRule =
+        secBSpec.negativeMarks === 0
+          ? MARKING_RULES.jee_main_numerical_archival
+          : MARKING_RULES.jee_main_numerical;
+      questionWithRule = {
+        ...q,
+        format: secBSpec.numericalRounding === 'nearest_integer' ? 'numerical_integer' : q.format,
+        markingRule: targetRule,
+        markingRuleId: targetRule.id,
+      };
+    }
+
+    const hasAttempt =
+      (resp.selectedOptionIndices && resp.selectedOptionIndices.length > 0) ||
+      (resp.numericalValue !== undefined &&
+        resp.numericalValue !== null &&
+        String(resp.numericalValue).trim() !== '') ||
+      (resp.matrixMapping && Object.keys(resp.matrixMapping).length > 0) ||
+      (resp.matrixRowSelection && Object.keys(resp.matrixRowSelection).length > 0);
+
+    if (isArchivalSectionBCap && isSectionB) {
+      const seenSlots = secBIncludedPerSubject[q.subject] || 0;
+      const usedAttempts = secBAttemptedPerSubject[q.subject] || 0;
+
+      if (seenSlots < maxSectionBAttempts) {
+        secBIncludedPerSubject[q.subject] = seenSlots + 1;
+        maxMarks += questionWithRule.markingRule.fullMarks;
+      }
+
+      if (hasAttempt && usedAttempts >= maxSectionBAttempts) {
+        ignoredOverflowQuestionIds.push(q.id);
+        outcomes.push({
+          questionId: q.id,
+          status: 'unattempted',
+          marksAwarded: 0,
+          maxMarks: 0,
+          penaltyApplied: 0,
+          explanationNote: `Archival Section B cap: only first ${maxSectionBAttempts} attempted questions per subject are evaluated.`,
+          subject: q.subject,
+          section: q.section,
+          chapterId: q.chapterId,
+          chapterName: q.chapterName,
+          sourceCategory: q.sourceCategory,
+          ignoredDueToSectionBCap: true,
+        });
+        continue;
+      }
+
+      if (hasAttempt) {
+        secBAttemptedPerSubject[q.subject] = usedAttempts + 1;
+      }
+    } else {
+      maxMarks += questionWithRule.markingRule.fullMarks;
+    }
+
+    const outcome = scorePyqQuestionResponse(questionWithRule, resp);
+    totalMarks += outcome.marksAwarded;
+    outcomes.push({
+      ...outcome,
+      subject: q.subject,
+      section: q.section,
+      chapterId: q.chapterId,
+      chapterName: q.chapterName,
+      sourceCategory: q.sourceCategory,
+    });
+  }
+
+  return {
+    ruleVersionId: ruleSpec.ruleVersionId,
+    totalMarks,
+    maxMarks,
+    ignoredOverflowQuestionIds,
+    outcomes,
   };
 }
 
@@ -1253,14 +1616,18 @@ export async function downloadOfficialPaperPdf(
 
   // Header
   drawWrapped(
-    `${paper.title} — ${mode === 'solutions' ? 'Verified Worked Solutions & Answer Key' : 'Question Paper'}`,
+    `${paper.title} — ${mode === 'solutions' ? 'Editorial Worked Solutions & Answer Key' : 'Question Paper'}`,
     14,
     true,
     rgb(0.24, 0.22, 0.78)
   );
   y -= 2;
   drawWrapped(
-    `Document Type: LearnMate Reconstructed PDF (${questions.length} Verified Local Corpus Questions)  |  Conducting Body: ${paper.officialConductingBody}  |  Date: ${paper.examDate} (${paper.shift})  |  Duration: ${paper.durationMinutes} min`,
+    `Document Type: ${
+      paper.isOfficialPastPaper
+        ? `LearnMate Compiled Archive PDF (${questions.length} Questions)`
+        : `LearnMate Original Practice PDF (${questions.length} Editorial Questions)`
+    }  |  Source: ${paper.officialConductingBody}  |  Date: ${paper.examDate} (${paper.shift})  |  Duration: ${paper.durationMinutes} min`,
     8.5,
     false,
     rgb(0.35, 0.4, 0.5)
@@ -1272,7 +1639,7 @@ export async function downloadOfficialPaperPdf(
   questions.forEach((q, idx) => {
     ensureSpace(85);
     drawWrapped(
-      `Q${idx + 1}. [${q.subject} · ${q.chapterName} · ${q.section} · ${q.markingRule.description}]`,
+      `Q${idx + 1}. [${q.subject} · ${q.chapterName} · ${q.section} · ${q.sourceCategory} · ${q.markingRule.description}]`,
       10,
       true,
       rgb(0.18, 0.2, 0.45)
@@ -1288,10 +1655,12 @@ export async function downloadOfficialPaperPdf(
 
     if (mode === 'solutions') {
       y -= 2;
+      const answerHeading =
+        q.sourceCategory === 'OFFICIAL_VERIFIED' ? 'Official Key Answer' : 'Editorial Answer Key';
       const keyLabel =
         q.format === 'numerical_integer' || q.format === 'numerical_decimal'
-          ? `Official Verified Answer: ${q.numericalAnswer}`
-          : `Official Verified Answer: ${(q.correctOptionIndices || [0])
+          ? `${answerHeading}: ${q.numericalAnswer}`
+          : `${answerHeading}: ${(q.correctOptionIndices || [0])
               .map((i) => `(${String.fromCharCode(65 + i)})`)
               .join(', ')}`;
       drawWrapped(keyLabel, 9.5, true, rgb(0.05, 0.48, 0.28), 12);
@@ -1318,10 +1687,16 @@ export interface PyqPaperCoverageReportItem {
   year: number;
   session: string;
   shift: string;
+  collectionKind: CorpusCollectionKind;
+  isOfficialPastPaper: boolean;
+  isCompleteOfficialPaper: boolean;
   expectedOfficialQuestions: number;
   availableCorpusQuestions: number;
+  officialVerifiedQuestions: number;
+  originalEditorialQuestions: number;
   coverageStatus:
     | 'FULLY_AVAILABLE'
+    | 'ORIGINAL_EDITORIAL_MOCK'
     | 'PARTIAL_QUESTIONS'
     | 'METADATA_ONLY'
     | 'LINK_ONLY'
@@ -1337,20 +1712,32 @@ export function getPyqCorpusCoverageAudit(): {
   totalQuestionsInCorpus: number;
   jeeMainQuestionsCount: number;
   jeeAdvancedQuestionsCount: number;
+  officialVerifiedQuestionsCount: number;
+  originalEditorialQuestionsCount: number;
+  reconstructedQuestionsCount: number;
+  incompleteHistoricalPapersCount: number;
   papers: PyqPaperCoverageReportItem[];
 } {
   const papers: PyqPaperCoverageReportItem[] = OFFICIAL_PYQ_PAPERS.map((p) => {
     const qList = getQuestionsForOfficialPaper(p.id);
-    const expectedOfficialQuestions = p.exam === 'jee_advanced' ? 51 : 75;
+    const expectedOfficialQuestions = p.expectedOfficialQuestions || (p.exam === 'jee_advanced' ? 51 : 75);
     const allHaveSolutions = qList.every((q) => Boolean(q.detailedSolution && q.detailedSolution.trim().length > 10));
-    const coverageStatus: PyqPaperCoverageReportItem['coverageStatus'] =
-      qList.length === 0
-        ? 'METADATA_ONLY'
-        : !allHaveSolutions
-        ? 'SOLUTIONS_MISSING'
-        : qList.length >= expectedOfficialQuestions
-        ? 'FULLY_AVAILABLE'
-        : 'PARTIAL_QUESTIONS';
+    const officialVerifiedQuestions = qList.filter((q) => q.sourceCategory === 'OFFICIAL_VERIFIED').length;
+    const originalEditorialQuestions = qList.filter((q) => q.sourceCategory === 'ORIGINAL_EDITORIAL').length;
+
+    let coverageStatus: PyqPaperCoverageReportItem['coverageStatus'];
+    if (qList.length === 0) {
+      coverageStatus = 'METADATA_ONLY';
+    } else if (!allHaveSolutions) {
+      coverageStatus = 'SOLUTIONS_MISSING';
+    } else if (!p.isOfficialPastPaper && qList.length >= expectedOfficialQuestions) {
+      coverageStatus = 'ORIGINAL_EDITORIAL_MOCK';
+    } else if (p.isOfficialPastPaper && officialVerifiedQuestions >= expectedOfficialQuestions) {
+      coverageStatus = 'FULLY_AVAILABLE';
+    } else {
+      coverageStatus = 'PARTIAL_QUESTIONS';
+    }
+
     return {
       paperId: p.id,
       title: p.title,
@@ -1358,8 +1745,13 @@ export function getPyqCorpusCoverageAudit(): {
       year: p.year,
       session: p.session,
       shift: p.shift,
+      collectionKind: p.collectionKind,
+      isOfficialPastPaper: p.isOfficialPastPaper,
+      isCompleteOfficialPaper: coverageStatus === 'FULLY_AVAILABLE',
       expectedOfficialQuestions,
       availableCorpusQuestions: qList.length,
+      officialVerifiedQuestions,
+      originalEditorialQuestions,
       coverageStatus,
       pdfType: 'learnmate_reconstructed_pdf',
     };
@@ -1367,33 +1759,50 @@ export function getPyqCorpusCoverageAudit(): {
 
   const jeeMainQuestionsCount = OFFICIAL_PYQ_QUESTIONS.filter((q) => q.exam === 'jee_main').length;
   const jeeAdvancedQuestionsCount = OFFICIAL_PYQ_QUESTIONS.filter((q) => q.exam === 'jee_advanced').length;
+  const officialVerifiedQuestionsCount = OFFICIAL_PYQ_QUESTIONS.filter(
+    (q) => q.sourceCategory === 'OFFICIAL_VERIFIED'
+  ).length;
+  const originalEditorialQuestionsCount =
+    OFFICIAL_PYQ_QUESTIONS.filter((q) => q.sourceCategory === 'ORIGINAL_EDITORIAL').length +
+    JEE_ADVANCED_ARCHETYPE_QUESTIONS.filter((q) => q.sourceCategory === 'ORIGINAL_EDITORIAL').length;
+  const reconstructedQuestionsCount = OFFICIAL_PYQ_QUESTIONS.filter(
+    (q) => q.sourceCategory === 'OFFICIAL_RECONSTRUCTED_PENDING_REVIEW'
+  ).length;
+  const incompleteHistoricalPapersCount = papers.filter(
+    (p) => p.isOfficialPastPaper && !p.isCompleteOfficialPaper
+  ).length;
 
   return {
     totalPapersInMetadata: OFFICIAL_PYQ_PAPERS.length,
     totalQuestionsInCorpus: OFFICIAL_PYQ_QUESTIONS.length,
     jeeMainQuestionsCount,
     jeeAdvancedQuestionsCount,
+    officialVerifiedQuestionsCount,
+    originalEditorialQuestionsCount,
+    reconstructedQuestionsCount,
+    incompleteHistoricalPapersCount,
     papers,
   };
 }
 
 /**
- * JEE Advanced Paragraph/Comprehension Linked & Matrix-Match (List-I / List-II) Archetype Questions
+ * JEE Advanced Paragraph/Comprehension Linked & Matrix-Match (List-I / List-II) Original Editorial Archetype Problems
  */
 export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
   {
-    id: 'adv-2024-p2-phy-para-1',
+    id: 'orig-adv-phy-para-1',
+    legacyIds: ['adv-2024-p2-phy-para-1', 'JEEADV-2024-P1-PHY-PARA1-Q1'],
     canonicalHash: buildCanonicalQuestionHash(
       'Physics',
       'Paragraph Comprehension Conducting rod of mass m and length L slides without friction on two parallel horizontal rails'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
-    shiftLabel: 'JEE Advanced 2024 · Paper 1 · Comprehension',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
+    shiftLabel: 'LearnMate Original Editorial · JEE Advanced Comprehension',
     paperNumber: 1,
     subject: 'Physics',
     section: 'Section 4',
@@ -1404,8 +1813,18 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     format: 'paragraph_comprehension',
     questionType: 'paragraph_comprehension',
     questionNumber: 7,
-    officialQuestionId: 'JEEADV-2024-P1-PHY-PARA1-Q1',
-    linkedQuestionGroup: 'para-emi-rails-2024',
+    officialQuestionId: 'LM-EDITORIAL-ADV-PARA1-Q1',
+    sourceCategory: 'ORIGINAL_EDITORIAL',
+    collectionKind: 'original_practice',
+    verificationMetadata: {
+      provenanceVerified: false,
+      verificationConfidence: 0.85,
+      reviewerStatus: 'editorial_reviewed',
+      solutionSource: 'LearnMate Editorial Physics Team',
+      licenseStatus: 'ORIGINAL_EDITORIAL_MIT',
+      isFakeShiftAssignment: false,
+    },
+    linkedQuestionGroup: 'para-emi-rails-editorial',
     passageTitle: 'Paragraph for Questions 7 & 8: Motional EMF on Conducting Rails',
     passageText:
       'A conducting rod PQ of mass $m = 0.2\\text{ kg}$ and length $L = 1.0\\text{ m}$ can slide without friction on two long parallel horizontal rails placed in a uniform vertical magnetic field $B = 2.0\\text{ T}$. The rails are connected at one end through a resistor $R = 4.0\\text{ }\\Omega$. At $t = 0$, the rod is given an initial horizontal velocity $v_0 = 10\\text{ m/s}$ along the rails (neglect rail and rod resistance and self-inductance).',
@@ -1423,8 +1842,8 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_paragraph,
     markingRuleId: MARKING_RULES.jee_adv_paragraph.id,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       'Retarding magnetic force $F = I L B = (B^2 L^2 v)/R = -m\\,dv/dt$.\nHere $\\tau = mR/(B^2 L^2) = (0.2 \\times 4)/(4 \\times 1) = 0.2\\text{ s}$.\nThus $v(t) = v_0 e^{-t/\\tau} = 10 e^{-0.2/0.2} = 10 e^{-1}\\text{ m/s}$.',
     solutionExplanation:
@@ -1433,22 +1852,23 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     commonMistakeTrap: 'Confusing time constant mR/(B²L²) with L/R.',
     commonTrap: 'Confusing mechanical-electromagnetic time constant mR/(B²L²) with inductive L/R.',
     difficulty: 'Hard',
-    sourceProvenance: 'JEE Advanced 2024 · Comprehension Passage 1 (Q1)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified Comprehension Q1' }],
+    sourceProvenance: 'LearnMate Original Editorial · JEE Advanced Comprehension Archetype (Q1)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Classified honestly as ORIGINAL_EDITORIAL' }],
   },
   {
-    id: 'adv-2024-p2-phy-para-2',
+    id: 'orig-adv-phy-para-2',
+    legacyIds: ['adv-2024-p2-phy-para-2', 'JEEADV-2024-P1-PHY-PARA1-Q2'],
     canonicalHash: buildCanonicalQuestionHash(
       'Physics',
       'Paragraph Comprehension total distance travelled by the conducting rod before coming to rest on the rails'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
-    shiftLabel: 'JEE Advanced 2024 · Paper 1 · Comprehension',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
+    shiftLabel: 'LearnMate Original Editorial · JEE Advanced Comprehension',
     paperNumber: 1,
     subject: 'Physics',
     section: 'Section 4',
@@ -1459,8 +1879,18 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     format: 'paragraph_comprehension',
     questionType: 'paragraph_comprehension',
     questionNumber: 8,
-    officialQuestionId: 'JEEADV-2024-P1-PHY-PARA1-Q2',
-    linkedQuestionGroup: 'para-emi-rails-2024',
+    officialQuestionId: 'LM-EDITORIAL-ADV-PARA1-Q2',
+    sourceCategory: 'ORIGINAL_EDITORIAL',
+    collectionKind: 'original_practice',
+    verificationMetadata: {
+      provenanceVerified: false,
+      verificationConfidence: 0.85,
+      reviewerStatus: 'editorial_reviewed',
+      solutionSource: 'LearnMate Editorial Physics Team',
+      licenseStatus: 'ORIGINAL_EDITORIAL_MIT',
+      isFakeShiftAssignment: false,
+    },
+    linkedQuestionGroup: 'para-emi-rails-editorial',
     passageTitle: 'Paragraph for Questions 7 & 8: Motional EMF on Conducting Rails',
     passageText:
       'A conducting rod PQ of mass $m = 0.2\\text{ kg}$ and length $L = 1.0\\text{ m}$ can slide without friction on two long parallel horizontal rails placed in a uniform vertical magnetic field $B = 2.0\\text{ T}$. The rails are connected at one end through a resistor $R = 4.0\\text{ }\\Omega$. At $t = 0$, the rod is given an initial horizontal velocity $v_0 = 10\\text{ m/s}$ along the rails (neglect rail and rod resistance and self-inductance).',
@@ -1478,8 +1908,8 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_paragraph,
     markingRuleId: MARKING_RULES.jee_adv_paragraph.id,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       '1. Using $-m\\,dv = (B^2 L^2 / R)\\,dx$, integrating from $v_0$ to $0$ gives $x_{\\max} = m R v_0 / (B^2 L^2) = (0.2 \\times 4 \\times 10)/(4 \\times 1) = 2.0\\text{ m}$.\n2. Total heat dissipated in $R$ equals initial kinetic energy: $H = \\frac{1}{2} m v_0^2 = 0.5 \\times 0.2 \\times 100 = 10\\text{ J}$.',
     solutionExplanation:
@@ -1488,22 +1918,23 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     commonMistakeTrap: 'Using constant-deceleration kinematics v² = 2ax instead of exponential velocity decay.',
     commonTrap: 'Using constant-deceleration kinematics v² = 2ax instead of integrating exponential decay.',
     difficulty: 'Hard',
-    sourceProvenance: 'JEE Advanced 2024 · Comprehension Passage 1 (Q2)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified Comprehension Q2' }],
+    sourceProvenance: 'LearnMate Original Editorial · JEE Advanced Comprehension Archetype (Q2)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Classified honestly as ORIGINAL_EDITORIAL' }],
   },
   {
-    id: 'adv-2024-p2-chem-matrix-1',
+    id: 'orig-adv-chem-matrix-1',
+    legacyIds: ['adv-2024-p2-chem-matrix-1', 'JEEADV-2024-P1-CHE-MAT1'],
     canonicalHash: buildCanonicalQuestionHash(
       'Chemistry',
       'Matrix Match List-I Thermodynamic Processes of an Ideal Gas with List-II Work Heat and Entropy relations'
     ),
-    paperId: 'paper-jee-adv-2024-p1',
+    paperId: 'paper-jee-adv-editorial-p1',
     exam: 'jee_advanced',
-    year: 2024,
+    year: 2025,
     session: 'Paper 1',
-    examDate: '2024-05-26',
-    shift: 'Paper 1 (Morning)',
-    shiftLabel: 'JEE Advanced 2024 · Paper 1 · Matrix-Match',
+    examDate: '2025-05-18',
+    shift: 'Original Editorial Mock',
+    shiftLabel: 'LearnMate Original Editorial · JEE Advanced Matrix-Match',
     paperNumber: 1,
     subject: 'Chemistry',
     section: 'Section 4',
@@ -1514,7 +1945,17 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     format: 'matrix_match',
     questionType: 'matrix_match',
     questionNumber: 9,
-    officialQuestionId: 'JEEADV-2024-P1-CHE-MAT1',
+    officialQuestionId: 'LM-EDITORIAL-ADV-CHE-MAT1',
+    sourceCategory: 'ORIGINAL_EDITORIAL',
+    collectionKind: 'original_practice',
+    verificationMetadata: {
+      provenanceVerified: false,
+      verificationConfidence: 0.85,
+      reviewerStatus: 'editorial_reviewed',
+      solutionSource: 'LearnMate Editorial Chemistry Team',
+      licenseStatus: 'ORIGINAL_EDITORIAL_MIT',
+      isFakeShiftAssignment: false,
+    },
     prompt:
       'Match each thermodynamic process for an ideal gas in **List-I (P, Q, R, S)** with its correct thermodynamic property in **List-II (1, 2, 3, 4, 5)** and select the correct code.',
     stem:
@@ -1548,8 +1989,8 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     keyStatus: 'normal',
     markingRule: MARKING_RULES.jee_adv_matrix,
     markingRuleId: MARKING_RULES.jee_adv_matrix.id,
-    answerKeyVersion: 'final-key-v1.0',
-    solutionOrigin: 'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+    answerKeyVersion: 'learnmate-editorial-adv-v1',
+    solutionOrigin: 'LearnMate Original Editorial Solution',
     detailedSolution:
       '• (P) Reversible isothermal expansion: $T$ constant $\\Rightarrow \\Delta U = \\Delta H = 0$, $w = -nRT\\ln(V_2/V_1)$ (Matches 2).\n• (Q) Adiabatic free expansion ($P_{\\text{ext}}=0, q=0$): $w=0 \\Rightarrow \\Delta U=0$, but gas expands irreversibly so $\\Delta S_{\\text{sys}} = nR\\ln(V_2/V_1) > 0$ (Matches 1).\n• (R) Reversible adiabatic expansion: $q_{\\text{rev}}=0 \\Rightarrow \\Delta S_{\\text{sys}}=0$ and $\\Delta U = w < 0$ (Matches 4).\n• (S) Isochoric heating ($\\Delta V=0$): $w=0$ and $q_V = \\Delta U = n C_{V,m}\\Delta T > 0$ (Matches 3).',
     solutionExplanation:
@@ -1558,8 +1999,8 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
     commonMistakeTrap: 'Assuming ΔS_sys = 0 in adiabatic free expansion (Q) just because q = 0 (since free expansion is irreversible, q_rev ≠ 0).',
     commonTrap: 'Assuming ΔS_sys = 0 in irreversible adiabatic free expansion.',
     difficulty: 'Hard',
-    sourceProvenance: 'JEE Advanced 2024 · Matrix-Match Section (List-I / List-II)',
-    versionHistory: [{ version: '1.0', date: '2024-06-09', note: 'Verified Matrix-Match Q9' }],
+    sourceProvenance: 'LearnMate Original Editorial · JEE Advanced Matrix-Match Archetype (Q9)',
+    versionHistory: [{ version: '1.0', date: '2026-11-12', note: 'Classified honestly as ORIGINAL_EDITORIAL' }],
   },
 ];
 
@@ -1572,7 +2013,7 @@ export const JEE_ADVANCED_ARCHETYPE_QUESTIONS: PyqCorpusQuestion[] = [
  * Total: 75 compulsory questions, 300 marks, 180 minutes.
  */
 export function assembleFull75QuestionNtaMock(
-  paperIdOrTitle = 'paper-jee-main-2025-jan-s1',
+  paperIdOrTitle = 'paper-jee-main-2027-editorial-mock-1',
   options?: {
     sectionBRuleMode?: 'compulsory_2026' | 'archival_2024';
     additionalPool?: PyqCorpusQuestion[];
@@ -1580,12 +2021,22 @@ export function assembleFull75QuestionNtaMock(
 ): {
   paperId: string;
   title: string;
+  collectionKind: CorpusCollectionKind;
+  isOfficialPastPaper: boolean;
+  ruleVersionId: string;
   totalQuestions: number;
   totalMarks: number;
   durationMinutes: number;
   sectionBRuleMode: 'compulsory_2026' | 'archival_2024';
   questions: PyqCorpusQuestion[];
   subjectBreakdown: Record<JeeSubject, { sectionA: number; sectionB: number; total: number }>;
+  provenanceBreakdown: {
+    officialVerified: number;
+    reconstructedPendingReview: number;
+    originalEditorial: number;
+    aiGenerated: number;
+  };
+  sourceProvenanceNotice: string;
 } {
   const sectionBRuleMode = options?.sectionBRuleMode || 'compulsory_2026';
   const paperMeta = OFFICIAL_PYQ_PAPERS.find((p) => p.id === paperIdOrTitle);
@@ -1669,17 +2120,38 @@ export function assembleFull75QuestionNtaMock(
     questionNumber: i + 1,
   }));
 
+  const provenanceBreakdown = {
+    officialVerified: numbered.filter((q) => q.sourceCategory === 'OFFICIAL_VERIFIED').length,
+    reconstructedPendingReview: numbered.filter(
+      (q) => q.sourceCategory === 'OFFICIAL_RECONSTRUCTED_PENDING_REVIEW'
+    ).length,
+    originalEditorial: numbered.filter((q) => q.sourceCategory === 'ORIGINAL_EDITORIAL').length,
+    aiGenerated: numbered.filter(
+      (q) =>
+        q.sourceCategory === 'AI_GENERATED_REVIEWED' ||
+        q.sourceCategory === 'AI_GENERATED_UNVERIFIED'
+    ).length,
+  };
+
   return {
     paperId: paperMeta?.id || paperIdOrTitle,
     title: paperMeta
-      ? `${paperMeta.title} (Full 75-Q NTA Assembled Mock)`
-      : 'JEE (Main) 2026/2027 Full 75-Question NTA Mock',
+      ? `${paperMeta.title} — Assembled Mixed 75-Q Simulation`
+      : 'JEE (Main) 2027 75-Question Simulated Mock (Mixed / Original Editorial Pool)',
+    collectionKind: 'mixed_simulation',
+    isOfficialPastPaper: false,
+    ruleVersionId: sectionBRuleMode === 'archival_2024' ? 'jee-main-2022-2024-v1' : 'jee-main-2027-p1-v1',
     totalQuestions: numbered.length,
     totalMarks: numbered.length * 4,
     durationMinutes: 180,
     sectionBRuleMode,
     questions: numbered,
     subjectBreakdown,
+    provenanceBreakdown,
+    sourceProvenanceNotice:
+      provenanceBreakdown.officialVerified === numbered.length
+        ? '100% Official Verified PYQ Simulation'
+        : `Simulated 75-Q JEE Main 2027 Blueprint (${provenanceBreakdown.officialVerified} official verified, ${provenanceBreakdown.originalEditorial} original editorial, ${provenanceBreakdown.reconstructedPendingReview} reconstructed). Not an official NTA historical shift paper.`,
   };
 }
 
@@ -1702,6 +2174,13 @@ export interface ShiftPercentileAndAirPrediction {
   nitTierEligibility: string;
   marksFor99PercentileInShift: number;
   marksFor95PercentileInShift: number;
+  /** Provenance & Statistical Honesty Metadata */
+  isEmpiricalNtaData: false;
+  modelType: 'heuristic_piecewise_reference_curve';
+  datasetVersion: string;
+  candidatePoolAssumed: number;
+  methodologySummary: string;
+  limitationDisclaimer: string;
 }
 
 /**
@@ -1827,6 +2306,14 @@ export function predictShiftPercentileAndAir(
       shiftDifficulty === 'Tough' ? 165 : shiftDifficulty === 'Easy' ? 210 : 188,
     marksFor95PercentileInShift:
       shiftDifficulty === 'Tough' ? 112 : shiftDifficulty === 'Easy' ? 152 : 132,
+    isEmpiricalNtaData: false,
+    modelType: 'heuristic_piecewise_reference_curve',
+    datasetVersion: 'learnmate-heuristic-ref-2024-2026-v1',
+    candidatePoolAssumed: totalCandidates,
+    methodologySummary:
+      'Linear piecewise interpolation between synthetic Tough/Moderate/Easy shift anchor cutoffs, mapped against an illustrative 1,350,000 candidate cohort.',
+    limitationDisclaimer:
+      'Illustrative heuristic model only — NOT derived from an empirical official NTA candidate score distribution. Actual NTA percentiles vary significantly by shift cohort.',
   };
 }
 

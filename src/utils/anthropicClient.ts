@@ -31,6 +31,10 @@ export interface ClaudeResponse {
   text: string;
   stopReason: string | null;
   model: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
 }
 
 export class ClaudeApiError extends Error {
@@ -153,10 +157,12 @@ export async function callClaude(req: ClaudeRequest): Promise<ClaudeResponse> {
       .map((b) => b.text as string)
       .join('');
 
+    const usage = (data as { usage?: { input_tokens?: number; output_tokens?: number } } | null)?.usage;
     return {
       text,
       stopReason: data?.stop_reason ?? null,
       model: data?.model || req.model,
+      ...(usage ? { usage } : {}),
     };
   } finally {
     clearTimeout(timer);
@@ -227,6 +233,8 @@ export async function streamClaude(
     let fullText = '';
     let stopReason: string | null = null;
     let resolvedModel = req.model;
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     const processLine = (line: string) => {
       const trimmed = line.trim();
@@ -235,8 +243,13 @@ export async function streamClaude(
       if (!payload || payload === '[DONE]') return;
       let evt: {
         type?: string;
-        message?: { model?: string; stop_reason?: string | null };
+        message?: {
+          model?: string;
+          stop_reason?: string | null;
+          usage?: { input_tokens?: number; output_tokens?: number };
+        };
         delta?: { type?: string; text?: string; stop_reason?: string | null };
+        usage?: { input_tokens?: number; output_tokens?: number };
         error?: { message?: string };
       };
       try {
@@ -244,8 +257,12 @@ export async function streamClaude(
       } catch {
         return;
       }
-      if (evt.type === 'message_start' && evt.message?.model) {
-        resolvedModel = evt.message.model;
+      if (evt.type === 'message_start' && evt.message) {
+        if (evt.message.model) resolvedModel = evt.message.model;
+        if (evt.message.usage) {
+          inputTokens = Number(evt.message.usage.input_tokens || inputTokens);
+          outputTokens = Number(evt.message.usage.output_tokens || outputTokens);
+        }
       } else if (
         evt.type === 'content_block_delta' &&
         evt.delta?.type === 'text_delta' &&
@@ -253,8 +270,18 @@ export async function streamClaude(
       ) {
         fullText += evt.delta.text;
         onDelta(evt.delta.text);
-      } else if (evt.type === 'message_delta' && evt.delta?.stop_reason !== undefined) {
-        stopReason = evt.delta.stop_reason ?? null;
+      } else if (evt.type === 'message_delta') {
+        if (evt.delta?.stop_reason !== undefined) {
+          stopReason = evt.delta.stop_reason ?? null;
+        }
+        if (evt.usage) {
+          if (evt.usage.input_tokens !== undefined) {
+            inputTokens = Number(evt.usage.input_tokens || inputTokens);
+          }
+          if (evt.usage.output_tokens !== undefined) {
+            outputTokens = Number(evt.usage.output_tokens || outputTokens);
+          }
+        }
       } else if (evt.type === 'error') {
         throw new ClaudeApiError(
           `Anthropic stream error: ${evt.error?.message || 'stream interrupted'}`,
@@ -281,6 +308,9 @@ export async function streamClaude(
       text: fullText,
       stopReason,
       model: resolvedModel,
+      ...(inputTokens > 0 || outputTokens > 0
+        ? { usage: { input_tokens: inputTokens, output_tokens: outputTokens } }
+        : {}),
     };
   } finally {
     clearTimeout(timer);

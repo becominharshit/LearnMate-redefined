@@ -234,6 +234,16 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           questionType: 'mcq_single',
           questionNumber: idx + 1,
           officialQuestionId: q.id,
+          sourceCategory: 'ORIGINAL_EDITORIAL',
+          collectionKind: 'original_practice',
+          verificationMetadata: {
+            provenanceVerified: false,
+            verificationConfidence: 0.7,
+            reviewerStatus: 'editorial_reviewed',
+            solutionSource: 'LearnMate Editorial Practice (Experimental Pattern)',
+            licenseStatus: 'ORIGINAL_EDITORIAL_MIT',
+            isFakeShiftAssignment: false,
+          },
           prompt: q.prompt,
           stem: q.prompt,
           options: [...q.options],
@@ -253,21 +263,20 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           },
           markingRuleId:
             examFilter === 'bitsat' ? 'BITSAT (+3 / -1 / 0)' : 'VITEEE (+1 / 0 / 0)',
-          answerKeyVersion: `v1.0-official-${examFilter}-${q.year}`,
-          solutionOrigin:
-            'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+          answerKeyVersion: `v1.0-editorial-${examFilter}-${q.year}`,
+          solutionOrigin: 'LearnMate Original Editorial Solution',
           detailedSolution: q.solutionExplanation,
           solutionExplanation: q.solutionExplanation,
           keyFormula: q.keyFormula,
           commonMistakeTrap: q.commonTrap,
           commonTrap: q.commonTrap,
           difficulty: q.difficulty === 'Moderate' ? 'Medium' : q.difficulty,
-          sourceProvenance: `${examFilter.toUpperCase()} Official Memory/Past Archive (${q.year})`,
+          sourceProvenance: `${examFilter.toUpperCase()} Experimental Pattern Sample (${q.year})`,
           versionHistory: [
             {
               version: '1.0',
               date: '2026-01-15',
-              note: `Verified ${examFilter.toUpperCase()} question bank item.`,
+              note: `Experimental ${examFilter.toUpperCase()} pattern sample item.`,
             },
           ],
         };
@@ -320,9 +329,9 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   ]);
 
   const launchFullJeeMainMock = () => {
-    const assembled75 = assembleFull75QuestionNtaMock('jee-main-2025-jan22-s1');
+    const assembled75 = assembleFull75QuestionNtaMock('paper-jee-main-2027-editorial-mock-1');
     setActiveCbtPaper({
-      title: `JEE (Main) 2026/2027 Official 75-Q NTA Mock — ${currentDoc?.title || 'Comprehensive'}`,
+      title: `JEE (Main) 2027 75-Q NTA Blueprint Mock (Original Editorial) — ${currentDoc?.title || 'Comprehensive'}`,
       variant: 'jee_main',
       questions: assembled75.questions,
       durationMinutes: 180,
@@ -896,22 +905,22 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   return (
     <div data-testid="practice-workspace-view" className="space-y-6 pb-12">
       {/* Top Row: Practice Title + Main / Advanced Switcher (Matches Image 11) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-line pb-4">
-        <div className="space-y-1">
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 border-b border-line pb-4">
+        <div className="space-y-1 min-w-0">
           <h1 className="font-display text-3xl sm:text-4xl font-bold text-ink tracking-tight">
             Practice
           </h1>
-          <p className="text-xs sm:text-sm text-muted">
-            Official JEE Main, JEE Advanced, BITSAT &amp; VITEEE past papers, CBT full mocks, and targeted note drills.
+          <p className="text-xs sm:text-sm text-muted max-w-2xl">
+            JEE Main, JEE Advanced, BITSAT &amp; VITEEE editorial mocks, PYQ catalog &amp; targeted note drills.
           </p>
         </div>
 
         {/* Main | Advanced | BITSAT | VITEEE Switcher + Question Bank Admin Console */}
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start xl:self-auto">
           <div
             role="group"
             aria-label="Exam Mode Switcher"
-            className="inline-flex items-center p-1 rounded-xl bg-white dark:bg-[#121A2E] border border-line shadow-2xs"
+            className="inline-flex flex-wrap items-center p-1 rounded-xl bg-white dark:bg-[#121A2E] border border-line shadow-2xs"
           >
             <button
               type="button"
@@ -997,7 +1006,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
       <div
         role="tablist"
         aria-label="Practice Sections"
-        className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-line"
+        className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar pb-1.5 border-b border-line"
       >
         {(
           [
@@ -1016,7 +1025,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
               aria-selected={isActive}
               data-testid={`practice-hub-tab-${tab.id}`}
               onClick={() => setHubTab(tab.id)}
-              className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 isActive
                   ? 'bg-brand-soft text-brand border border-brand/25'
                   : 'text-muted hover:text-ink hover:bg-white'
@@ -1116,9 +1125,9 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
             <div className="lm-card-editorial p-5 sm:p-6 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-bold text-ink">Official Papers</h2>
+                  <h2 className="text-lg font-bold text-ink">Mock Papers &amp; PYQ Catalog</h2>
                   <p className="text-xs text-muted">
-                    Verified shift-wise JEE Main &amp; JEE Advanced papers with downloadable PDFs and CBT simulation.
+                    Editorial 75-Q mocks and historical shift catalog slots (pending verified NTA paper imports).
                   </p>
                 </div>
 
@@ -1182,6 +1191,9 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                   <tbody className="divide-y divide-line">
                     {filteredOfficialPapers.map((paper) => {
                       const shiftPoolCount = getQuestionsForOfficialPaper(paper.id).length;
+                      const isCatalogPending =
+                        paper.publicationStatus === 'incomplete_pending_official_import' ||
+                        shiftPoolCount === 0;
                       return (
                         <tr key={paper.id} className="hover:bg-canvas/60">
                           <td className="py-3.5 px-3">
@@ -1190,17 +1202,31 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                             </div>
                             <div className="text-[11px] text-muted flex flex-wrap items-center gap-1.5 mt-0.5">
                               <span>
-                                {paper.examDate} · {paper.shift} · Verified v{paper.syllabusVersion}
+                                {paper.examDate} · {paper.shift} · {paper.syllabusVersion}
                               </span>
-                              <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold">
-                                Shift Mini-Pack ({shiftPoolCount} Qs)
-                              </span>
+                              {paper.isOfficialPastPaper ? (
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                    isCatalogPending
+                                      ? 'bg-amber-50 text-amber-900 border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  }`}
+                                >
+                                  {isCatalogPending
+                                    ? 'Catalog Slot · Pending Official Import (0 Qs)'
+                                    : `Official PYQ (${shiftPoolCount} Qs)`}
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold">
+                                  Original Editorial Practice ({shiftPoolCount} Qs)
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="py-3.5 px-3 font-semibold text-ink tabular-nums">
-                            <div>75 Blueprint</div>
+                            <div>{paper.expectedOfficialQuestions} Blueprint</div>
                             <div className="text-[10px] text-muted">
-                              ({shiftPoolCount} shift seed)
+                              ({shiftPoolCount} loaded)
                             </div>
                           </td>
                           <td className="py-3.5 px-3 text-muted tabular-nums">
@@ -1211,30 +1237,34 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                           </td>
                           <td className="py-3.5 px-3 text-right">
                             <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => void handleDownloadPaperPdf(paper, false)}
-                                data-testid={`download-paper-pdf-${paper.id}`}
-                                className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
-                              >
-                                <Download className="w-3 h-3 text-muted" />
-                                <span>Paper PDF</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void handleDownloadPaperPdf(paper, true)}
-                                data-testid={`download-solutions-pdf-${paper.id}`}
-                                className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
-                              >
-                                <FileText className="w-3 h-3 text-brand" />
-                                <span>Solutions PDF</span>
-                              </button>
+                              {!isCatalogPending && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleDownloadPaperPdf(paper, false)}
+                                    data-testid={`download-paper-pdf-${paper.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
+                                  >
+                                    <Download className="w-3 h-3 text-muted" />
+                                    <span>Paper PDF</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleDownloadPaperPdf(paper, true)}
+                                    data-testid={`download-solutions-pdf-${paper.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg border border-line bg-white hover:bg-canvas text-xs font-semibold text-ink cursor-pointer inline-flex items-center gap-1"
+                                  >
+                                    <FileText className="w-3 h-3 text-brand" />
+                                    <span>Solutions PDF</span>
+                                  </button>
+                                </>
+                              )}
                               {paper.exam === 'jee_main' && (
                                 <button
                                   type="button"
                                   onClick={() => launchAssembled75QMockForPaper(paper)}
                                   data-testid={`assemble-75q-mock-${paper.id}`}
-                                  title="Dynamically assemble a full 75-Question (25P + 25C + 25M) NTA CBT Mock seeded from this shift"
+                                  title="Assemble a 75-Question (25P + 25C + 25M) JEE Main 2027 simulated mock using local editorial & imported questions"
                                   className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-xs font-bold cursor-pointer"
                                 >
                                   Assemble 75-Q Mock
@@ -1246,7 +1276,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                                 data-testid={`start-official-mock-${paper.id}`}
                                 className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand-strong text-white text-xs font-bold cursor-pointer"
                               >
-                                Start Mock
+                                {isCatalogPending ? 'Launch Pattern Sim' : 'Start Mock'}
                               </button>
                             </div>
                           </td>
@@ -1315,7 +1345,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                     Chapter-Wise &amp; Shift-Wise PYQ Bank
                   </span>
                   <h2 className="text-lg font-bold text-ink">
-                    Verified Past Questions ({filteredPyqQuestions.length})
+                    Practice &amp; Past-Pattern Bank ({filteredPyqQuestions.length})
                   </h2>
                 </div>
 
@@ -1353,7 +1383,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 lg:max-h-[calc(100dvh-18rem)] lg:overflow-y-auto lg:pr-1">
                 {filteredPyqQuestions.map((q, idx) => {
                   const selectedIndices = pyqSelectedOptions[q.id] || [];
                   const numInput = pyqNumericalInputs[q.id] || '';
@@ -1810,7 +1840,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
         </div>
 
         {/* RIGHT 4 COLUMNS: My Notes Set Builder (when not on custom set tab) + Practice Progress + Weak Topics */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto">
           {/* Quick My Notes Set Builder Card - hidden on custom_set tab to prevent duplicate builders */}
           {hubTab !== 'custom_set' && (
             <div className="lm-card-editorial p-5 space-y-4">

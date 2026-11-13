@@ -141,4 +141,6 @@ export interface StructuredDiagramSpec {
   modelUsed?: string;
   provider?: string;
   fallbackNotice?: string;
+  verificationBadge?: 'VERIFIED_TEMPLATE' | 'AI_UNVERIFIED_SCHEMATIC' | 'REPAIRED_BY_VALIDATOR';
+  animationKind?: 'fbd_motion' | 'optics_wavefront' | 'rc_charge_flow' | 'vsepr_vibration' | 'conic_focus_sweep';
 }

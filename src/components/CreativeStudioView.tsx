@@ -44,7 +44,7 @@ import {
 } from '../utils/phase6Engine';
 import {
   serializeDiagramSpecToSvg,
-  getDeterministicDiagramTemplate,
+  getVerifiedDiagramPresetMatch,
 } from '../utils/diagramEngine';
 import {
   buildAnimatedExplanationScenes,
@@ -188,6 +188,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
   const [visualConceptInput, setVisualConceptInput] = useState(selectedTopic);
   const [visualCategory, setVisualCategory] = useState<string>('auto');
   const [visualResult, setVisualResult] = useState<VisualizeConceptResponse | null>(null);
+  const [visualError, setVisualError] = useState<string | null>(null);
   const [isVisualizing, setIsVisualizing] = useState(false);
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<
     'all' | 'Physics' | 'Chemistry' | 'Mathematics'
@@ -198,27 +199,19 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
     setVideoTopicInput(selectedTopic);
   }, [selectedTopic]);
 
-  const handleRunVisualize = async (conceptOverride?: string, categoryOverride?: string) => {
-    const targetConcept = (conceptOverride ?? visualConceptInput).trim();
-    if (!targetConcept) return;
-
-    const targetCategory = categoryOverride ?? visualCategory;
-    setIsVisualizing(true);
-
-    // Extract relevant study excerpts from the active document
+  const getContextForDiagram = (targetConcept: string) => {
     const queryWords = targetConcept
       .toLowerCase()
       .split(/[^a-z0-9]+/)
       .filter((w) => w.length >= 3);
 
-    let scoredPages = activeDocument.pages.map((p) => {
-      const text = p.content.toLowerCase();
-      const score = queryWords.reduce((acc, word) => acc + (text.includes(word) ? 1 : 0), 0);
-      return { page: p, score };
-    });
-
-    // Sort by relevance score
-    scoredPages.sort((a, b) => b.score - a.score);
+    const scoredPages = activeDocument.pages
+      .map((p) => {
+        const text = p.content.toLowerCase();
+        const score = queryWords.reduce((acc, word) => acc + (text.includes(word) ? 1 : 0), 0);
+        return { page: p, score };
+      })
+      .sort((a, b) => b.score - a.score);
 
     const relevantPages =
       scoredPages[0]?.score > 0
@@ -226,9 +219,53 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         : activeDocument.pages.slice(0, 2);
 
     const citedPages = relevantPages.map((p) => p.pageNumber);
-    const contextText = relevantPages
-      .map((p) => `Page ${p.pageNumber}:\n${p.content}`)
-      .join('\n\n');
+    const contextText = relevantPages.map((p) => `Page ${p.pageNumber}:\n${p.content}`).join('\n\n');
+    return { citedPages, contextText };
+  };
+
+  const applyVerifiedPresetImmediate = (targetConcept: string, targetCategory: string): boolean => {
+    const { citedPages } = getContextForDiagram(targetConcept);
+    const presetSpec = getVerifiedDiagramPresetMatch(targetConcept, targetCategory, citedPages);
+    if (!presetSpec) return false;
+    setVisualError(null);
+    setVisualResult({
+      concept: targetConcept,
+      style: targetCategory,
+      isAiGenerated: false,
+      verificationStatus: 'VERIFIED_TEMPLATE',
+      modelNotice:
+        presetSpec.fallbackNotice ||
+        'Verified Deterministic JEE Template rendered locally (<50ms). Use "Enhance with AI" if you want note-specific annotations.',
+      spec: presetSpec,
+      diagramSteps: [
+        {
+          step: 1,
+          title: presetSpec.title,
+          detail: presetSpec.description,
+          color: '#4F46E5',
+        },
+      ],
+    });
+    return true;
+  };
+
+  const handleRunVisualize = async (
+    conceptOverride?: string,
+    categoryOverride?: string,
+    forceAi = false
+  ) => {
+    const targetConcept = (conceptOverride ?? visualConceptInput).trim();
+    if (!targetConcept) return;
+
+    const targetCategory = categoryOverride ?? visualCategory;
+    if (!forceAi && applyVerifiedPresetImmediate(targetConcept, targetCategory)) {
+      return;
+    }
+
+    setIsVisualizing(true);
+    setVisualError(null);
+
+    const { citedPages, contextText } = getContextForDiagram(targetConcept);
 
     try {
       const res = await aiStudyClient.visualizeConcept({
@@ -239,42 +276,55 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
         citedPages,
       });
 
-      // Guard: ensure spec is populated
-      if (!res.spec) {
-        res.spec = getDeterministicDiagramTemplate(
+      if (!res.spec || !Array.isArray(res.spec.elements) || res.spec.elements.length < 2) {
+        const matchedPreset = getVerifiedDiagramPresetMatch(
           targetConcept,
-          targetCategory as any,
+          targetCategory,
           citedPages
         );
+        if (!matchedPreset) {
+          throw new Error(
+            'The AI returned an incomplete diagram specification and no verified scientific preset matched this prompt.'
+          );
+        }
+        res.spec = matchedPreset;
       }
       setVisualResult(res);
     } catch (err) {
-      // Deterministic verified template fallback
-      const fallbackSpec = getDeterministicDiagramTemplate(
+      const matchedPreset = getVerifiedDiagramPresetMatch(
         targetConcept,
-        targetCategory as any,
+        targetCategory,
         citedPages
       );
-      setVisualResult({
-        concept: targetConcept,
-        style: targetCategory as any,
-        isAiGenerated: false,
-        verificationStatus: 'FALLBACK',
-        modelNotice:
+      if (matchedPreset && !forceAi) {
+        setVisualResult({
+          concept: targetConcept,
+          style: targetCategory as any,
+          isAiGenerated: false,
+          verificationStatus: 'VERIFIED_TEMPLATE',
+          modelNotice:
+            err instanceof Error
+              ? `AI service offline (${err.message}). Showing verified deterministic template.`
+              : 'AI service offline. Showing verified deterministic template.',
+          spec: matchedPreset,
+          diagramSteps: matchedPreset.elements
+            .filter((e) => e.kind === 'text')
+            .slice(0, 4)
+            .map((e: any, idx) => ({
+              step: idx + 1,
+              title: e.text || `Step ${idx + 1}`,
+              detail: `Coordinate (${e.x}, ${e.y})`,
+              color: e.color || '#4F46E5',
+            })),
+        });
+      } else {
+        setVisualResult(null);
+        setVisualError(
           err instanceof Error
-            ? `AI service offline: ${err.message}. Showing verified schematic template.`
-            : 'AI service offline. Showing verified schematic template.',
-        spec: fallbackSpec,
-        diagramSteps: fallbackSpec.elements
-          .filter((e) => e.kind === 'text')
-          .slice(0, 4)
-          .map((e: any, idx) => ({
-            step: idx + 1,
-            title: e.text || `Step ${idx + 1}`,
-            detail: `Coordinate (${e.x}, ${e.y})`,
-            color: e.color || '#4F46E5',
-          })),
-      });
+            ? err.message
+            : 'Diagram synthesis failed and no verified scientific preset matches this prompt.'
+        );
+      }
     } finally {
       setIsVisualizing(false);
     }
@@ -860,6 +910,17 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
     }
   }, [contextualTransfer]);
 
+  // Pre-load the first matching verified JEE diagram preset when entering Create with no active preview
+  useEffect(() => {
+    if (contextualTransfer || visualResult || isVisualizing || visualError) return;
+    if (!applyVerifiedPresetImmediate(selectedTopic, 'auto')) {
+      const defaultPreset = JEE_PRESETS[0];
+      if (defaultPreset) {
+        applyVerifiedPresetImmediate(defaultPreset.concept, defaultPreset.category);
+      }
+    }
+  }, [contextualTransfer, activeDocument.id]);
+
   // Filtered saved assets
   const filteredSavedAssets = savedAssets.filter((a) => {
     if (savedFilter === 'current') {
@@ -913,19 +974,19 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
 
       {/* Editorial Header */}
       <div className="space-y-4 border-b border-line dark:border-slate-800 pb-0">
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-2">
-          <div className="space-y-1.5">
+        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 pb-2">
+          <div className="space-y-1.5 min-w-0">
             <div className="lm-kicker">CREATE · JEE VISUAL STUDIO</div>
             <h1 className="lm-editorial-title text-3xl sm:text-4xl text-ink dark:text-slate-100">
               Concept diagrams &amp; visual explanations.
             </h1>
-            <p className="lm-editorial-subtitle text-sm sm:text-base text-body dark:text-slate-400">
+            <p className="lm-editorial-subtitle text-sm sm:text-base text-body dark:text-slate-400 max-w-2xl">
               Generate structured, grounded SVG diagrams for Free-Body Diagrams, Ray Optics, Circuits,
               Molecular VSEPR geometry, and Conic sections from your active study notes.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 self-start lg:self-end max-w-full">
+          <div className="flex flex-wrap items-center gap-2 self-start xl:self-end max-w-full">
             <select
               aria-label="Select active study document for studio"
               value={activeDocument.id}
@@ -998,7 +1059,7 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
       {subTab === 'visualize' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* LEFT 4 COLS: Concept Input, Category, Presets & Source Grounding */}
-          <div className="lg:col-span-4 space-y-5">
+          <div className="lg:col-span-4 space-y-5 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto">
             <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-5 space-y-4 shadow-2xs">
               <div className="space-y-1">
                 <h2 className="text-base font-bold text-ink dark:text-slate-100 flex items-center gap-2">
@@ -1098,10 +1159,11 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
                     <button
                       key={preset.label}
                       type="button"
+                      data-testid={`preset-btn-${preset.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
                       onClick={() => {
                         setVisualConceptInput(preset.concept);
                         setVisualCategory(preset.category);
-                        void handleRunVisualize(preset.concept, preset.category);
+                        void handleRunVisualize(preset.concept, preset.category, false);
                       }}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-canvas hover:border-brand/40 text-[11px] text-ink dark:text-slate-200 font-medium transition-all cursor-pointer"
                     >
@@ -1141,22 +1203,76 @@ export const CreativeStudioView: React.FC<CreativeStudioViewProps> = ({
           </div>
 
           {/* RIGHT 8 COLS: Diagram Result / Canvas / Component Breakdown */}
-          <div className="lg:col-span-8 space-y-4">
-            {visualResult?.spec ? (
+          <div className="lg:col-span-8 space-y-4 lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto lg:pr-1">
+            {visualError && !isVisualizing ? (
+              <div
+                data-testid="visual-diagram-error"
+                role="alert"
+                className="p-6 rounded-3xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 space-y-3"
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold text-rose-950 dark:text-rose-100">
+                      Diagram Could Not Be Generated
+                    </h3>
+                    <p className="text-xs text-rose-800 dark:text-rose-200 leading-relaxed">
+                      {visualError}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void handleRunVisualize(undefined, undefined, true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-strong text-white text-xs font-semibold cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Retry AI Generation</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = JEE_PRESETS[0];
+                      setVisualConceptInput(p.concept);
+                      setVisualCategory(p.category);
+                      void handleRunVisualize(p.concept, p.category, false);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-ink dark:text-slate-100 cursor-pointer"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Load Verified Physics Preset</span>
+                  </button>
+                </div>
+              </div>
+            ) : visualResult?.spec ? (
               <div className="space-y-4">
-                {/* Top Banner if Notice / Fallback */}
+                {/* Top Banner if Notice / Status */}
                 {visualResult.modelNotice && (
                   <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-950 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                       <span>
-                        <strong>Status ({visualResult.verificationStatus || 'VERIFIED'}):</strong>{' '}
+                        <strong>Status ({visualResult.verificationStatus || 'VERIFIED_TEMPLATE'}):</strong>{' '}
                         {visualResult.modelNotice}
                       </span>
                     </div>
-                    <span className="px-2.5 py-0.5 rounded-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-[11px] font-bold shrink-0">
-                      {visualResult.isAiGenerated ? 'AI Model Grounded' : 'Deterministic SVG Template'}
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!visualResult.isAiGenerated && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleRunVisualize(visualResult.concept, visualResult.style, true)
+                          }
+                          className="px-2.5 py-1 rounded-full bg-brand text-white text-[11px] font-bold hover:bg-brand-strong cursor-pointer"
+                        >
+                          Enhance with AI
+                        </button>
+                      )}
+                      <span className="px-2.5 py-0.5 rounded-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-[11px] font-bold shrink-0">
+                        {visualResult.isAiGenerated ? 'AI Unverified Schematic' : 'Verified Deterministic Template'}
+                      </span>
+                    </div>
                   </div>
                 )}
 

@@ -187,3 +187,40 @@ test('per-document studyState syncs conceptAttemptsJson, conceptMasteryJson, and
   );
 });
 
+test('shared_snapshots forbids collection listing and blocks revoked or expired links', async () => {
+  const alice = env.authenticatedContext('alice', verifiedGoogle).firestore();
+  const bob = env.authenticatedContext('bob', verifiedGoogle).firestore();
+
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'shared_snapshots/share-active'), {
+      shareId: 'share-active',
+      ownerUid: 'alice',
+      kind: 'notes',
+      revoked: false,
+      expiresAtMs: Date.now() + 600_000,
+      createdAt: now,
+    });
+    await setDoc(doc(ctx.firestore(), 'shared_snapshots/share-revoked'), {
+      shareId: 'share-revoked',
+      ownerUid: 'alice',
+      kind: 'notes',
+      revoked: true,
+      expiresAtMs: Date.now() + 600_000,
+      createdAt: now,
+    });
+    await setDoc(doc(ctx.firestore(), 'shared_snapshots/share-expired'), {
+      shareId: 'share-expired',
+      ownerUid: 'alice',
+      kind: 'notes',
+      revoked: false,
+      expiresAtMs: 1_000_000,
+      createdAt: now,
+    });
+  });
+
+  await assertSucceeds(getDoc(doc(bob, 'shared_snapshots/share-active')));
+  await assertFails(getDoc(doc(bob, 'shared_snapshots/share-revoked')));
+  await assertFails(getDoc(doc(bob, 'shared_snapshots/share-expired')));
+  await assertFails(getDocs(collection(alice, 'shared_snapshots')));
+});
+

@@ -1308,8 +1308,17 @@ export const DEFAULT_JEE_75_QUESTION_PAPER: JeeQuestion[] = [
 
 import { JeeCandidateResponse, JeeExamResult, JeeSubject, JeeSubjectStat } from '../types/jeeExam';
 
+export interface PercentileEstimateWithMetadata {
+  percentile: number;
+  isEmpiricalNtaData: false;
+  modelType: 'heuristic_step_reference_curve';
+  datasetVersion: string;
+  disclaimer: string;
+}
+
 /**
- * Estimates JEE Main percentile based on official historical score curves.
+ * Estimates JEE Main percentile using a static heuristic score step table.
+ * NOTE: This is NOT empirical official NTA percentile distribution data.
  */
 export function estimateJeePercentile(marks: number): number {
   if (marks >= 280) return 99.98;
@@ -1325,6 +1334,17 @@ export function estimateJeePercentile(marks: number): number {
   if (marks >= 40) return 66.00;
   if (marks >= 20) return 50.00;
   return Math.max(10, Math.round(marks * 1.5));
+}
+
+export function estimateJeePercentileWithMetadata(marks: number): PercentileEstimateWithMetadata {
+  return {
+    percentile: estimateJeePercentile(marks),
+    isEmpiricalNtaData: false,
+    modelType: 'heuristic_step_reference_curve',
+    datasetVersion: 'learnmate-heuristic-ref-2024-2026-v1',
+    disclaimer:
+      'Illustrative heuristic estimate based on reference mark brackets — not official NTA normalization data.',
+  };
 }
 
 /**

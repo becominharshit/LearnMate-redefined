@@ -201,6 +201,15 @@ export function createAiTutorRouter(): Router {
             },
           });
 
+          const tokens = Number(
+            resp.usageMetadata?.totalTokenCount ||
+              Number(resp.usageMetadata?.promptTokenCount || 0) +
+                Number(resp.usageMetadata?.candidatesTokenCount || 0)
+          );
+          if (tokens > 0) {
+            res.locals.measuredAiTokens = Number(res.locals.measuredAiTokens || 0) + tokens;
+          }
+
           const parsed = JSON.parse(resp.text || '{}') as Partial<SocraticCluePayload>;
           if (parsed.clue1Principle && parsed.clue2Equation && parsed.clue3AlgebraicStep) {
             res.json({
@@ -246,18 +255,25 @@ export function createAiTutorRouter(): Router {
         languageRegister?: TutorLanguageRegister;
       };
 
+      const cleanHint = String(rawTextHint || '').trim();
+      const hasImage = Boolean(String(imageBase64 || '').trim());
+      if (!hasImage && !cleanHint) {
+        res.status(400).json({
+          error: 'Please upload a photo/screenshot of your question or paste problem text.',
+          errorCode: 'missing_ocr_input',
+        });
+        return;
+      }
+
       const safeRegister: TutorLanguageRegister =
         languageRegister === 'Hinglish' || languageRegister === 'Hindi'
           ? languageRegister
           : 'English';
 
       const ai = getGeminiClient();
-      const matched = matchSyllabusChapterFromText(rawTextHint || 'Rotational Motion');
-      const defaultFormula =
-        matched?.topics?.[0]?.formulas?.[0] ||
-        'I_{\\text{cm}} \\alpha = \\tau_{\\text{net}}, \\quad a_{\\text{cm}} = \\frac{g\\sin\\theta}{1 + k^2/R^2}';
+      let aiErrorReason: string | null = null;
 
-      if (ai && imageBase64) {
+      if (ai && hasImage) {
         try {
           const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
           const resp = await ai.models.generateContent({
@@ -303,11 +319,24 @@ export function createAiTutorRouter(): Router {
             },
           });
 
+          const tokens = Number(
+            resp.usageMetadata?.totalTokenCount ||
+              Number(resp.usageMetadata?.promptTokenCount || 0) +
+                Number(resp.usageMetadata?.candidatesTokenCount || 0)
+          );
+          if (tokens > 0) {
+            res.locals.measuredAiTokens = Number(res.locals.measuredAiTokens || 0) + tokens;
+          }
+
           const parsed = JSON.parse(resp.text || '{}') as Record<string, string>;
           if (parsed.extractedLatexProblem) {
             const chapterMatch = matchSyllabusChapterFromText(
               `${parsed.matchedChapterTitle || ''} ${parsed.extractedLatexProblem}`
             );
+            const matchedFormula =
+              chapterMatch?.topics?.[0]?.keyFormulas?.[0]?.expression ||
+              chapterMatch?.highYieldFormulas?.[0] ||
+              '';
             res.json({
               extractedLatexProblem: parsed.extractedLatexProblem,
               detectedSubject:
@@ -324,7 +353,7 @@ export function createAiTutorRouter(): Router {
                 clue3AlgebraicStep: parsed.clue3AlgebraicStep,
               },
               stepByStepSolution: parsed.stepByStepSolution,
-              keyFormula: parsed.keyFormula || defaultFormula,
+              keyFormula: parsed.keyFormula || matchedFormula,
               commonTrap:
                 parsed.commonTrap ||
                 'Check SI unit conversions and vector sign conventions before final substitution.',
@@ -332,21 +361,36 @@ export function createAiTutorRouter(): Router {
             } satisfies OcrDoubtResultPayload);
             return;
           }
-        } catch {
-          // Fall back to deterministic OCR/text parser below
+          aiErrorReason = 'OCR vision model could not read a problem statement from this image.';
+        } catch (err) {
+          aiErrorReason =
+            err instanceof Error ? err.message : 'Vision OCR provider request failed.';
         }
       }
 
-      const fallbackClues = buildDeterministicSocraticClues(
-        rawTextHint || matched.title,
-        safeRegister
-      );
-      const extractedText =
-        rawTextHint.trim() ||
-        `A uniform solid cylinder of mass $M$ and radius $R$ rolls without slipping down an inclined plane of angle $\\theta$. Find the linear acceleration $a_{\\text{cm}}$ of its center of mass and the minimum coefficient of static friction $\\mu_{\\min}$ required to prevent slipping.`;
+      // Only solve via text hint when the student explicitly supplied problem text;
+      // NEVER fabricate an unrelated sample problem when an uploaded image could not be OCR-read.
+      if (!cleanHint) {
+        const status = !ai ? 503 : 422;
+        res.status(status).json({
+          error: !ai
+            ? 'Live image OCR is unavailable because vision AI credentials are not configured on this server. Paste your question text directly to get Socratic hints.'
+            : `${aiErrorReason || 'Could not extract readable text from this image.'} Please upload a sharper crop or type the question text.`,
+          errorCode: 'ocr_unavailable_or_unreadable',
+          code: 'ocr_unavailable_or_unreadable',
+        });
+        return;
+      }
+
+      const matched = matchSyllabusChapterFromText(cleanHint);
+      const defaultFormula =
+        matched?.topics?.[0]?.keyFormulas?.[0]?.expression ||
+        matched?.highYieldFormulas?.[0] ||
+        '';
+      const fallbackClues = buildDeterministicSocraticClues(cleanHint, safeRegister);
 
       res.json({
-        extractedLatexProblem: extractedText,
+        extractedLatexProblem: cleanHint,
         detectedSubject: matched.subject,
         matchedChapterId: matched.id,
         matchedChapterTitle: matched.title,
@@ -359,8 +403,8 @@ export function createAiTutorRouter(): Router {
         stepByStepSolution: fallbackClues.finalSolutionSummary,
         keyFormula: defaultFormula,
         commonTrap:
-          'Avoid substituting f_s = \\mu_s N for pure rolling unless rolling is on the verge of slipping.',
-        modelUsed: 'learnmate-ocr-fallback-engine',
+          'Verify SI units, limiting conditions, and sign conventions before final substitution.',
+        modelUsed: 'learnmate-text-hint-engine',
       } satisfies OcrDoubtResultPayload);
     } catch (err) {
       res.status(500).json({

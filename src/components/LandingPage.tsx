@@ -73,11 +73,11 @@ const STEPS = [
 
 const LIMITS = [
   'AI answers can be wrong. Every answer cites pages; check important steps and use Report when something looks off.',
-  'We are building for JEE Main 2027 Session 1 first. JEE Advanced support comes after the February session, once its pattern is confirmed.',
-  'A full 75-question, 3-hour mock test is not built yet. That is the next phase after practice and revision.',
-  'NTA bans calculators and every electronic device in the exam hall. The calculator inside LearnMate is only for practice at home.',
-  'YouTube import uses the official player and a transcript you paste. LearnMate does not download or re-upload videos.',
-  'Image and video generation stays paused for under-18 accounts because the providers’ terms do not allow it. Claude-written study help is unaffected.',
+  'Supports JEE Main 2027 (75-question NTA CBT pattern) plus JEE Advanced multi-correct, numerical, and matrix-match archetypes.',
+  'Historical NTA shift slots are cataloged transparently; only editorial practice sets or verified datasets appear in practice mode.',
+  'NTA bans calculators and every electronic device in the exam hall. The Study Tools graphing & scientific calculator inside LearnMate is only for home practice.',
+  'YouTube import uses the official player and transcript processing. LearnMate does not download or re-upload videos.',
+  'Third-party video generation stays paused for under-18 accounts to honor age-band safety rules. Verified SVG concept diagrams and step-by-step AI explanations remain available.',
   'LearnMate is independent. It is not affiliated with NTA, IITs or any coaching institute, and it cannot promise a rank.',
 ];
 
@@ -89,8 +89,8 @@ const PRIVACY_POINTS = [
   },
   {
     icon: FileText,
-    title: 'Your PDF stays on your device',
-    body: 'The original file is kept locally. Only the pages needed to answer a question are sent to Claude when you ask.',
+    title: 'Your PDF stays under your control',
+    body: 'PDF parsing runs locally in your browser. Only the relevant page excerpts needed for your question are sent to the study tutor when you ask.',
   },
   {
     icon: ShieldCheck,
@@ -141,7 +141,7 @@ const FAQS = [
   {
     question: 'Will it work for JEE Advanced?',
     answer:
-      'Not yet. We are focusing on JEE Main 2027 Session 1 first. JEE Advanced is planned for after the February session, when the official dates and pattern are available.',
+      'Yes — Practice Hub includes JEE Advanced Paper 1 pattern mocks with partial credit (+4/-2 with +3/+2/+1) and matrix-match questions alongside JEE Main 2027 full 75-question mocks.',
   },
   {
     question: 'Can it replace my coaching or school teacher?',
@@ -154,9 +154,9 @@ const FAQS = [
       'Private study data is removed from that browser, so the next person on a shared laptop cannot open it. Signing back in restores it from your account.',
   },
   {
-    question: 'Why can’t I generate images or videos?',
+    question: 'Why are third-party media generators restricted?',
     answer:
-      'The image and video providers we can access require adult users. Since most JEE students are under 18, those features stay paused. Diagrams and study explanations are being built with Claude instead.',
+      'External media providers require adult users. For under-18 safety compliance, third-party video generation stays paused while deterministic JEE SVG diagrams, interactive step animations, and AI explanations remain active.',
   },
   {
     question: 'How do I report a wrong answer?',
@@ -357,7 +357,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     Page 1
                   </span>
                 </div>
-                <div className="space-y-4 p-5">
+                <div className="space-y-4 p-5 pb-10">
                   <p className="text-sm leading-relaxed text-body">
                     If B has already happened, how likely is A? The sample space shrinks from every
                     outcome to just B.

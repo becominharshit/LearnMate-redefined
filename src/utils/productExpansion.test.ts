@@ -344,11 +344,21 @@ describe('Cartesian Equation Grapher & Discontinuity Detection', () => {
     }
 
     const audit = getPyqCorpusCoverageAudit();
-    assert.equal(audit.totalPapersInMetadata, 7);
+    assert.equal(audit.totalPapersInMetadata, 8);
     assert.equal(audit.totalQuestionsInCorpus, 81);
     assert.equal(audit.jeeMainQuestionsCount, 75);
     assert.equal(audit.jeeAdvancedQuestionsCount, 6);
-    assert.ok(audit.papers.every((p) => p.coverageStatus === 'PARTIAL_QUESTIONS'));
+    assert.equal(audit.officialVerifiedQuestionsCount, 0);
+    assert.equal(audit.originalEditorialQuestionsCount, 84); // 75 main + 6 adv + 3 archetypes
+    assert.equal(audit.incompleteHistoricalPapersCount, 6);
+    assert.ok(
+      audit.papers
+        .filter((p) => p.isOfficialPastPaper)
+        .every((p) => p.coverageStatus === 'METADATA_ONLY' && !p.isCompleteOfficialPaper)
+    );
+    assert.ok(
+      OFFICIAL_PYQ_QUESTIONS.every((q) => !q.verificationMetadata.isFakeShiftAssignment)
+    );
     assert.ok(audit.papers.every((p) => p.pdfType === 'learnmate_reconstructed_pdf'));
   });
 

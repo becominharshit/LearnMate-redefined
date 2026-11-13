@@ -109,7 +109,13 @@ export interface VisualizeConceptResponse {
   style: string;
   isAiGenerated: boolean;
   spec: StructuredDiagramSpec;
-  verificationStatus?: 'WORKING_VERIFIED' | 'BLOCKED_BY_BILLING' | 'FALLBACK';
+  verificationStatus?:
+    | 'VERIFIED_TEMPLATE'
+    | 'AI_UNVERIFIED_SCHEMATIC'
+    | 'REPAIRED_BY_VALIDATOR'
+    | 'WORKING_VERIFIED'
+    | 'BLOCKED_BY_BILLING'
+    | 'FALLBACK';
   generatedImageUrl?: string;
   modelNotice?: string;
   provider?: string;

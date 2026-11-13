@@ -530,12 +530,12 @@ export function buildDailyPracticeCoachPlan(params: {
     id: pyqTaskId,
     title:
       attempts.length === 0
-        ? `Solve your first ${targetExam === 'jee_advanced' ? 'JEE Advanced' : 'JEE Main'} PYQ set`
-        : `Solve 10 ${targetExam === 'jee_advanced' ? 'JEE Advanced' : 'JEE Main'} Official PYQs`,
+        ? `Solve your first ${targetExam === 'jee_advanced' ? 'JEE Advanced' : 'JEE Main'} practice set`
+        : `Solve 10 ${targetExam === 'jee_advanced' ? 'JEE Advanced' : 'JEE Main'} practice questions`,
     subtitle:
       documents.length > 0
-        ? `Connected to ${documents[0].title.replace(/\.pdf$/i, '')} & syllabus archive`
-        : 'Official multi-year paper archive with step-by-step solutions',
+        ? `Connected to ${documents[0].title.replace(/\.pdf$/i, '')} & practice bank`
+        : 'Curated JEE practice bank & shift catalog with step-by-step solutions',
     reason: pyqReason,
     rationale: pyqReason,
     estimatedMinutes: 25,

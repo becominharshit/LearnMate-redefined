@@ -1,15 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Navbar, ActiveTab } from './components/Navbar';
-import { StudyView, StudySubMode, StudyHubSection } from './components/StudyView';
-import { QuickReviseView, QuickReviseSubTab } from './components/QuickReviseView';
-import { PracticeWorkspaceView } from './components/PracticeWorkspaceView';
-import { PdfWorkspaceView } from './components/PdfWorkspaceView';
-import { ResourcesView } from './components/ResourcesView';
-import { CreativeStudioView } from './components/CreativeStudioView';
+import type { StudySubMode, StudyHubSection } from './components/StudyView';
+import type { QuickReviseSubTab } from './components/QuickReviseView';
 import { StudentDashboardView } from './components/StudentDashboardView';
 import { StudentProfileModal } from './components/StudentProfileModal';
-import { ProgressView } from './components/ProgressView';
-import { VoiceTutorModal } from './components/VoiceTutorModal';
 import { AddMaterialModal, AddMaterialMode } from './components/AddMaterialModal';
 import { AuthScreen } from './components/AuthScreen';
 import { VerifyEmailScreen, FirebaseSetupScreen } from './components/AccountGateScreens';
@@ -20,13 +14,46 @@ import { FirstRunSetupModal, type FirstRunAnswers } from './components/FirstRunS
 import { LegalPage } from './components/LegalPage';
 import { AppGuideAndSearchModal } from './components/AppGuideAndSearchModal';
 import type { UtilityTab } from './components/CompactStudyUtilitiesWidget';
-import {
-  StudyToolsWorkspaceView,
-  type StudyToolSubTab,
-} from './components/StudyToolsWorkspaceView';
-import { WeeklyMentorReportModal } from './components/WeeklyMentorReportModal';
-import { AdminCommercialConsoleModal } from './components/AdminCommercialConsoleModal';
+import type { StudyToolSubTab } from './components/StudyToolsWorkspaceView';
 import { PwaOfflineAndJobsBar } from './components/PwaOfflineAndJobsBar';
+
+const StudyView = lazy(() => import('./components/StudyView').then((m) => ({ default: m.StudyView })));
+const QuickReviseView = lazy(() =>
+  import('./components/QuickReviseView').then((m) => ({ default: m.QuickReviseView }))
+);
+const PracticeWorkspaceView = lazy(() =>
+  import('./components/PracticeWorkspaceView').then((m) => ({ default: m.PracticeWorkspaceView }))
+);
+const PdfWorkspaceView = lazy(() =>
+  import('./components/PdfWorkspaceView').then((m) => ({ default: m.PdfWorkspaceView }))
+);
+const ResourcesView = lazy(() =>
+  import('./components/ResourcesView').then((m) => ({ default: m.ResourcesView }))
+);
+const CreativeStudioView = lazy(() =>
+  import('./components/CreativeStudioView').then((m) => ({ default: m.CreativeStudioView }))
+);
+const ProgressView = lazy(() =>
+  import('./components/ProgressView').then((m) => ({ default: m.ProgressView }))
+);
+const StudyToolsWorkspaceView = lazy(() =>
+  import('./components/StudyToolsWorkspaceView').then((m) => ({
+    default: m.StudyToolsWorkspaceView,
+  }))
+);
+const WeeklyMentorReportModal = lazy(() =>
+  import('./components/WeeklyMentorReportModal').then((m) => ({
+    default: m.WeeklyMentorReportModal,
+  }))
+);
+const AdminCommercialConsoleModal = lazy(() =>
+  import('./components/AdminCommercialConsoleModal').then((m) => ({
+    default: m.AdminCommercialConsoleModal,
+  }))
+);
+const VoiceTutorModal = lazy(() =>
+  import('./components/VoiceTutorModal').then((m) => ({ default: m.VoiceTutorModal }))
+);
 import type { BackgroundJobRecord } from './utils/commercialScaleEngine';
 import { buildSampleChapterDocument, SAMPLE_CHAPTER_ID } from './data/sampleChapter';
 import {
@@ -565,7 +592,8 @@ export function App() {
     stepLabel: string
   ): string => {
     const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const now = new Date().toISOString();
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
     const job: BackgroundJobRecord = {
       jobId,
       uid: user?.uid || 'guest-student',
@@ -574,6 +602,9 @@ export function App() {
       status: 'running',
       progressPct: 25,
       stepLabel,
+      retryCount: 0,
+      maxRetries: 3,
+      leaseExpiresAt: new Date(nowMs + 5 * 60_000).toISOString(),
       createdAt: now,
       updatedAt: now,
     };
@@ -1098,6 +1129,13 @@ export function App() {
 
       {/* Main Content Container (Full-bleed widescreen up to 1920px) */}
       <main className="flex-1 min-w-0">
+        <Suspense
+          fallback={
+            <div className="py-20 text-center text-xs font-semibold text-muted">
+              Loading workspace…
+            </div>
+          }
+        >
         {(activeTab === 'dashboard' || activeTab === 'home') && (
           <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 py-8 lg:py-10">
             <StudentDashboardView
@@ -1307,6 +1345,7 @@ export function App() {
             />
           </div>
         )}
+        </Suspense>
       </main>
 
       {/* Global Search (Ctrl+K) & Interactive App Guide (?) Modal */}
@@ -1421,28 +1460,38 @@ export function App() {
       />
 
       {/* Weekly Mentor & Parent Progress Report Modal */}
-      <WeeklyMentorReportModal
-        isOpen={mentorReportOpen}
-        onClose={() => setMentorReportOpen(false)}
-        studentName={user?.displayName || studentProfile.fullName || 'Student'}
-        studentProfile={studentProfile}
-        documents={documents}
-      />
+      {mentorReportOpen && (
+        <Suspense fallback={null}>
+          <WeeklyMentorReportModal
+            isOpen={mentorReportOpen}
+            onClose={() => setMentorReportOpen(false)}
+            studentName={user?.displayName || studentProfile.fullName || 'Student'}
+            studentProfile={studentProfile}
+            documents={documents}
+          />
+        </Suspense>
+      )}
 
       {/* Commercial Plans, Token Quotas, Semantic Cache & System Health Modal */}
-      <AdminCommercialConsoleModal
-        isOpen={commercialConsoleOpen}
-        onClose={() => setCommercialConsoleOpen(false)}
-      />
+      {commercialConsoleOpen && (
+        <Suspense fallback={null}>
+          <AdminCommercialConsoleModal
+            isOpen={commercialConsoleOpen}
+            onClose={() => setCommercialConsoleOpen(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Live Voice AI Tutor Modal */}
-      {effectiveDoc && (
-        <VoiceTutorModal
-          isOpen={voiceTutorOpen}
-          onClose={() => setVoiceTutorOpen(false)}
-          activeDocument={effectiveDoc}
-          weakTopics={studentProfile.weakAreas}
-        />
+      {effectiveDoc && voiceTutorOpen && (
+        <Suspense fallback={null}>
+          <VoiceTutorModal
+            isOpen={voiceTutorOpen}
+            onClose={() => setVoiceTutorOpen(false)}
+            activeDocument={effectiveDoc}
+            weakTopics={studentProfile.weakAreas}
+          />
+        </Suspense>
       )}
     </div>
   );

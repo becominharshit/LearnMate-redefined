@@ -68,7 +68,7 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
       aria-label="Study Streak Tracker"
       className="bg-white dark:bg-[#121A2E] rounded-2xl border border-line p-4 sm:p-5 shadow-xs transition-colors"
     >
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="flex flex-col gap-3.5">
         {/* Left: Streak identity & metrics */}
         <div className="flex items-start sm:items-center gap-3.5">
           <div
@@ -150,16 +150,16 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
           </div>
         </div>
 
-        {/* Right: Quick daily check-in button */}
-        <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 lg:pt-0 border-t lg:border-t-0 border-line">
-          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-xl bg-soft border border-line">
+        {/* Bottom action strip: Current streak counter + daily check-in button */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2.5 border-t border-line">
+          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-xl bg-soft border border-line shrink-0">
             <span
               data-testid="streak-current-count"
               className="text-2xl font-extrabold text-ink tabular-nums"
             >
               {summary.currentStreak}
             </span>
-            <span className="text-xs font-semibold text-muted">
+            <span className="text-xs font-semibold text-muted whitespace-nowrap">
               {summary.currentStreak === 1 ? 'day streak' : 'days streak'}
             </span>
           </div>
@@ -169,9 +169,9 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
               type="button"
               data-testid="streak-checkin-btn"
               onClick={handleCheckInToday}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-brand hover:bg-brand-strong text-white shadow-xs transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-brand hover:bg-brand-strong text-white shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+              <Sparkles className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
               Log Today&apos;s Study
             </button>
           ) : (
@@ -210,7 +210,7 @@ export const StreakTracker: React.FC<StreakTrackerProps> = ({
 
         <div
           data-testid="streak-days-grid"
-          className="grid grid-cols-7 sm:grid-cols-14 gap-1.5"
+          className="grid grid-cols-7 gap-1.5"
         >
           {summary.days.map((day) => {
             const cellStyle = day.inCurrentStreak

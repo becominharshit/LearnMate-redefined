@@ -56,6 +56,7 @@ export function createFirebaseTokenVerifier(projectId: string, useEmulator = fal
       uid: decoded.uid,
       email: decoded.email,
       email_verified: decoded.email_verified,
+      admin: decoded.admin === true,
       firebase: decoded.firebase,
     };
   };
@@ -112,22 +113,49 @@ export function createOriginGuardMiddleware(extraAllowedOrigins: string[]) {
   };
 }
 
-export function createAdminTokenGuardMiddleware() {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV !== 'production') {
+export function createAdminTokenGuardMiddleware(options?: {
+  alwaysRequire?: boolean;
+  verifyStudentIdToken?: TokenVerifier;
+}) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const expected = (process.env.ADMIN_TOKEN || '').trim();
+    const provided = (req.get('x-admin-token') || '').trim();
+
+    if (
+      expected.length > 0 &&
+      provided.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
+    ) {
       next();
       return;
     }
-    const expected = process.env.ADMIN_TOKEN || '';
-    const provided = req.get('x-admin-token') || '';
-    const allowed =
-      expected.length > 0 &&
-      provided.length === expected.length &&
-      crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
-    if (!allowed) {
-      res.status(404).json({ error: 'Not found' });
+
+    // Check already-attached verified student or verify Bearer token for Firebase custom admin claim
+    const studentReq = req as StudentRequest;
+    if (studentReq.student?.isAdmin === true) {
+      next();
       return;
     }
-    next();
+
+    const bearer = readBearerToken(req.get('authorization'));
+    if (bearer && options?.verifyStudentIdToken) {
+      const auth = await authenticateStudent(options.verifyStudentIdToken, bearer);
+      if (auth.ok && auth.student.isAdmin === true) {
+        studentReq.student = auth.student;
+        next();
+        return;
+      }
+    }
+
+    // In local dev ONLY for diagnostics when alwaysRequire is false and ADMIN_TOKEN is unset
+    if (!options?.alwaysRequire && process.env.NODE_ENV !== 'production' && !expected) {
+      next();
+      return;
+    }
+
+    res.status(403).json({
+      error: 'Administrator authorization required.',
+      code: 'admin_authorization_required',
+    });
   };
 }

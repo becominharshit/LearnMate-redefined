@@ -19,7 +19,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isVerifiedStudent() && (
-        request.auth.token.email == "harshitkumar7407@gmail.com" ||
+        request.auth.token.admin == true ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -157,6 +157,42 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidAiReport(request.resource.data, userId, reportId);
         allow delete: if isOwner(userId);
       }
+
+      // Commercial entitlements are read-only for the owning student; writes require server Admin SDK / signed billing webhook.
+      match /entitlements/{entitlementId} {
+        allow read: if isOwner(userId);
+        allow create, update, delete: if false;
+      }
+
+      // Closed-loop learning intelligence records (diagnosis, seenQuestionIds, consent settings).
+      match /learningIntelligence/{recordId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) &&
+                                 request.resource.data.keys().hasAll(['uid', 'updatedAt']) &&
+                                 request.resource.data.uid == userId &&
+                                 request.resource.data.updatedAt is string &&
+                                 request.resource.data.updatedAt.size() <= 64;
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /admins/{adminId} {
+      allow read: if isOwner(adminId);
+      allow write: if false;
+    }
+
+    match /shared_snapshots/{shareId} {
+      allow get: if resource != null &&
+                    resource.data.revoked != true &&
+                    (!('expiresAtMs' in resource.data) || request.time.toMillis() < resource.data.expiresAtMs);
+      allow list: if false;
+      allow create: if isVerifiedStudent() &&
+                       request.resource.data.keys().hasAll(['shareId', 'ownerUid', 'kind', 'createdAt']) &&
+                       request.resource.data.shareId == shareId &&
+                       request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if isVerifiedStudent() &&
+                               resource != null &&
+                               resource.data.ownerUid == request.auth.uid;
     }
 
     // ===============================================================

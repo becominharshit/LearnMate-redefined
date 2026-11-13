@@ -7,6 +7,7 @@ export interface DecodedStudentToken {
   uid: string;
   email?: string;
   email_verified?: boolean;
+  admin?: boolean;
   firebase?: { sign_in_provider?: string };
 }
 
@@ -18,6 +19,7 @@ export interface VerifiedStudent {
   email?: string;
   emailVerified: boolean;
   signInProvider: string;
+  isAdmin?: boolean;
 }
 
 export type StudentAuthResult =
@@ -89,6 +91,7 @@ export async function authenticateStudent(
       email: decoded.email,
       emailVerified: Boolean(decoded.email_verified),
       signInProvider: provider,
+      isAdmin: decoded.admin === true,
     },
   };
 }

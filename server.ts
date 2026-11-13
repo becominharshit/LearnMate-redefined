@@ -18,6 +18,7 @@ import {
   createAdminTokenGuardMiddleware,
   createFirebaseTokenVerifier,
   readFirebaseConfigProjectId,
+  type StudentRequest,
 } from './src/server/middleware/authAndSecurity.ts';
 import {
   DistributedRateLimiterAndTokenBudget,
@@ -29,6 +30,9 @@ import { createStorageRouter } from './src/server/routes/storageRoutes.ts';
 import { createCommercialAndScaleRouter } from './src/server/routes/commercialAndScaleRoutes.ts';
 import { attachVoiceLiveWebSocketServer } from './src/server/ws/voiceLiveServer.ts';
 import { registerCoreStudyRoutes } from './src/server/coreStudyEngine.ts';
+import { getDurableStore } from './src/server/persistence/durableStore.ts';
+import { getEntitlementService } from './src/server/services/entitlementService.ts';
+import { getAiTelemetryService } from './src/server/services/aiTelemetryService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,13 +46,18 @@ const FIREBASE_PROJECT_ID = (
 ).trim();
 const FIREBASE_USE_EMULATOR = process.env.VITE_FIREBASE_USE_EMULATOR === 'true';
 
+const durableStore = getDurableStore();
+const entitlementService = getEntitlementService();
+const aiTelemetryService = getAiTelemetryService();
+
 const verifyStudentIdToken = createFirebaseTokenVerifier(
   FIREBASE_PROJECT_ID,
   FIREBASE_USE_EMULATOR
 );
 const rateLimiter = new DistributedRateLimiterAndTokenBudget({
-  dailyTokenCap: 250_000,
-  maxRequestsPerMinute: 36,
+  dailyTokenCap: 50_000,
+  maxRequestsPerMinute: 20,
+  store: durableStore,
 });
 
 function getGenAIClient(): GoogleGenAI | null {
@@ -78,57 +87,61 @@ async function startServer() {
 
   app.use('/api', createOriginGuardMiddleware(extraAllowedOrigins));
 
-  // Large payload routes (OCR scans, audio transcription, video lessons, binary storage)
-  app.use(
-    [
-      '/api/study/scan-notes',
-      '/api/study/transcribe-audio',
-      '/api/create/video-lesson',
-      '/api/tutor/ocr-doubt',
-      '/api/storage',
-    ],
-    express.json({ limit: '12mb' })
-  );
-  app.use(express.json({ limit: '2mb' }));
+  const jsonOptions = {
+    limit: '2mb',
+    verify: (req: express.Request & { rawBody?: string }, _res: express.Response, buf: Buffer) => {
+      if (req.originalUrl?.includes('/api/commercial/webhook/')) {
+        req.rawBody = buf.toString('utf8');
+      }
+    },
+  };
 
-  // Modular Auth, Sliding-Window Rate Limiter & Per-User Daily AI Token Budget Middleware
+  app.use(
+    ['/api/study/scan-notes', '/api/study/transcribe-audio', '/api/create/video-lesson', '/api/tutor/ocr-doubt', '/api/storage'],
+    express.json({ limit: '20mb' })
+  );
+  app.use(express.json(jsonOptions));
+
+  // Modular Auth, IP Throttle, Sliding-Window Rate Limiter & Tier-Derived Daily AI Token Budget
   app.use(
     '/api',
     createAuthAndQuotaMiddleware({
       verifyStudentIdToken,
       rateLimiter,
+      getTierLimitsForUser: (uid) => {
+        const { tier } = entitlementService.getEffectiveTierSpec(uid);
+        return { dailyTokenCap: tier.dailyTokenCap, maxRequestsPerMinute: tier.maxRequestsPerMinute };
+      },
     })
   );
 
-  // Admin Token Guard for internal telemetry & Vertex probes in production
-  app.use(
-    ['/api/usage', '/api/capabilities', '/api/vertex'],
-    createAdminTokenGuardMiddleware()
-  );
+  app.use(['/api/usage', '/api/capabilities', '/api/vertex'], createAdminTokenGuardMiddleware({ verifyStudentIdToken }));
 
-  // Token budget status endpoint
   app.get('/api/quota/status', (req, res) => {
-    const uid =
-      (req as express.Request & { student?: { uid: string } }).student?.uid ||
-      'dev-student-local';
-    res.json(rateLimiter.getTokenBudgetStatus(uid));
+    const uid = (req as StudentRequest).student?.uid || 'dev-student-local';
+    const { tier } = entitlementService.getEffectiveTierSpec(uid);
+    res.json(rateLimiter.getTokenBudgetStatus(uid, Date.now(), tier.dailyTokenCap, tier.maxRequestsPerMinute));
   });
 
-  // Mount Phase 1 & Commercial Scalability Modular Routers
   app.use('/api/tutor', createAiTutorRouter());
   app.use('/api/pyq', createPyqAndCbtRouter());
   app.use('/api/cbt', createPyqAndCbtRouter());
-  app.use('/api/storage', createStorageRouter());
-  app.use('/api', createCommercialAndScaleRouter({ rateLimiter }));
+  app.use('/api/storage', createStorageRouter({ store: durableStore }));
+  app.use(
+    '/api',
+    createCommercialAndScaleRouter({
+      rateLimiter,
+      store: durableStore,
+      entitlementService,
+      verifyStudentIdToken,
+      getCostTelemetrySummary: () => aiTelemetryService.getAdminSummary(),
+    })
+  );
 
-  // Mount Core Study, Revision, Practice, YouTube & Vertex Routes
   registerCoreStudyRoutes(app);
 
   if (!isProduction) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
@@ -143,8 +156,6 @@ async function startServer() {
   }
 
   const httpServer = http.createServer(app);
-
-  // Attach Authenticated Gemini Live Voice Tutoring WebSocket Server (/api/live)
   attachVoiceLiveWebSocketServer(httpServer, {
     verifyStudentIdToken,
     rateLimiter,
@@ -154,7 +165,11 @@ async function startServer() {
   });
 
   httpServer.listen(PORT, '0.0.0.0', () => {
+    const durability = durableStore.isProductionDurable();
     console.log(`LearnMate modular server running on http://localhost:${PORT}`);
+    if (isProduction && !durability.durable) {
+      console.warn(`[DURABILITY WARNING] ${durability.reason} Commercial, storage, and quota endpoints will fail closed (503).`);
+    }
   });
 }
 

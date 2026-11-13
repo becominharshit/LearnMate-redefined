@@ -10,8 +10,10 @@ import {
   BookOpen,
   CheckCircle2,
   AlertTriangle,
+  Play,
+  Pause,
 } from 'lucide-react';
-import type { StructuredDiagramSpec, DiagramElement } from '../types/diagram';
+import type { StructuredDiagramSpec, DiagramElement, DiagramArrow } from '../types/diagram';
 import { serializeDiagramSpecToSvg } from '../utils/diagramEngine';
 
 interface DiagramRendererProps {
@@ -32,8 +34,19 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [downloadToast, setDownloadToast] = useState<boolean>(false);
+  const [isAnimating, setIsAnimating] = useState<boolean>(true);
 
   const { width, height } = spec.viewBox;
+
+  const customArrowColors = Array.from(
+    new Set(
+      spec.elements
+        .filter((e): e is DiagramArrow => e.kind === 'arrow' && Boolean(e.color))
+        .map((e) => e.color!.trim())
+    )
+  );
+  const customMarkerMap = new Map<string, string>();
+  customArrowColors.forEach((c, idx) => customMarkerMap.set(c.toLowerCase(), `arrow-custom-${idx}`));
 
   const handleDownloadSvg = () => {
     const svgContent = serializeDiagramSpecToSvg(spec, isDarkTheme);
@@ -57,14 +70,14 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
 
   const getMarkerId = (color?: string): string => {
     if (!color) return 'arrow-default';
-    const c = color.toLowerCase();
+    const c = color.trim().toLowerCase();
     if (c.includes('red') || c === '#dc2626' || c === '#ef4444') return 'arrow-red';
     if (c.includes('blue') || c === '#2563eb' || c === '#3b82f6') return 'arrow-blue';
     if (c.includes('green') || c === '#16a34a' || c === '#10b981') return 'arrow-green';
-    if (c.includes('amber') || c.includes('orange') || c === '#d97706' || c === '#f59e0b') return 'arrow-amber';
-    if (c.includes('purple') || c.includes('violet') || c === '#9333ea' || c === '#8b5cf6') return 'arrow-purple';
-    if (c.includes('slate') || c.includes('gray') || c === '#64748b') return 'arrow-slate';
-    return 'arrow-default';
+    if (c.includes('amber') || c === 'orange' || c === '#d97706' || c === '#f59e0b') return 'arrow-amber';
+    if (c.includes('purple') || c === 'violet' || c === '#9333ea' || c === '#8b5cf6') return 'arrow-purple';
+    if (c.includes('slate') || c === 'gray' || c === '#64748b') return 'arrow-slate';
+    return customMarkerMap.get(c) || 'arrow-default';
   };
 
   const adaptStrokeOrText = (
@@ -268,14 +281,46 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
       case 'polygon': {
         const fill = adaptFill(el.fill, '#F1F5F9', '#1E293B');
         const stroke = adaptStrokeOrText(el.stroke, '#475569', '#94A3B8');
+        let centroid: { x: number; y: number } | null = null;
+        if (el.label) {
+          const coords = el.points
+            .trim()
+            .split(/[\s,]+/)
+            .map(Number)
+            .filter(Number.isFinite);
+          if (coords.length >= 6) {
+            let sx = 0;
+            let sy = 0;
+            const nPts = Math.floor(coords.length / 2);
+            for (let i = 0; i < nPts; i++) {
+              sx += coords[i * 2];
+              sy += coords[i * 2 + 1];
+            }
+            centroid = { x: sx / nPts, y: sy / nPts };
+          }
+        }
         return (
-          <polygon
-            key={el.id}
-            points={el.points}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={el.strokeWidth || 2}
-          />
+          <g key={el.id}>
+            <polygon
+              points={el.points}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={el.strokeWidth || 2}
+            />
+            {el.label && centroid && (
+              <text
+                x={centroid.x}
+                y={centroid.y + 4}
+                fill={defaultText}
+                fontSize={12}
+                fontWeight="bold"
+                textAnchor="middle"
+                className="select-none"
+              >
+                {el.label}
+              </text>
+            )}
+          </g>
         );
       }
 
@@ -320,9 +365,12 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
         const y1 = el.cy - el.r * Math.sin(rad1);
         const x2 = el.cx + el.r * Math.cos(rad2);
         const y2 = el.cy - el.r * Math.sin(rad2);
-        const diff = Math.abs(el.endAngleDeg - el.startAngleDeg);
+        const delta = el.endAngleDeg - el.startAngleDeg;
+        const diff = Math.abs(delta);
         const largeArc = diff > 180 ? 1 : 0;
-        const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${el.r} ${el.r} 0 ${largeArc} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+        // In SVG Y-down screen coordinates, increasing math angle sweeps counter-clockwise (sweepFlag = 0)
+        const sweepFlag = delta >= 0 ? 0 : 1;
+        const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${el.r} ${el.r} 0 ${largeArc} ${sweepFlag} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
         const midDeg = (el.startAngleDeg + el.endAngleDeg) / 2;
         const midRad = (midDeg * Math.PI) / 180;
         const labelX = el.cx + (el.r + 18) * Math.cos(midRad);
@@ -339,6 +387,7 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
                 fontSize={12}
                 fontWeight="bold"
                 textAnchor="middle"
+                dominantBaseline="middle"
                 className="select-none"
               >
                 {el.label}
@@ -369,6 +418,16 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
             <span className="px-2.5 py-0.5 rounded-full bg-brand-soft text-brand text-[10px] font-bold uppercase tracking-wider">
               {spec.subject} · {spec.category.replace(/_/g, ' ')}
             </span>
+            {spec.verificationBadge === 'VERIFIED_TEMPLATE' && (
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                Verified Preset
+              </span>
+            )}
+            {spec.verificationBadge === 'AI_UNVERIFIED_SCHEMATIC' && (
+              <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
+                AI Schematic (Verify Visually)
+              </span>
+            )}
             {spec.fallbackNotice && (
               <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
                 {spec.fallbackNotice}
@@ -385,6 +444,21 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
 
         {/* Toolbar controls */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsAnimating((a) => !a)}
+            title={isAnimating ? 'Pause diagram motion' : 'Play diagram motion'}
+            aria-label={isAnimating ? 'Pause diagram motion' : 'Play diagram motion'}
+            data-testid="diagram-animate-toggle-btn"
+            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer transition-colors ${
+              isAnimating
+                ? 'border-brand/40 bg-brand-soft text-brand'
+                : 'border-line hover:bg-soft text-muted hover:text-ink'
+            }`}
+          >
+            {isAnimating ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{isAnimating ? 'Animating' : 'Animate'}</span>
+          </button>
           <button
             type="button"
             onClick={() => setZoomLevel((z) => Math.max(0.6, Number((z - 0.15).toFixed(2))))}
@@ -519,6 +593,20 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
               >
                 <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748B" />
               </marker>
+              {customArrowColors.map((color, idx) => (
+                <marker
+                  key={color}
+                  id={`arrow-custom-${idx}`}
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1 L 10 5 L 0 9 z" fill={adaptStrokeOrText(color, color, color)} />
+                </marker>
+              ))}
             </defs>
 
             {/* Canvas background rect */}
@@ -531,6 +619,65 @@ export const DiagramRenderer: React.FC<DiagramRendererProps> = ({
 
             {/* Render all validated elements */}
             {spec.elements.map(renderElement)}
+
+            {/* Continuous Non-Destructive STEM Physics/Optics/Circuit/Conic Motion Overlay */}
+            {isAnimating && (
+              <g data-testid="diagram-animation-overlay" pointerEvents="none">
+                {(spec.animationKind === 'optics_wavefront' || spec.category === 'ray_optics') && (
+                  <>
+                    <circle r="4.5" fill="#DC2626">
+                      <animateMotion dur="2.6s" repeatCount="indefinite" path="M 130 140 L 350 140 L 475.7 312.9" />
+                    </circle>
+                    <circle r="4.5" fill="#D97706">
+                      <animateMotion dur="2.6s" begin="0.8s" repeatCount="indefinite" path="M 130 140 L 475.7 312.9" />
+                    </circle>
+                  </>
+                )}
+                {(spec.animationKind === 'rc_charge_flow' ||
+                  spec.category === 'circuit' ||
+                  spec.category === 'circuit_diagram') && (
+                  <>
+                    {[0, 0.75, 1.5, 2.25].map((delay) => (
+                      <circle key={delay} r="4" fill="#16A34A">
+                        <animateMotion
+                          dur="3s"
+                          begin={`${delay}s`}
+                          repeatCount="indefinite"
+                          path="M 150 240 L 150 160 L 550 160 L 550 230 M 550 245 L 550 360 L 150 360 L 150 255"
+                        />
+                      </circle>
+                    ))}
+                  </>
+                )}
+                {(spec.animationKind === 'fbd_motion' || spec.category === 'free_body_diagram') && (
+                  <circle cx="286.5" cy="281.6" r="8" fill="none" stroke="#4F46E5" strokeWidth="2">
+                    <animate attributeName="r" values="6;16;6" dur="2.2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.9;0.15;0.9" dur="2.2s" repeatCount="indefinite" />
+                  </circle>
+                )}
+                {(spec.animationKind === 'vsepr_vibration' || spec.category === 'molecular_shape') && (
+                  <circle cx="350" cy="220" r="44" fill="none" stroke="#2563EB" strokeWidth="1.5" strokeDasharray="4 4">
+                    <animate attributeName="r" values="40;50;40" dur="2.4s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.7;0.2;0.7" dur="2.4s" repeatCount="indefinite" />
+                  </circle>
+                )}
+                {(spec.animationKind === 'conic_focus_sweep' ||
+                  spec.category === 'conic_section' ||
+                  spec.category === 'conic') && (
+                  <circle
+                    cx={spec.title.toLowerCase().includes('ellipse') ? 494 : 310}
+                    cy="240"
+                    r="8"
+                    fill="none"
+                    stroke="#DC2626"
+                    strokeWidth="2"
+                  >
+                    <animate attributeName="r" values="6;15;6" dur="2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.9;0.2;0.9" dur="2s" repeatCount="indefinite" />
+                  </circle>
+                )}
+              </g>
+            )}
           </svg>
         </div>
       </div>

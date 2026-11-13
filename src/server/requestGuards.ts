@@ -3,12 +3,24 @@
  */
 import type { UsageCategory } from './usageLimits.ts';
 
-/** API paths that need no student login. Admin diagnostics are protected by ADMIN_TOKEN instead. */
+/** API paths that need no student login. Admin diagnostics are protected by ADMIN_TOKEN / custom claim; webhooks by HMAC signatures. */
 const PUBLIC_API_PATHS = new Set(['/api/health', '/api/readiness']);
-const ADMIN_API_PREFIXES = ['/api/usage', '/api/capabilities', '/api/vertex'];
+const WEBHOOK_API_PATHS = new Set([
+  '/api/commercial/webhook/razorpay',
+  '/api/commercial/webhook/stripe',
+]);
+const ADMIN_API_PREFIXES = ['/api/usage', '/api/capabilities', '/api/vertex', '/api/admin'];
+
+export function isWebhookApiPath(path: string): boolean {
+  return WEBHOOK_API_PATHS.has(path);
+}
 
 export function isPublicApiPath(path: string): boolean {
-  return PUBLIC_API_PATHS.has(path) || ADMIN_API_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+  return (
+    PUBLIC_API_PATHS.has(path) ||
+    WEBHOOK_API_PATHS.has(path) ||
+    ADMIN_API_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))
+  );
 }
 
 /** Daily allowance bucket for each AI route; routes not listed only get the per-minute limit. */

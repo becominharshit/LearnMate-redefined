@@ -12,31 +12,59 @@ import {
 import {
   COMMERCIAL_TIERS,
   type CommercialSubscriptionTierId,
+  type SupportedBillingCurrency,
 } from '../utils/commercialScaleEngine';
+import { apiFetch } from '../services/apiFetch';
 
 interface AdminCommercialConsoleModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+const CURRENCY_SYMBOLS: Record<SupportedBillingCurrency, string> = {
+  INR: '₹',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+};
+
 export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [healthData, setHealthData] = useState<any>(null);
-  const [activeTierId, setActiveTierId] = useState<CommercialSubscriptionTierId>('pro_scholar');
+  const [tierData, setTierData] = useState<any>(null);
+  const [invoices, setInvoices] = useState<Array<{
+    invoiceId: string;
+    tierId: string;
+    provider: string;
+    amount: number;
+    currency: SupportedBillingCurrency;
+    status: string;
+    issuedAt: string;
+  }>>([]);
+  const [activeTierId, setActiveTierId] = useState<CommercialSubscriptionTierId>('free_explorer');
+  const [currency, setCurrency] = useState<SupportedBillingCurrency>('INR');
+  const [provider, setProvider] = useState<'razorpay' | 'stripe'>('razorpay');
   const [loading, setLoading] = useState(false);
+  const [billingNotice, setBillingNotice] = useState<string | null>(null);
 
   const fetchHealthAndTiers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/health');
+      const [res, invRes] = await Promise.all([
+        apiFetch('/api/commercial/tiers'),
+        apiFetch('/api/commercial/invoices'),
+      ]);
       if (res.ok) {
         const json = await res.json();
-        setHealthData(json);
-        if (json.subscription?.activeTierId) {
-          setActiveTierId(json.subscription.activeTierId);
+        setTierData(json);
+        if (json.activeTierId) {
+          setActiveTierId(json.activeTierId);
         }
+      }
+      if (invRes.ok) {
+        const invJson = await invRes.json();
+        setInvoices(Array.isArray(invJson.invoices) ? invJson.invoices : []);
       }
     } catch {
       // Offline fallback
@@ -47,23 +75,53 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
 
   useEffect(() => {
     if (isOpen) {
+      setBillingNotice(null);
       void fetchHealthAndTiers();
     }
   }, [isOpen]);
 
   const handleSelectTier = async (tierId: CommercialSubscriptionTierId) => {
-    setActiveTierId(tierId);
+    setBillingNotice(null);
     try {
-      const res = await fetch('/api/commercial/select-tier', {
+      if (tierId === 'free_explorer') {
+        const res = await apiFetch('/api/commercial/select-tier', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tierId }),
+        });
+        if (res.ok) {
+          await fetchHealthAndTiers();
+          setBillingNotice('Switched active plan to Free Explorer.');
+        }
+        return;
+      }
+
+      const checkoutRes = await apiFetch('/api/commercial/checkout/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tierId }),
+        body: JSON.stringify({ tierId, provider, currency }),
       });
-      if (res.ok) {
-        await fetchHealthAndTiers();
+      const json = await checkoutRes.json().catch(() => ({}));
+      if (checkoutRes.ok && json.session?.sessionId) {
+        const sym = CURRENCY_SYMBOLS[currency] || '₹';
+        const priceDisplay = `${sym}${json.session.amount ?? json.session.amountInr}/mo`;
+        if (json.session.checkoutUrl) {
+          setBillingNotice(
+            `Checkout session ${json.session.sessionId} created (${priceDisplay}). Complete payment at ${json.session.checkoutUrl} — tier activates via signed webhook.`
+          );
+        } else {
+          setBillingNotice(
+            `Checkout session ${json.session.sessionId} created (${priceDisplay}). Tier activates automatically after signed payment webhook verification.`
+          );
+        }
+      } else {
+        setBillingNotice(
+          json.error ||
+            'Paid tiers require verified payment checkout or an authorized admin grant. Client-side upgrades are disabled.'
+        );
       }
     } catch {
-      // ignore offline
+      setBillingNotice('Network unavailable — plan changes require server verification.');
     }
   };
 
@@ -94,7 +152,7 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
                 Commercial Plans, AI Token Economics &amp; Corpus Health Console
               </h2>
               <p className="text-xs text-muted">
-                Manage Free Explorer, Pro Scholar &amp; Institute tiers · Monitor Semantic Cache, Hybrid RAG &amp; PYQ Corpus
+                Server-enforced Free Explorer, Pro Scholar &amp; Institute tiers · Monitor Semantic Cache &amp; Provenance Corpus
               </p>
             </div>
           </div>
@@ -123,12 +181,58 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
         <div className="p-6 overflow-y-auto space-y-6">
           {/* Section 1: 3 Commercial Subscription Tiers */}
           <div className="space-y-3">
-            <h3 className="font-display text-sm font-bold text-ink">
-              01. Commercial Entitlement Tiers (Free Explorer · Pro Scholar · Institute)
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-display text-sm font-bold text-ink">
+                01. Commercial Entitlement Tiers (Free Explorer · Pro Scholar · Institute)
+              </h3>
+              <div className="flex items-center gap-2 text-xs">
+                <label htmlFor="billing-currency-select" className="text-muted font-medium">
+                  Currency
+                </label>
+                <select
+                  id="billing-currency-select"
+                  value={currency}
+                  onChange={(e) => {
+                    const nextCur = e.target.value as SupportedBillingCurrency;
+                    setCurrency(nextCur);
+                    if (nextCur !== 'INR' && provider === 'razorpay') {
+                      setProvider('stripe');
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-lg border border-line bg-canvas text-ink font-semibold"
+                >
+                  <option value="INR">INR (₹)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                </select>
+                <label htmlFor="billing-provider-select" className="text-muted font-medium ml-1">
+                  Gateway
+                </label>
+                <select
+                  id="billing-provider-select"
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value as 'razorpay' | 'stripe')}
+                  className="px-2.5 py-1 rounded-lg border border-line bg-canvas text-ink font-semibold"
+                >
+                  <option value="razorpay">Razorpay</option>
+                  <option value="stripe">Stripe</option>
+                </select>
+              </div>
+            </div>
+            {billingNotice && (
+              <div
+                data-testid="commercial-billing-notice"
+                className="p-3 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-900 dark:text-amber-200 font-medium"
+              >
+                {billingNotice}
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {Object.values(COMMERCIAL_TIERS).map((tier) => {
                 const isCurrent = activeTierId === tier.id;
+                const price = tier.pricesByCurrency?.[currency] ?? tier.priceInrMonthly;
+                const sym = CURRENCY_SYMBOLS[currency] || '₹';
                 return (
                   <div
                     key={tier.id}
@@ -144,7 +248,7 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
                           {tier.name}
                         </span>
                         <span className="font-mono tabular-nums text-xs font-bold text-brand">
-                          {tier.priceInrMonthly === 0 ? 'Free' : `₹${tier.priceInrMonthly}/mo`}
+                          {price === 0 ? 'Free' : `${sym}${price}/mo`}
                         </span>
                       </div>
                       <p className="text-xs text-muted">{tier.tagline}</p>
@@ -168,12 +272,29 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
                           : 'bg-white dark:bg-[#1E293B] border border-line text-ink hover:bg-soft'
                       }`}
                     >
-                      {isCurrent ? 'Active Plan' : `Switch to ${tier.name}`}
+                      {isCurrent
+                        ? 'Active Plan'
+                        : tier.id === 'free_explorer'
+                        ? `Switch to ${tier.name}`
+                        : `Upgrade via Checkout`}
                     </button>
                   </div>
                 );
               })}
             </div>
+            {invoices.length > 0 && (
+              <div className="p-3.5 rounded-xl border border-line bg-canvas text-xs space-y-1.5">
+                <div className="font-semibold text-ink">Verified Billing Receipts</div>
+                {invoices.slice(0, 5).map((inv) => (
+                  <div key={inv.invoiceId} className="flex items-center justify-between text-muted font-mono tabular-nums">
+                    <span>{inv.invoiceId} · {inv.tierId} ({inv.provider})</span>
+                    <span>
+                      {CURRENCY_SYMBOLS[inv.currency] || ''}{inv.amount} · {inv.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Section 2: System Scalability, Token Quota & Semantic Cache Telemetry */}
@@ -191,19 +312,19 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
                   <div>
                     Active Cap:{' '}
                     <strong className="text-ink">
-                      {(healthData?.subscription?.dailyTokenCap ?? 250000).toLocaleString()} tokens
+                      {(tierData?.quota?.dailyTokenCap ?? 50000).toLocaleString()} tokens
                     </strong>
                   </div>
                   <div>
                     Used Today:{' '}
                     <strong className="text-ink">
-                      {(healthData?.subscription?.tokensUsedToday ?? 0).toLocaleString()} tokens
+                      {(tierData?.quota?.tokensUsedToday ?? 0).toLocaleString()} tokens
                     </strong>
                   </div>
                   <div>
                     Rate Window:{' '}
                     <strong className="text-ink">
-                      {healthData?.subscription?.maxRequestsPerMinute ?? 60} req/min
+                      {tierData?.quota?.maxRequestsPerMinute ?? 20} req/min
                     </strong>
                   </div>
                 </div>
@@ -218,19 +339,19 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
                   <div>
                     Cache Hit Rate:{' '}
                     <strong className="text-ink">
-                      {healthData?.semanticCache?.hitRatePercent ?? 0}%
+                      {tierData?.semanticCache?.hitRatePercent ?? 0}%
                     </strong>
                   </div>
                   <div>
                     Tokens Saved:{' '}
                     <strong className="text-emerald-600">
-                      {(healthData?.semanticCache?.totalTokensSaved ?? 0).toLocaleString()}
+                      {(tierData?.semanticCache?.totalTokensSaved ?? 0).toLocaleString()}
                     </strong>
                   </div>
                   <div>
                     Indexed Queries:{' '}
                     <strong className="text-ink">
-                      {healthData?.semanticCache?.entriesCount ?? 0}
+                      {tierData?.semanticCache?.entriesCount ?? 0}
                     </strong>
                   </div>
                 </div>
@@ -239,20 +360,21 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
               <div className="p-4 rounded-xl bg-canvas border border-line space-y-2">
                 <div className="flex items-center gap-2 font-bold text-ink">
                   <Database className="w-4 h-4 text-indigo-600" />
-                  <span>Multi-Exam PYQ Corpus</span>
+                  <span>Multi-Exam Provenance Corpus</span>
                 </div>
                 <div className="font-mono tabular-nums space-y-1 text-muted">
                   <div>
-                    JEE Main: <strong className="text-ink">{healthData?.corpusSummary?.byExam?.jee_main ?? 14}</strong> · JEE Adv:{' '}
-                    <strong className="text-ink">{healthData?.corpusSummary?.byExam?.jee_advanced ?? 6}</strong>
+                    Verified PYQs: <strong className="text-ink">{tierData?.corpusSummary?.totalVerifiedOfficialQuestions ?? 0}</strong> · Original Editorial:{' '}
+                    <strong className="text-ink">{tierData?.corpusSummary?.totalOriginalEditorialQuestions ?? 89}</strong>
                   </div>
                   <div>
-                    BITSAT: <strong className="text-ink">{healthData?.corpusSummary?.byExam?.bitsat ?? 3}</strong> · VITEEE:{' '}
-                    <strong className="text-ink">{healthData?.corpusSummary?.byExam?.viteee ?? 2}</strong>
+                    JEE Main: <strong className="text-ink">{tierData?.corpusSummary?.byExam?.jee_main ?? 75}</strong> · JEE Adv:{' '}
+                    <strong className="text-ink">{tierData?.corpusSummary?.byExam?.jee_advanced ?? 9}</strong> · BITSAT/VIT:{' '}
+                    <strong className="text-ink">{(tierData?.corpusSummary?.byExam?.bitsat ?? 3) + (tierData?.corpusSummary?.byExam?.viteee ?? 2)}</strong>
                   </div>
                   <div className="flex items-center gap-1 text-emerald-600 font-sans font-semibold">
                     <Layers className="w-3.5 h-3.5" />
-                    <span>Hybrid Firestore + Local Corpus Active</span>
+                    <span>Durable Store + Verified Provenance Active</span>
                   </div>
                 </div>
               </div>

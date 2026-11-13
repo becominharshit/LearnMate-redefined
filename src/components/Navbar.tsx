@@ -107,11 +107,15 @@ const DESKTOP_SECONDARY_NAV: NavItem[] = [
   { id: 'create', label: 'Creative Studio', icon: Sparkles },
 ];
 
-const MOBILE_PRIMARY_NAV: NavItem[] = [
+const MOBILE_AND_TABLET_ALL_NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'study', label: 'Study', icon: BookOpen },
   { id: 'practice', label: 'Practice', icon: Target },
+  { id: 'revision', label: 'Revise', icon: ListChecks },
   { id: 'study-tools', label: 'Tools', icon: Calculator },
+  { id: 'analytics', label: 'Progress', icon: BarChart3 },
+  { id: 'resources', label: 'Resources', icon: Compass },
+  { id: 'create', label: 'Create', icon: Sparkles },
 ];
 
 function isTabActive(item: ActiveTab, activeTab: ActiveTab): boolean {
@@ -134,7 +138,7 @@ const SECTION_TITLES: Record<ActiveTab, { title: string; subtitle: string }> = {
   study: { title: 'Study Workbench', subtitle: 'Document reader, annotations & AI Tutor' },
   'ai-tutor': { title: 'Study Workbench', subtitle: 'Document reader, annotations & AI Tutor' },
   'pdf-workspace': { title: 'Study Workbench', subtitle: 'PDF Annotation Studio' },
-  practice: { title: 'Practice Hub', subtitle: 'Official JEE Main, Advanced, BITSAT & VITEEE PYQs & CBT Mocks' },
+  practice: { title: 'Practice Hub', subtitle: 'JEE Main, Advanced, BITSAT & VITEEE Practice & PYQ Catalog' },
   revision: { title: 'Revision Studio', subtitle: 'Handwritten notes, Formula Book & active recall' },
   'study-tools': { title: 'Study Tools Lab', subtitle: 'Desmos-grade 2D Graphing, Matrix, 3D Vector, Geometry & Scientific Suite' },
   analytics: { title: 'Progress & Mastery', subtitle: 'Accuracy trends & chapter mastery telemetry' },
@@ -230,7 +234,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   const menuItemClass =
     'w-full px-4 py-2.5 text-left text-sm text-ink hover:bg-soft flex items-center gap-3 cursor-pointer transition-colors';
 
-  const meActive = profileOpen || activeTab === 'analytics';
   const activeMeta = SECTION_TITLES[activeTab] || SECTION_TITLES.dashboard;
 
   return (
@@ -390,20 +393,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           CLEAN WIDESCREEN TOP HEADER BAR (5 Approved Utility Controls)
          ===================================================================== */}
       <header className="sticky top-0 z-30 w-full bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-b border-line lm-no-print">
-        <div className="max-w-[1920px] w-full mx-auto px-6 sm:px-8 lg:px-10 xl:px-12 h-16 flex items-center justify-between gap-4">
+        <div className="max-w-[1920px] w-full mx-auto px-3 sm:px-6 lg:px-10 xl:px-12 h-16 flex items-center justify-between gap-2 sm:gap-4">
           {/* Left Context: Mobile Brand + Desktop Section Breadcrumb */}
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
             {/* Mobile Brand */}
             <button
               type="button"
               onClick={() => onSelectTab('dashboard')}
-              className="lg:hidden flex items-center gap-2 shrink-0 cursor-pointer"
+              className="lg:hidden flex items-center gap-1.5 sm:gap-2 shrink-0 cursor-pointer"
               aria-label="LearnMate home"
             >
-              <span className="w-8 h-8 rounded-xl bg-brand text-white grid place-items-center shadow-xs">
+              <span className="w-8 h-8 rounded-xl bg-brand text-white grid place-items-center shadow-xs shrink-0">
                 <GraduationCap className="w-4 h-4" />
               </span>
-              <span className="font-display font-extrabold text-base tracking-tight text-ink">
+              <span className="font-display font-extrabold text-sm sm:text-base tracking-tight text-ink">
                 LearnMate
               </span>
             </button>
@@ -431,7 +434,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Right Global Utilities (ONLY the 5 approved controls: Add Material, Voice Tutor, Global Search, Formula Book, Profile) */}
-          <div className="ml-auto flex items-center gap-2.5 lg:gap-3 shrink-0">
+          <div className="ml-auto flex items-center gap-1.5 sm:gap-2.5 lg:gap-3 shrink-0">
             {/* 1. + Add Material Button */}
             {onOpenAddMaterial && (
               <button
@@ -439,12 +442,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => onOpenAddMaterial('pdf')}
                 data-testid="navbar-add-material-btn"
                 aria-label="Add Material"
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-2 sm:px-3.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus className="w-4 h-4 shrink-0" />
-                <span>
-                  Add<span className="hidden sm:inline"> Material</span>
-                </span>
+                <span className="hidden sm:inline">Add Material</span>
               </button>
             )}
 
@@ -454,7 +455,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 type="button"
                 onClick={onOpenVoiceTutor}
                 data-testid="navbar-voice-tutor-btn"
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 p-2 sm:px-3.5 sm:py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
                 title="Open AI Voice Tutor"
               >
                 <Mic className="w-4 h-4 text-brand shrink-0" />
@@ -470,7 +471,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 data-testid="navbar-search-btn"
                 aria-label="Search (Ctrl+K)"
                 title="Search chapters, notes, PYQs, materials & tools (Ctrl+K)"
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 p-2 sm:px-3.5 sm:py-2 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer"
               >
                 <Search className="w-4 h-4 shrink-0" />
                 <span className="hidden md:inline">Search (Ctrl+K)</span>
@@ -759,15 +760,16 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Mobile bottom tab bar: Home · Study · Practice · Revise · Me */}
+      {/* Non-collapsible Tablet & Android/Mobile navigation dock exposing all 8 destinations directly */}
       <nav
-        aria-label="Mobile navigation"
+        aria-label="Mobile and tablet navigation"
+        data-testid="mobile-tablet-bottom-nav"
         className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-t border-line pb-[env(safe-area-inset-bottom)] lm-no-print"
       >
-        <div className="grid grid-cols-5">
-          {MOBILE_PRIMARY_NAV.map((item) => {
+        <div className="flex md:grid md:grid-cols-8 items-stretch overflow-x-auto md:overflow-visible no-scrollbar snap-x px-1 md:px-2">
+          {MOBILE_AND_TABLET_ALL_NAV.map((item) => {
             const Icon = item.icon;
-            const active = !profileOpen && isTabActive(item.id, activeTab);
+            const active = isTabActive(item.id, activeTab);
             return (
               <button
                 key={item.id}
@@ -778,34 +780,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 data-testid={`mobile-nav-tab-${item.id}`}
                 aria-current={active ? 'page' : undefined}
-                className={`relative flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-                  active ? 'text-brand' : 'text-muted'
+                className={`relative flex flex-col items-center justify-center gap-1 min-w-[68px] md:min-w-0 shrink-0 min-h-[52px] px-2 py-2 text-[11px] font-semibold transition-colors cursor-pointer snap-start ${
+                  active ? 'text-brand' : 'text-muted hover:text-ink'
                 }`}
               >
                 {active && (
                   <span className="absolute top-0 h-0.5 w-8 rounded-full bg-brand" aria-hidden="true" />
                 )}
-                <Icon className="w-5 h-5" />
-                {item.label}
+                <Icon className="w-4 h-4 shrink-0" />
+                <span className="whitespace-nowrap truncate max-w-full">{item.label}</span>
               </button>
             );
           })}
-
-          <button
-            type="button"
-            onClick={() => setProfileOpen((prev) => !prev)}
-            data-testid="mobile-nav-tab-me"
-            aria-expanded={profileOpen}
-            className={`relative flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-              meActive ? 'text-brand' : 'text-muted'
-            }`}
-          >
-            {meActive && (
-              <span className="absolute top-0 h-0.5 w-8 rounded-full bg-brand" aria-hidden="true" />
-            )}
-            <UserRound className="w-5 h-5" />
-            Me
-          </button>
         </div>
       </nav>
     </>

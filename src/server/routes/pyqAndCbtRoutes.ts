@@ -1,12 +1,16 @@
 import { Router } from 'express';
 import {
   OFFICIAL_PYQ_PAPERS,
-  OFFICIAL_PYQ_QUESTIONS,
   filterPyqQuestions,
   scorePyqQuestionResponse,
   assembleFull75QuestionNtaMock,
   predictShiftPercentileAndAir,
+  resolveCorpusQuestionById,
+  getCorpusCollections,
+  getPyqCorpusCoverageAudit,
+  scoreCbtSubmissionBatch,
   type PyqCorpusQuestion,
+  type QuestionSourceCategory,
 } from '../../utils/pyqCorpusEngine.ts';
 import { validateQuestionRecord } from '../../ingestion/validators/index.ts';
 import type { UnifiedQuestionRecord } from '../../ingestion/types.ts';
@@ -14,6 +18,41 @@ import { BITSAT_AND_VITEEE_PYQ_QUESTIONS } from '../../utils/commercialScaleEngi
 
 export function createPyqAndCbtRouter(): Router {
   const router = Router();
+
+  // GET /api/pyq/provenance — Honest corpus provenance, separated collections & coverage audit
+  router.get('/provenance', (_req, res) => {
+    try {
+      const collections = getCorpusCollections();
+      const coverageAudit = getPyqCorpusCoverageAudit();
+      res.json({
+        coverageAudit,
+        collectionCounts: {
+          officialVerifiedPyqs: collections.officialVerifiedPyqs.length,
+          reconstructedPendingReview: collections.reconstructedPendingReview.length,
+          originalEditorialPractice: collections.originalEditorialPractice.length,
+          aiGeneratedPractice: collections.aiGeneratedPractice.length,
+          rejectedOrRestricted: collections.rejectedOrRestricted.length,
+        },
+        papers: OFFICIAL_PYQ_PAPERS.map((p) => ({
+          id: p.id,
+          title: p.title,
+          exam: p.exam,
+          year: p.year,
+          collectionKind: p.collectionKind,
+          isOfficialPastPaper: p.isOfficialPastPaper,
+          isCompleteOfficialPaper: p.isCompleteOfficialPaper,
+          ruleVersionId: p.ruleVersionId,
+          publicationStatus: p.publicationStatus,
+          loadedQuestionsCount: p.questionIds.length,
+          expectedOfficialQuestions: p.expectedOfficialQuestions,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to inspect PYQ provenance.',
+      });
+    }
+  });
 
   // GET /api/pyq/questions — Paginated PYQ query endpoint (JEE Main, JEE Advanced, BITSAT, VITEEE)
   router.get('/questions', (req, res) => {
@@ -24,6 +63,7 @@ export function createPyqAndCbtRouter(): Router {
       const chapterId = (req.query.chapterId as string) || 'All';
       const difficulty = (req.query.difficulty as string) || 'All';
       const format = (req.query.format as string) || 'All';
+      const sourceCategory = (req.query.sourceCategory as QuestionSourceCategory | 'All') || 'All';
       const searchQuery = (req.query.q as string) || '';
       const page = Math.max(1, Number(req.query.page) || 1);
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 25));
@@ -38,6 +78,7 @@ export function createPyqAndCbtRouter(): Router {
               chapterId,
               difficulty,
               searchQuery,
+              ...(sourceCategory !== 'All' ? { sourceCategory } : {}),
             });
 
       if (exam === 'bitsat' || exam === 'viteee' || exam === 'all') {
@@ -46,6 +87,7 @@ export function createPyqAndCbtRouter(): Router {
           if (subject !== 'All' && q.subject !== subject) return false;
           if (year !== 'All' && q.year !== year) return false;
           if (chapterId !== 'All' && q.chapterId !== chapterId) return false;
+          if (sourceCategory !== 'All' && sourceCategory !== 'ORIGINAL_EDITORIAL') return false;
           if (searchQuery.trim()) {
             const sq = searchQuery.toLowerCase();
             if (
@@ -87,7 +129,7 @@ export function createPyqAndCbtRouter(): Router {
   router.post('/assemble-shift', (req, res) => {
     try {
       const {
-        paperId = 'paper-jee-main-2025-jan-s1',
+        paperId = 'paper-jee-main-2027-editorial-mock-1',
         sectionBRuleMode = 'compulsory_2026',
       } = (req.body || {}) as {
         paperId?: string;
@@ -111,10 +153,14 @@ export function createPyqAndCbtRouter(): Router {
     try {
       const {
         paperId,
+        ruleVersionId,
+        sectionBRuleMode = 'compulsory_2026',
         shiftDifficulty = 'Moderate',
         responses = [],
       } = (req.body || {}) as {
         paperId?: string;
+        ruleVersionId?: string;
+        sectionBRuleMode?: 'compulsory_2026' | 'archival_2024';
         shiftDifficulty?: 'Tough' | 'Moderate' | 'Easy';
         responses?: Array<{
           questionId: string;
@@ -125,42 +171,46 @@ export function createPyqAndCbtRouter(): Router {
         }>;
       };
 
-      const questionMap = new Map<string, PyqCorpusQuestion>();
-      for (const q of OFFICIAL_PYQ_QUESTIONS) {
-        questionMap.set(q.id, q);
+      if (!Array.isArray(responses)) {
+        res.status(400).json({ error: 'responses must be an array of question answers.' });
+        return;
       }
 
-      let totalMarks = 0;
-      let maxMarks = 0;
-      const outcomes = [];
+      const paperMeta = paperId ? OFFICIAL_PYQ_PAPERS.find((p) => p.id === paperId) : undefined;
+      const effectiveRuleVersionId =
+        ruleVersionId ||
+        paperMeta?.ruleVersionId ||
+        (sectionBRuleMode === 'archival_2024' ? 'jee-main-2022-2024-v1' : 'jee-main-2027-p1-v1');
 
+      const resolvedQuestions: PyqCorpusQuestion[] = [];
+      const timeSpentById = new Map<string, number>();
       for (const r of responses) {
-        const q = questionMap.get(r.questionId);
+        const q = resolveCorpusQuestionById(r.questionId);
         if (!q) continue;
-        const outcome = scorePyqQuestionResponse(q, {
-          selectedOptionIndices: r.selectedOptionIndices,
-          numericalValue: r.numericalValue,
-          matrixMapping: r.matrixMapping,
-        });
-        totalMarks += outcome.marksAwarded;
-        maxMarks += outcome.maxMarks;
-        outcomes.push({
-          ...outcome,
-          subject: q.subject,
-          chapterId: q.chapterId,
-          chapterName: q.chapterName,
-          timeSpentSeconds: r.timeSpentSeconds ?? 0,
-        });
+        resolvedQuestions.push(q);
+        timeSpentById.set(q.id, r.timeSpentSeconds ?? 0);
       }
+
+      const batch = scoreCbtSubmissionBatch(resolvedQuestions, responses, {
+        ruleVersionId: effectiveRuleVersionId,
+        sectionBRuleMode,
+      });
+
+      const outcomes = batch.outcomes.map((outcome) => ({
+        ...outcome,
+        timeSpentSeconds: timeSpentById.get(outcome.questionId) ?? 0,
+      }));
 
       const normalizedOutOf300 =
-        maxMarks > 0 ? Math.round((totalMarks / maxMarks) * 300) : totalMarks;
+        batch.maxMarks > 0 ? Math.round((batch.totalMarks / batch.maxMarks) * 300) : batch.totalMarks;
       const prediction = predictShiftPercentileAndAir(normalizedOutOf300, shiftDifficulty);
 
       res.json({
         paperId: paperId || 'custom-cbt',
-        totalMarks,
-        maxMarks,
+        ruleVersionId: batch.ruleVersionId,
+        totalMarks: batch.totalMarks,
+        maxMarks: batch.maxMarks,
+        ignoredOverflowQuestionIds: batch.ignoredOverflowQuestionIds,
         normalizedOutOf300,
         prediction,
         outcomes,

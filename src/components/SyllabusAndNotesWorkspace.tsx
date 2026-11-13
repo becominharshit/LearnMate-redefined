@@ -100,7 +100,7 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
       {/* Top Bar: JEE Main vs Advanced Syllabus Provenance & Subject Filter */}
       <div className="lm-card-editorial p-4 sm:p-5 space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="space-y-1">
+          <div className="space-y-1 min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-0.5 rounded-full bg-brand-soft text-brand text-[11px] font-bold">
                 {initialMode === 'syllabus' ? 'Official Syllabus Catalog' : 'Authoritative Chapter Notes'}
@@ -203,7 +203,7 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
       {/* Main Split Grid: Left Chapter Directory (4 cols) + Right Chapter Notes & PYQs (8 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Left Chapter Selector List */}
-        <div className="lg:col-span-4 lm-card-editorial p-3.5 space-y-2 max-h-[75vh] overflow-y-auto">
+        <div className="lg:col-span-4 lm-card-editorial p-3.5 space-y-2 max-h-[60vh] lg:sticky lg:top-20 lg:max-h-[calc(100dvh-11rem)] overflow-y-auto">
           <div className="px-2 py-1 flex items-center justify-between text-xs font-bold text-muted">
             <span>Chapters ({filteredChapters.length})</span>
             <span>Status</span>
@@ -247,12 +247,12 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
 
         {/* Right Active Chapter Full Notes / Quick Notes & Connected Actions */}
         <div
-          className="lg:col-span-8 lm-card-editorial p-5 sm:p-6 space-y-6"
+          className="lg:col-span-8 lm-card-editorial p-5 sm:p-6 space-y-6 lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto min-w-0"
           data-testid="active-chapter-notes-panel"
         >
           {/* Chapter Header & Action Toolbar */}
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-line">
-            <div className="space-y-1.5">
+          <div className="flex flex-col gap-3.5 pb-4 border-b border-line">
+            <div className="space-y-1.5 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2.5 py-0.5 rounded-md bg-brand-soft text-brand text-xs font-bold">
                   {activeChapter.code} · {activeChapter.subject} ({activeChapter.classLevel})
@@ -269,7 +269,7 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -321,11 +321,11 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                   key={topic.id}
                   className="rounded-2xl border border-line bg-canvas p-4 sm:p-5 space-y-4"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <h4 className="font-display text-base sm:text-lg font-extrabold text-ink">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="font-display text-base sm:text-lg font-extrabold text-ink min-w-0 flex-1">
                       Topic {idx + 1}: {topic.title}
                     </h4>
-                    <span className="px-2.5 py-0.5 rounded-full bg-brand-soft text-brand text-[11px] font-bold">
+                    <span className="px-2.5 py-0.5 rounded-full bg-brand-soft text-brand text-[11px] font-bold shrink-0">
                       JEE Main &amp; Advanced
                     </span>
                   </div>
@@ -482,8 +482,8 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                       data-testid={`revision-checkpoint-${chk.id}`}
                       className="rounded-xl border border-line bg-canvas p-4 space-y-2.5"
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs sm:text-sm font-bold text-ink">{chk.question}</p>
+                      <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
+                        <p className="text-xs sm:text-sm font-bold text-ink min-w-0 flex-1">{chk.question}</p>
                         <button
                           type="button"
                           onClick={() =>

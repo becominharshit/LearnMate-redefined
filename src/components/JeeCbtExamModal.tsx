@@ -1519,7 +1519,9 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
         q.format === 'mcq_multiple'
           ? 'multiple_mcq'
           : q.format === 'numerical'
-          ? 'numerical_decimal'
+          ? Number.isInteger(q.correctNumericalValue)
+            ? 'numerical_integer'
+            : 'numerical_decimal'
           : q.format === 'paragraph_comprehension'
           ? 'paragraph_comprehension'
           : q.format === 'matrix_match'
@@ -1537,6 +1539,16 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
           : 'mcq_single',
       questionNumber: q.questionNumber,
       officialQuestionId: q.id,
+      sourceCategory: 'ORIGINAL_EDITORIAL',
+      collectionKind: 'original_practice',
+      verificationMetadata: {
+        provenanceVerified: false,
+        verificationConfidence: 0.9,
+        reviewerStatus: 'editorial_reviewed',
+        solutionSource: 'LearnMate Editorial Team',
+        licenseStatus: 'ORIGINAL_EDITORIAL_MIT',
+        isFakeShiftAssignment: false,
+      },
       prompt: q.questionText,
       stem: q.questionText,
       options: q.options,
@@ -1559,8 +1571,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
       markingRule: rule,
       markingRuleId: rule.id,
       answerKeyVersion: 'v1.0',
-      solutionOrigin:
-        'LearnMate Reviewed Editorial Solution (Verified against Official Final Answer Key)',
+      solutionOrigin: 'LearnMate Original Editorial Solution',
       detailedSolution: q.solutionSteps,
       solutionExplanation: q.solutionSteps,
       keyFormula: q.keyFormula,
@@ -1645,13 +1656,46 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
       },
     };
 
+    const secBAttemptedPerSubject: Record<string, number> = {
+      Physics: 0,
+      Chemistry: 0,
+      Mathematics: 0,
+    };
+    const secBIncludedSlotsPerSubject: Record<string, number> = {
+      Physics: 0,
+      Chemistry: 0,
+      Mathematics: 0,
+    };
+
     questions.forEach((q) => {
       const r = responses[q.id];
       const b = breakdowns[q.subject];
       b.timeSpentSeconds += r?.timeSpentSeconds || 0;
 
       const evalRes = evaluateQuestionMarks(q, r);
-      b.maxMarks += evalRes.maxMarks;
+      const isArchivalSecB =
+        examVariant === 'jee_main' &&
+        sectionBRuleMode === 'archival_2024' &&
+        q.section === 'Section B';
+
+      if (isArchivalSecB) {
+        if (secBIncludedSlotsPerSubject[q.subject] < 5) {
+          secBIncludedSlotsPerSubject[q.subject] += 1;
+          b.maxMarks += evalRes.maxMarks;
+        }
+        if (evalRes.isAttempted) {
+          if (secBAttemptedPerSubject[q.subject] >= 5) {
+            b.unattemptedCount += 1;
+            return;
+          }
+          secBAttemptedPerSubject[q.subject] += 1;
+        } else {
+          b.unattemptedCount += 1;
+          return;
+        }
+      } else {
+        b.maxMarks += evalRes.maxMarks;
+      }
 
       if (!evalRes.isAttempted) {
         b.unattemptedCount += 1;
@@ -2021,7 +2065,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
-                          Historical NTA Shift-Normalized Predictor (2024–2026)
+                          Heuristic Reference Model · Non-Empirical Estimate
                         </span>
                         <h4 className="text-sm font-bold text-white">
                           Estimated Percentile &amp; All-India Rank (AIR) Band
@@ -2051,7 +2095,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                     <div className="grid grid-cols-3 gap-3 pt-1">
                       <div className="p-3 rounded-lg bg-white/10 border border-white/15">
                         <div className="text-[11px] text-indigo-200">
-                          Est. NTA Percentile
+                          Heuristic Percentile
                         </div>
                         <div className="text-xl font-black text-amber-300 tabular-nums">
                           {prediction.estimatedPercentile.toFixed(2)}%ile
@@ -2062,7 +2106,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                       </div>
                       <div className="p-3 rounded-lg bg-white/10 border border-white/15">
                         <div className="text-[11px] text-indigo-200">
-                          Est. CRL Rank Band
+                          Illustrative Rank Band
                         </div>
                         <div className="text-sm font-extrabold text-white tabular-nums pt-0.5">
                           {prediction.estimatedAirBand}
@@ -2080,6 +2124,12 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                         </div>
                       </div>
                     </div>
+                    <p
+                      data-testid="percentile-heuristic-disclaimer"
+                      className="text-[11px] leading-snug text-amber-100/90 bg-white/5 border border-amber-400/25 rounded-lg px-3 py-2"
+                    >
+                      {prediction.limitationDisclaimer} ({prediction.datasetVersion})
+                    </p>
                   </div>
 
                   {/* Time-vs-Accuracy Quadrant Matrix */}

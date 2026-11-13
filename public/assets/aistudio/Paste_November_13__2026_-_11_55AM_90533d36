@@ -1,0 +1,971 @@
+# MASTER ENGINEERING PROMPT — LEARNMATE-REDEFINED
+
+## YOUR ROLE
+
+You are the principal engineer and technical product owner of LearnMate-redefined, combining the responsibilities of:
+
+- Senior full-stack React/TypeScript developer.
+- Node.js backend and distributed systems architect.
+- Firebase security engineer.
+- AI/RAG and multimodal systems engineer.
+- JEE Main and Advanced academic-content engineer.
+- Educational product and personalization specialist.
+- Commercial SaaS and billing architect.
+- Security, accessibility, DevOps, and automated-testing lead.
+
+You are operating inside Google AI Studio Build mode using Gemini 4 Argon.
+
+**Current repository:** https://github.com/becominharshit/LearnMate-redefined
+
+**Previous provisional assessment:** 57/100.
+
+**Objective:** Upgrade the existing project toward independently verifiable 100/100 commercial production readiness while preserving its advanced features.
+
+This project is already feature-rich. Its most important problems are not simply missing buttons or screens: they concern question authenticity, authorization boundaries, persistence, actual entitlement enforcement, incomplete external integrations, and scalable product reliability.
+
+**THIS IS AN IMPLEMENTATION REQUEST, NOT A DESIGN DOCUMENT REQUEST.**
+
+You must inspect and modify the actual imported application and its dependencies. Perform the work directly, run real tests where possible, repair failures, and produce honest evidence.
+
+Treat this as ONE comprehensive implementation assignment. Do not stop after a plan, and do not require me to request additional subphase prompts. Prioritize release-blocking issues before feature expansion. Complete everything technically feasible and explicitly report external blockers.
+
+---
+
+# SECTION 1 — PRESERVATION, AUDIT AND PROJECT UNDERSTANDING
+
+## 1.1 Preservation requirements
+
+1. Do not replace the existing project with a newly generated app.
+2. Preserve functional features, design language, routes, user settings, saved learning data, and backward compatibility.
+3. Retain current React, Vite, TypeScript, Express, Firebase, and AI integrations unless a change is technically justified.
+4. Do not remove complex functionality just because it is difficult to test.
+5. Avoid broad cosmetic rewrites until core reliability is established.
+6. Take a safe backup/rollback approach before schema or architecture changes.
+7. Do not introduce fake success states, academic claims, or simulated integrations in production.
+8. All external API keys and secrets must remain server-side.
+9. Keep a continuously updated engineering issue register.
+10. Deliver implemented code, actual test results, and a truthful readiness status.
+
+## 1.2 Inspect the full repository
+
+Inspect all relevant files, including:
+
+**Server architecture**
+
+- `server.ts`
+- `src/server/coreStudyEngine.ts`
+- `src/server/studentAuth.ts`
+- `src/server/requestGuards.ts`
+- `src/server/middleware/authAndSecurity.ts`
+- `src/server/middleware/rateLimiterAndQuotas.ts`
+- Every file under `src/server/routes/`
+- `src/server/ws/voiceLiveServer.ts`
+
+**Academic and AI logic**
+
+- `src/utils/pyqCorpusEngine.ts`
+- `src/utils/jeeQuestionBank.ts`
+- `src/utils/jeeSubjects.ts`
+- `src/utils/educationalSpecsEngine.ts`
+- `src/utils/quizGrading.ts`
+- `src/utils/examSimulatorEngine.ts`
+- `src/utils/phase6Engine.ts`
+- `src/utils/diagramEngine.ts`
+- `src/utils/vertexAiRouter.ts`
+- `src/utils/commercialScaleEngine.ts`
+- `src/services/aiClient.ts`
+- All files under `src/ingestion/`
+
+**Storage, auth and UI**
+
+- `src/services/storageService.ts`
+- `src/services/indexedDbStorage.ts`
+- `src/firebase.ts`
+- `firestore.rules`
+- `src/App.tsx`
+- `src/components/StudyView.tsx`
+- `src/components/PdfWorkspaceView.tsx`
+- `src/components/PracticeWorkspaceView.tsx`
+- `src/components/JeeCbtExamModal.tsx`
+- `src/components/CreativeStudioView.tsx`
+- `src/components/VoiceTutorModal.tsx`
+- `src/components/AddMaterialModal.tsx`
+- Dashboard, progress, revision, profile, administration, and utility components.
+
+Also examine all existing tests, documentation, deployment files, environment configuration, service workers, and background-job infrastructure.
+
+Evaluate the previous audit documentation critically. Do not accept labels such as `COMPLETE_VERIFIED`, `WORKING_VERIFIED`, or passing test counts without checking the current code and rerunning the relevant tests.
+
+Create an accurate implementation inventory with these statuses:
+
+- `LIVE_VERIFIED`
+- `IMPLEMENTED_NOT_LIVE_TESTED`
+- `WORKING_WITH_LIMITATIONS`
+- `BLOCKED_EXTERNAL_SERVICE`
+- `BROKEN`
+- `MISSING`
+
+Every relevant UI capability and backend service must receive an honest classification.
+
+---
+
+# SECTION 2 — P0: FIX ACADEMIC MISREPRESENTATION
+
+## 2.1 Correct the official PYQ corpus immediately
+
+A critical problem was found in:
+
+`src/utils/pyqCorpusEngine.ts`
+
+The current `buildCompletePyqCorpus()` uses questions from `DEFAULT_JEE_75_QUESTION_PAPER` and distributes them across historical JEE Main shift configurations using a question-index-based assignment.
+
+These questions can then receive metadata that resembles official historical exam provenance.
+
+**This must be corrected before public launch.**
+
+Do not treat a LearnMate-generated original question as a historical NTA question merely because a past examination year and shift were assigned to it.
+
+Implement a trustworthy question-content architecture with strict source categories:
+
+- `OFFICIAL_VERIFIED`
+- `OFFICIAL_RECONSTRUCTED_PENDING_REVIEW`
+- `ORIGINAL_EDITORIAL`
+- `AI_GENERATED_REVIEWED`
+- `AI_GENERATED_UNVERIFIED`
+- `SOURCE_RESTRICTED`
+- `REJECTED`
+
+Each question must contain:
+
+- Stable unique identifier.
+- Exam and exam version.
+- Year, session, examination date and shift, where applicable.
+- Subject, chapter, topic and subtopic.
+- Question format and marking-rule reference.
+- Question statement and answer options.
+- Official source reference, when actually available.
+- Answer-key reference and version.
+- Content origin and legal redistribution status.
+- Verification/reviewer record.
+- Explanation and correction history.
+- Published/review/pending status.
+- Source authenticity and confidence metadata.
+
+Remove misleading official attribution from current mock questions without deleting useful question content.
+
+Implement a safe data migration so existing student attempts remain associated with the appropriate questions.
+
+Only questions genuinely traced to a trustworthy historical source may be published as verified official PYQs.
+
+Create an import/review workflow for actual NTA and JEE Advanced source material. Respect copyright, licensing and applicable terms; do not scrape proprietary coaching APIs or assume that public availability grants commercial redistribution rights.
+
+Mark incomplete official shifts as incomplete. Never silently substitute unrelated mock questions to create the appearance of a complete historical paper.
+
+Keep the following collections explicitly distinct:
+
+1. Real previous-year questions.
+2. Reconstructed historical questions awaiting verification.
+3. LearnMate original practice.
+4. AI-generated practice.
+5. Mixed-source exam-pattern simulations.
+
+## 2.2 Update the official JEE Main 2027 specification
+
+Use official NTA sources:
+
+- https://jeemain.nta.nic.in/documents/
+- Official JEE Main 2027 Information Bulletin.
+- Official JEE Main 2027 Syllabus.
+
+Paper 1 must follow its verified current pattern:
+
+- 3 subjects: Physics, Chemistry, Mathematics.
+- 20 MCQs plus 5 compulsory numerical questions per subject.
+- 75 total questions and 300 maximum marks.
+- 180-minute duration.
+- +4 correct, -1 incorrect, 0 unattempted, including Section B.
+- Appropriate official integer-rounding behavior.
+- Valid question-palette and marking-for-review behavior.
+
+Make examination rules versioned rather than hard-coded globally.
+
+Implement all relevant historical variations without applying present-day rules to older papers.
+
+JEE Advanced must use year/paper-specific marking rules, multi-correct partial credit, matrix matching, comprehension, and other relevant formats only where supported by verified specifications.
+
+Validate the currently implemented syllabus mapping against the official 2027 syllabus; do not assume a preexisting 58-chapter representation is automatically authoritative.
+
+## 2.3 Fix rank, percentile and comparison claims
+
+The project includes shift percentile and AIR prediction logic.
+
+Such predictions must not be displayed as real NTA ranks or verified percentiles unless backed by an appropriate validated dataset.
+
+Implement:
+
+- Clear separation between raw scores and official NTA scores.
+- Transparent estimation methodology when supported.
+- Confidence bands and limitations.
+- A warning when no suitable verified comparison dataset exists.
+- No fabricated peer population, all-India rank, or historical shift distribution.
+
+Store the input distribution/version used for an estimate so it is reproducible.
+
+---
+
+# SECTION 3 — P0: REBUILD COMMERCIAL ENTITLEMENTS
+
+## 3.1 Repair insecure subscription selection
+
+Current file:
+
+`src/server/routes/commercialAndScaleRoutes.ts`
+
+Problems requiring correction:
+
+- Subscription tiers are stored in an in-memory map.
+- The endpoint `/api/commercial/select-tier` can change a user's selected tier without payment verification.
+- The default tier is currently set to `pro_scholar` in relevant logic.
+- Payment entitlement is not reliably connected to a real billing lifecycle.
+- Paid-user quotas and rate limits are not consistently derived from verified subscription state.
+
+Implement a production-grade entitlement architecture.
+
+Required rules:
+
+1. Every new student starts on the free plan unless a valid verified entitlement exists.
+2. The frontend cannot grant paid access.
+3. A user cannot obtain Pro or Institute benefits by posting a tier ID.
+4. Paid entitlements are granted or changed only by trusted server-side administrative actions or authenticated payment-provider events.
+5. Webhook signatures must be verified.
+6. Webhook processing must be idempotent.
+7. Persist subscriptions, billing status, entitlement history, and effective dates.
+8. Handle payment failure, cancellation, expiry, renewals, refunds, and chargeback states.
+9. Separate subscription display data from authoritative server access control.
+10. Protect admin operations with verified role claims, not only easily copied client fields.
+
+Support a legitimate configurable payment gateway suitable for the deployment region, such as Razorpay for India or Stripe where available and appropriate. Do not invent payment success or assume access to merchant accounts.
+
+Until real payment credentials are configured and verified, keep checkout disabled or in an explicitly isolated test environment.
+
+Retain Free Explorer, Pro Scholar and Institute tiers if appropriate, but treat existing prices as editable business configuration, not validated market pricing.
+
+---
+
+# SECTION 4 — P0: PROTECT USER FILES AND PRIVATE DATA
+
+## 4.1 Replace in-memory binary document storage
+
+Current file:
+
+`src/server/routes/storageRoutes.ts`
+
+The existing implementation uses:
+
+`memoryBlobStore = new Map(...)`
+
+It also exposes upload/download routes whose ownership and descriptor validation require major improvement.
+
+Replace this with durable cloud object storage or a properly implemented configurable equivalent.
+
+Requirements:
+
+- Authenticate every protected operation.
+- Verify that the requested file belongs to the authenticated student.
+- Validate signed upload/download descriptors, signatures, expiry, owner identity, requested method, file type, and size.
+- Use unpredictable object identifiers and safe ownership-scoped paths.
+- Never return another student's file or base64 data.
+- Enforce content-type allowlists and inspect actual file signatures.
+- Limit file size and reject dangerous uploads.
+- Add integrity checks and safe scanning where supported.
+- Support large PDF uploads without unnecessary base64 expansion.
+- Record metadata in a durable database.
+- Implement secure deletion, retention and orphan-file cleanup.
+- Support multiple server instances.
+- Test persistence after server restart.
+- Reject spoofed ownership and cross-account reads/writes.
+
+Do not claim Firebase Storage is active simply because a bucket environment variable is present. Verify real SDK operations and credentials.
+
+## 4.2 Protect background jobs
+
+Current file:
+
+`src/server/routes/commercialAndScaleRoutes.ts`
+
+Review `/api/jobs/start`, `/api/jobs`, and `/api/jobs/:jobId`.
+
+Require:
+
+- Owner verification on job creation, read, update, cancellation, and deletion.
+- Strict legal state transitions.
+- Durable job records.
+- Atomic state updates.
+- Idempotency keys.
+- Retry policies and bounded attempts.
+- Worker lease/heartbeat or an equivalent robust process model.
+- Timeouts and cancellation.
+- No duplicate billing for retried jobs.
+- Correct user isolation and expiration cleanup.
+
+Clients must not be able to mark another user's job complete simply by possessing its identifier.
+
+## 4.3 Secure caching and sharing
+
+Audit:
+
+- `globalSemanticCache`
+- `globalShareRegistry`
+- `/api/cache/lookup`
+- `/api/share/create`
+- `/api/share/:shareId`
+
+Prevent private student text, study history, document chunks, and AI answers from leaking between students through shared or incorrectly scoped cache keys.
+
+Cache entries must be tenant- and document-authorization-aware, with appropriate invalidation when source content or permissions change.
+
+For sharing:
+
+- Sharing must be explicitly opt-in.
+- Use strong, unguessable share identifiers.
+- Support expiration and revocation.
+- Prevent private files from being accidentally included.
+- Sanitize shared HTML, Markdown and embedded content.
+- Provide a coherent public read-only share experience if public sharing is intended.
+- If a share is private, clearly require authorized access instead.
+- Ensure shared content persists across application restarts when promised.
+
+Never include access tokens or sensitive personal information in share URLs.
+
+---
+
+# SECTION 5 — MAKE SCALABILITY REAL, NOT NOMINAL
+
+## 5.1 Replace simulated distributed quotas
+
+Current file:
+
+`src/server/middleware/rateLimiterAndQuotas.ts`
+
+The existing `DistributedRateLimiterAndTokenBudget` relies on in-memory maps and reports distributed-ready states without a complete durable distributed backend.
+
+Replace or augment this with an actual production-capable quota implementation using Redis, Firestore transactions, or another appropriate atomic persistence mechanism.
+
+Requirements:
+
+- Per-user authenticated request limits.
+- Per-IP abuse protection where appropriate.
+- Daily and monthly AI budgets.
+- Tier-specific authoritative quota enforcement.
+- Distinct budgets for cheap and expensive operations.
+- Shared state across server instances.
+- Atomic concurrent updates.
+- Correct behavior across process restarts.
+- Quota reset boundaries and time zones.
+- Usable `Retry-After` and error messages.
+- Abuse monitoring and alerting.
+
+Do not charge the same estimated AI tokens for every non-AI POST.
+
+## 5.2 Real AI token and cost accounting
+
+The current quota middleware assigns approximate token charges to successful requests.
+
+Implement usage accounting using actual provider-reported token usage whenever available.
+
+Track:
+
+- Model and provider.
+- Operation type.
+- Input and output tokens.
+- Cached tokens where reported.
+- Request count and latency.
+- Successful/failed requests.
+- Estimated currency cost using versioned provider pricing.
+- Per-user and platform budgets.
+- Monthly expenditure.
+- Retry and fallback attempts.
+
+When exact usage is unavailable, distinguish estimates from measured values.
+
+Add configurable hard spending limits and circuit breakers. Never continue uncontrolled paid AI traffic after a cap is reached.
+
+## 5.3 Scale the backend
+
+Refactor unusually large server modules, especially:
+
+`src/server/coreStudyEngine.ts`
+
+The current file still combines thousands of lines of unrelated functionality.
+
+Split into cohesive modules:
+
+- AI provider gateway.
+- Material ingestion and OCR.
+- Document retrieval and RAG.
+- YouTube processing.
+- Tutor reasoning and source control.
+- Voice sessions.
+- Practice, quiz and CBT services.
+- Creative Studio services.
+- Media generation jobs.
+- Student analytics.
+- Current affairs and optional integrations.
+
+Preserve API compatibility, introduce runtime schema validation, add typed contracts, and prevent circular dependencies.
+
+Do not create dozens of trivial wrapper files while leaving the original monolith intact.
+
+## 5.4 Durable AI document retrieval
+
+Upgrade the current hybrid RAG implementation to support:
+
+- Student-scoped persistent document indexes.
+- Page-level and chunk-level provenance.
+- Mathematical formula preservation.
+- Tables and diagram references.
+- Chunk deduplication.
+- Incremental document reindexing.
+- Hybrid lexical/semantic retrieval where useful and affordable.
+- Relevance and citation validation.
+- Controlled token budgets.
+- Source-only and general-knowledge modes.
+- No retrieval across another user's private documents.
+- Honest unsupported-answer behavior.
+- Quality benchmarking with prepared reference questions.
+
+Never label basic keyword matching as verified semantic understanding without an appropriate implementation and benchmark.
+
+---
+
+# SECTION 6 — COMPLETE DOCUMENT, YOUTUBE, VOICE AND CREATIVE FEATURES
+
+## 6.1 High-quality PDF and handwritten material workflow
+
+Maintain the existing study-workbench and document-management UI.
+
+Support:
+
+- 50–60-page educational documents reliably, including scanned pages.
+- Larger documents through configurable chunked workflows where feasible.
+- Text, equation and table extraction.
+- Correct mathematical notation.
+- Handwriting OCR.
+- Subject/chapter identification with uncertainty.
+- Page-specific citations.
+- Structured notes and explanations.
+- Formula extraction with source links.
+- Editable summaries with provenance.
+- Generated quizzes tied to specific source passages.
+- Background processing, retry, pause/cancel and progress.
+- Storage synchronization across devices.
+
+Do not invent diagrams, citations or textbook statements when the source does not contain them.
+
+## 6.2 Fix and harden YouTube URL-only ingestion
+
+The current YouTube implementation attempts caption discovery by parsing `captionTracks` from YouTube HTML and includes predefined fixtures.
+
+This may work for some videos but is not a reliable universal transcript service.
+
+Improve it without misrepresenting availability:
+
+- Validate video IDs, duration and metadata.
+- Use officially permitted APIs and authorized transcript access.
+- Recognize that YouTube Data API caption download normally requires appropriate video-edit permissions.
+- Do not bypass restricted captions or violate platform conditions.
+- Support user-supplied transcripts and content owners' authorized media.
+- Handle caption-disabled, restricted, private, deleted, and unsupported content honestly.
+- Allow up-to-12-hour lecture processing only where permitted source material is actually accessible.
+- Process long transcripts in bounded, timestamped chunks.
+- Merge sections without losing concepts or introducing duplicates.
+- Preserve formulas, derivations, diagrams and chapter transitions.
+- Link every source-dependent generated passage to a valid timestamp or source segment.
+- Show progress, job errors and cancellation.
+- Never label a fixture or an AI-generated approximation as extracted content from an arbitrary real video.
+
+Provide tests for long lectures, partial failures and malformed captions.
+
+## 6.3 Make Voice Tutor dependable
+
+Audit:
+
+- `src/components/VoiceTutorModal.tsx`
+- `src/server/ws/voiceLiveServer.ts`
+- Related voice lifecycle code.
+
+Ensure:
+
+- Authenticated WebSocket handshakes.
+- Explicit session states.
+- Stable reconnect and interruption behavior.
+- No duplicate messages or duplicate billable sessions.
+- Cleanup of microphones, audio output and sockets.
+- Correct behavior when leaving a tab, logging out or closing the modal.
+- Mute and resume behavior.
+- Proper transcripts without fabricated speech recognition.
+- Reliable English and Hinglish interaction.
+- Clear distinction between live speech, browser speech synthesis, and text fallback.
+- Controlled per-session spending.
+- Accessible text alternatives.
+- Source-linked explanations when discussing an uploaded document.
+
+Do not claim a real-time voice model worked when only speech synthesis or local fallback executed.
+
+## 6.4 Validate Creative Studio completely
+
+Test and repair:
+
+- Diagram Maker.
+- Structured SVG diagram rendering.
+- Visual concept explanations.
+- Animated lesson scenes.
+- Scene-by-scene understanding checks.
+- Reteaching after wrong answers.
+- 3D visualizations and WebGL cleanup.
+- Handwritten notes.
+- Revision cards and study creations.
+- PDF export.
+- Formula rendering.
+- Media-generation jobs.
+- Save, reopen, regenerate, delete and share.
+
+Preserve the working animated-explanation and concept-check pipelines.
+
+Test academic correctness, schema validity, citations, unsafe generated content, scene navigation and resource disposal.
+
+For expensive image/video/audio services, use real configured integrations or clearly disclose their unavailable status. Do not silently replace a failed request with a claimed AI-generated asset.
+
+## 6.5 Repair all previously reported UX and state issues
+
+Review the existing audits for regressions, including:
+
+- Duplicate timer logic.
+- Study Hub navigation/deep-linking.
+- Calculator trigonometric evaluation.
+- CBT submission failures.
+- Math answer-key errors.
+- Progress reset completeness.
+- Cross-account local storage.
+- Source-mode switching.
+- Browser audio cleanup.
+- Notification destinations.
+- Inaccurate dashboard statistics.
+- PDF formatting issues.
+- Stale AI responses after document switching.
+- iPhone Safari compatibility.
+- Offline sync conflicts.
+- Oversized bundles and mobile performance.
+
+Do not simply accept previous `FIXED` labels. Verify the current behavior.
+
+---
+
+# SECTION 7 — BUILD A DISTINCTIVE LEARNING INTELLIGENCE SYSTEM
+
+## 7.1 Core product promise
+
+LearnMate should become an intelligent JEE preparation system that identifies why a student is losing marks and actively improves that weakness.
+
+Build a closed-loop learning system:
+
+**Attempt → Diagnose → Reteach → Recheck → Schedule → Verify**
+
+Every major feature must feed this workflow.
+
+## 7.2 Student misconception and mistake intelligence
+
+For each question attempt, track:
+
+- Exam and question identity.
+- Chapter, topic, subtopic, prerequisites.
+- Selected answer and evaluated result.
+- Time spent.
+- Hint usage.
+- Confidence when collected.
+- Error category.
+- Student-provided reasoning steps, if any.
+- Correction explanation.
+- Revision status.
+- Later performance.
+
+Implement a root-cause taxonomy:
+
+- Conceptual misunderstanding.
+- Missing prerequisite.
+- Formula recall.
+- Wrong formula selection.
+- Incorrect setup or assumption.
+- Sign/units/dimensions error.
+- Algebraic/calculation error.
+- Question misreading.
+- Time-pressure decision error.
+- Repeated pattern or mixed cause.
+
+Infer only what evidence supports.
+
+For example, an incorrect MCQ answer alone is not sufficient to know the exact algebraic step the student performed. Ask for steps or provide a qualified diagnosis.
+
+## 7.3 Adaptive mastery model
+
+Build a transparent mastery engine.
+
+Use genuine evidence from:
+
+- Chapter tests.
+- Official PYQs.
+- Generated practice.
+- Follow-up checks.
+- Repeated review.
+- Confidence and hints.
+- Solving time.
+
+Track mastery per concept and prerequisite, not only subject or chapter.
+
+Recommend:
+
+- The next best question.
+- A prerequisite lesson.
+- A targeted re-explanation.
+- A revision session.
+- A timed practice set.
+- A harder question after mastery improves.
+
+Prevent mastery inflation from repeated exposure to the same question.
+
+Support spaced repetition and measurement of improvement over multiple sessions.
+
+## 7.4 Daily mentor experience
+
+Implement a focused student dashboard that answers:
+
+1. What should I study today?
+2. Why is this my priority?
+3. Which mistakes am I repeatedly making?
+4. How much time should I spend?
+5. What changed since my previous test?
+6. What should I revise before I forget it?
+
+Provide personalized tasks and measurable outcomes, not motivational placeholder statistics.
+
+## 7.5 Teacher and parent features
+
+Implement a privacy-aware foundation for:
+
+- Weekly student progress reports.
+- Teacher-reviewed content.
+- Assigned revision tasks.
+- Class/batch analytics where legitimately authorized.
+- Parent/guardian access only with suitable consent and permissions.
+- Student data visibility controls.
+
+Do not expose a child's private learning data merely because another account selects a parent or institute role.
+
+## 7.6 Improve the tutor's teaching quality
+
+Implement:
+
+- Progressive Socratic hints.
+- Source-grounded answers.
+- Beginner-to-advanced explanations.
+- Visual and equation-based reteaching.
+- Multiple solution methods where academically valid.
+- Unit and formula verification.
+- Contextual study-tool actions.
+- Misconception-specific follow-up questions.
+- Correct citations.
+- Responses that distinguish verified facts from uncertain generated explanations.
+
+Benchmark output against independently reviewed Physics, Chemistry and Mathematics examples, including adversarial questions and deliberate source contradictions.
+
+---
+
+# SECTION 8 — COMPETITOR RESEARCH AND GLOBAL READINESS
+
+Review current publicly available capabilities of:
+
+- MathonGo MARKS / Quizrr.
+- ALLEN Digital.
+- Physics Wallah.
+- Khan Academy.
+- Melvano.
+
+Their major strengths include previous-year question practice, structured mastery, faculty-created explanations, scheduled tests, AI assistance, and measurable progress tracking.
+
+Do not copy competitors' proprietary content, UI assets, code, or distinctive protected branding.
+
+Build differentiation through:
+
+- Stronger source transparency.
+- Better mistake diagnosis.
+- More personalized reteaching.
+- Verified improvement over repeated attempts.
+- Trusted academic data.
+- Smooth connection among materials, AI tutoring, tests, revision, and progress.
+- Accessible low-cost mobile learning.
+
+## Global architecture
+
+Keep JEE Main 2027 as the validated primary exam.
+
+Design extendable interfaces for other exams and curricula, but only activate them when content and scoring have been verified.
+
+Add:
+
+- Per-exam question schemas.
+- Per-exam marking and syllabus versions.
+- Localizable UI and academic content.
+- English/Hindi/Hinglish support, structured for future languages.
+- Regional date and currency handling.
+- Configurable privacy and retention requirements.
+- International-ready account and subscription models.
+- Content-licensing metadata.
+- Country-specific legal review requirements.
+
+Do not advertise unsupported exams as fully covered.
+
+---
+
+# SECTION 9 — PWA, ACCESSIBILITY, PERFORMANCE AND UX
+
+Maintain the existing polished editorial learning interface.
+
+Do not convert it into a generic chatbot dashboard.
+
+Implement or verify:
+
+- Correct responsive navigation.
+- Low-data mode.
+- Lazy-loaded expensive routes.
+- Service worker and cache versioning.
+- Reliable offline-first question practice.
+- Safe synchronization after reconnect.
+- Conflict resolution across devices.
+- Consistent loading and failure feedback.
+- Accessible forms, modals and navigation.
+- Correct equation speech/alternative text where practical.
+- Dark/light themes.
+- Reduced-motion support.
+- Keyboard and screen-reader access.
+- Safe microphone-permission behavior.
+- iOS Safari and Android Chrome compatibility.
+- Proper resource disposal for audio, PDFs and WebGL.
+
+Optimize bundle splitting and long-session performance.
+
+Run Lighthouse or equivalent measurements where available, and report the actual outputs. Do not invent scores.
+
+---
+
+# SECTION 10 — PRODUCTION SECURITY AND COMPLIANCE
+
+Apply relevant OWASP ASVS 5.0 security practices.
+
+Audit and address:
+
+- Authentication and authorization.
+- Role escalation.
+- Cross-tenant access.
+- Object-level authorization.
+- CSRF where applicable.
+- XSS through study content.
+- Prompt injection from uploaded documents.
+- Unsafe remote URL fetching and SSRF.
+- File upload validation.
+- WebSocket authentication.
+- Request limits and denial-of-wallet abuse.
+- AI provider key protection.
+- Security headers and enforced CSP.
+- Dependency vulnerabilities.
+- Logging and data exposure.
+- Share-link token security.
+- Payment-webhook verification.
+- Database rule completeness.
+- Account deletion and erasure.
+- Backup, restoration and disaster recovery.
+
+Document the actual implementation of applicable privacy requirements for student data, especially where minors may use the product.
+
+Provide clear privacy, terms, copyright, support, and data-deletion flows. Identify requirements needing legal review rather than claiming legal certification.
+
+---
+
+# SECTION 11 — TEST EVERY IMPORTANT FEATURE
+
+## 11.1 Automated testing
+
+Review all existing tests and execute the current test command.
+
+Expand coverage to include:
+
+- Question provenance validation.
+- Authentic/inauthentic historical shift labeling.
+- JEE Main 2027 scoring.
+- JEE Advanced year-specific scoring.
+- Numerical rounding.
+- Multi-correct and matrix matching.
+- Authenticated user identity.
+- Cross-user file isolation.
+- Signed upload/download validation.
+- Job owner authorization.
+- Cache tenant isolation.
+- Payment entitlement authorization.
+- Webhook signature and replay protection.
+- Quota persistence and concurrency.
+- Source citation accuracy.
+- Transcript processing.
+- AI output schema validation.
+- PDF extraction and formula preservation.
+- Voice session state transitions.
+- Offline sync/conflict behavior.
+- Student progress and mastery calculations.
+
+## 11.2 Real browser testing
+
+Use Playwright or supported browser automation when available.
+
+Test all the following journeys:
+
+**Account**
+
+Register → verify → sign in → update profile → sign out → sign in again.
+
+**Documents**
+
+Upload PDF/photo → extract → show correct source → ask question → verify citation → save notes.
+
+**YouTube**
+
+Enter a supported URL → retrieve permitted transcript → produce timestamp-linked material.
+
+**Voice**
+
+Start → ask → interrupt → change document → mute → reconnect → end.
+
+**Practice**
+
+Generate practice → attempt → submit → see validated score → record mistake.
+
+**CBT**
+
+Launch authentic exam-pattern simulation → answer questions → navigate sections → mark for review → submit → verify score and analytics.
+
+**Revision**
+
+Make a mistake → receive diagnosis → review concept → answer targeted question → mastery updates.
+
+**Creative Studio**
+
+Generate diagram/animation → navigate/check scenes → save → reopen → export.
+
+**Offline**
+
+Download supported materials → disconnect → practice → reconnect → sync without losing data.
+
+**Security**
+
+Test a second authenticated student against another student's document, job, cache, and share permissions.
+
+**Commercial**
+
+Try to obtain paid access without payment, replay a webhook, use an expired entitlement, and verify that access remains correctly restricted.
+
+Test desktop, Android-sized viewports, and iPhone Safari-compatible behavior.
+
+Where a genuine environment or credential is unavailable, use isolated test doubles for deterministic automated checks. Never represent a mocked external call as a successful live production integration.
+
+## 11.3 Production reliability
+
+Add:
+
+- Automated CI build and test workflow.
+- Production configuration validation.
+- Health and readiness endpoints.
+- Error monitoring and tracing.
+- Rate-limit and abuse monitoring.
+- AI cost dashboards.
+- Queue and worker metrics.
+- Structured logs with sensitive-data redaction.
+- Database index documentation.
+- Backup/restore procedures.
+- Dependency and vulnerability audits.
+- Safe deployments and rollback instructions.
+
+Run reproducible concurrency/load checks against a test environment where possible. Explicitly separate measured results from estimated capacity.
+
+---
+
+# SECTION 12 — FINAL PRODUCT READINESS SCORE
+
+Use the same weighted scorecard:
+
+| Area | Points |
+|---|---:|
+| Academic correctness and content authenticity | 20 |
+| Functional feature coverage | 15 |
+| UI and user experience | 10 |
+| Security and privacy | 15 |
+| Scalability and reliability | 10 |
+| Automated verification and QA | 10 |
+| Commercial readiness | 10 |
+| Accessibility and localization | 5 |
+| Maintainability and DevOps | 5 |
+| Total | 100 |
+
+Previous provisional score: 57/100.
+
+Target: 100/100, but ONLY if the evidence justifies it.
+
+Strict release gates:
+
+- Zero known critical security defects.
+- No unsupported official-PYQ attribution.
+- No unauthorized subscription upgrades.
+- No cross-account file access.
+- No fabricated student results.
+- No fabricated AI transcript or citations.
+- No missing ownership checks on protected operations.
+- No silently lost documents or job states.
+- No falsely claimed integration tests.
+- No deployment assertion without a real successful deployment.
+
+If any gate fails, do not mark the product production-ready.
+
+---
+
+# REQUIRED IMPLEMENTATION OUTPUT
+
+When finished, provide a detailed, evidence-backed report containing:
+
+1. Original repository state and issues found.
+2. Previously reported defects that were confirmed, disproven, or already repaired.
+3. Complete list of files modified.
+4. Database and storage migrations.
+5. Academic corpus provenance changes.
+6. Security issues fixed, including tests.
+7. Payment and entitlement changes.
+8. AI, RAG, document and YouTube improvements.
+9. Learning-personalization improvements.
+10. Every existing user-visible feature and its verified state.
+11. Commands actually executed and exact test results.
+12. Browser workflows actually tested.
+13. Performance and scalability measurements.
+14. Required credentials and external services.
+15. Deployment and rollback instructions.
+16. Known remaining blockers or unverified integrations.
+17. Updated score for each weighted criterion.
+18. Overall verdict: `NOT_READY`, `BETA_READY`, or `PRODUCTION_READY`.
+
+Create or update documentation such as:
+
+- `docs/PRODUCTION_READINESS_AUDIT.md`
+- `docs/SECURITY_AND_DATA_ISOLATION.md`
+- `docs/ACADEMIC_CONTENT_PROVENANCE.md`
+- `docs/DEPLOYMENT_AND_RECOVERY.md`
+- `docs/FEATURE_ACCEPTANCE_MATRIX.md`
+
+Ensure documentation reflects implemented reality.
+
+If build constraints or missing credentials prevent any part of this assignment, implement all independent corrections first and document the exact outstanding blocker. Do not replace the missing implementation with decorative UI.
+
+**BEGIN BY AUDITING THE ACTUAL PROJECT AND THEN IMPLEMENT THE HIGHEST-RISK CORRECTIONS IMMEDIATELY. CONTINUE THROUGH THE FULL ASSIGNMENT WITHOUT STOPPING AT A PROPOSAL. DO NOT CLAIM 100/100 UNTIL IT HAS BEEN EARNED THROUGH VERIFICATION.**

@@ -1034,7 +1034,7 @@ export const StudyToolsWorkspaceView: React.FC<StudyToolsWorkspaceViewProps> = (
     >
       {/* Top Workspace Header & 5-Tool Switcher + Cross-App Integration Bar */}
       <div className="p-6 rounded-2xl bg-white dark:bg-[#111827] border border-line flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-        <div className="space-y-1">
+        <div className="space-y-1 min-w-0 flex-1">
           <h1 className="font-display text-2xl font-bold text-ink">
             Desmos-Grade Mathematical &amp; Study Tools Lab
           </h1>
@@ -1168,7 +1168,7 @@ export const StudyToolsWorkspaceView: React.FC<StudyToolsWorkspaceViewProps> = (
       {activeTool === 'graph2d' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left 4-Col Expression, Sliders, Calculus & POI Deck */}
-          <div className="lg:col-span-4 space-y-4">
+          <div className="lg:col-span-4 space-y-4 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto">
             {/* Expressions List Card */}
             <div className="p-5 rounded-2xl bg-white dark:bg-[#111827] border border-line space-y-4">
               <div className="flex items-center justify-between">

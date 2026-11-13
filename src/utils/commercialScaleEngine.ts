@@ -36,11 +36,14 @@ export interface EngineeringEntrancePyqItem {
 
 export type CommercialSubscriptionTierId = 'free_explorer' | 'pro_scholar' | 'institute';
 
+export type SupportedBillingCurrency = 'INR' | 'USD' | 'EUR' | 'GBP';
+
 export interface CommercialTierSpec {
   id: CommercialSubscriptionTierId;
   name: string;
   tagline: string;
   priceInrMonthly: number;
+  pricesByCurrency: Record<SupportedBillingCurrency, number>;
   dailyTokenCap: number;
   maxRequestsPerMinute: number;
   maxUploadPages: number;
@@ -53,6 +56,7 @@ export const COMMERCIAL_TIERS: Record<CommercialSubscriptionTierId, CommercialTi
     name: 'Free Explorer',
     tagline: 'For foundational self-study & daily PYQ practice',
     priceInrMonthly: 0,
+    pricesByCurrency: { INR: 0, USD: 0, EUR: 0, GBP: 0 },
     dailyTokenCap: 50_000,
     maxRequestsPerMinute: 20,
     maxUploadPages: 50,
@@ -68,6 +72,7 @@ export const COMMERCIAL_TIERS: Record<CommercialSubscriptionTierId, CommercialTi
     name: 'Pro Scholar',
     tagline: 'For serious JEE, BITSAT & VITEEE rankers',
     priceInrMonthly: 499,
+    pricesByCurrency: { INR: 499, USD: 6, EUR: 6, GBP: 5 },
     dailyTokenCap: 250_000,
     maxRequestsPerMinute: 60,
     maxUploadPages: 400,
@@ -83,6 +88,7 @@ export const COMMERCIAL_TIERS: Record<CommercialSubscriptionTierId, CommercialTi
     name: 'Institute & Batch',
     tagline: 'For coaching batches, mentors & power scholars',
     priceInrMonthly: 1499,
+    pricesByCurrency: { INR: 1499, USD: 19, EUR: 18, GBP: 15 },
     dailyTokenCap: 1_000_000,
     maxRequestsPerMinute: 180,
     maxUploadPages: 1000,
@@ -308,18 +314,34 @@ export function retrieveTopRagChunks(params: {
 }
 
 /* ============================================================================
- * 3. SERVER-SIDE SEMANTIC & FINGERPRINT AI RESPONSE CACHE
+ * 3. SERVER-SIDE SEMANTIC & FINGERPRINT AI RESPONSE CACHE (TENANT-SCOPED)
  * ============================================================================ */
 
 export interface SemanticCacheRecord<T = unknown> {
   cacheKey: string;
   canonicalQuery: string;
   contextKey: string;
+  tenantId: string;
+  docVersion: string;
+  modelKey: string;
   payload: T;
   createdAt: string;
   lastHitAt: string;
   hitCount: number;
   estimatedTokensSaved: number;
+}
+
+export function buildTenantScopedCacheContext(params: {
+  tenantId: string;
+  documentId?: string;
+  docVersion?: string;
+  modelKey?: string;
+}): string {
+  const tenant = (params.tenantId || 'anonymous').trim().toLowerCase();
+  const doc = (params.documentId || 'general').trim().toLowerCase();
+  const ver = (params.docVersion || 'v1').trim().toLowerCase();
+  const model = (params.modelKey || 'default').trim().toLowerCase();
+  return `t=${tenant}|d=${doc}|v=${ver}|m=${model}`;
 }
 
 export function canonicalizeSemanticQuery(rawQuery: string, contextId = 'global'): string {
@@ -363,7 +385,8 @@ export class SemanticAiResponseCache {
     rawQuery: string,
     contextId: string,
     payload: T,
-    tokensPerHit = 650
+    tokensPerHit = 650,
+    meta?: { tenantId?: string; docVersion?: string; modelKey?: string }
   ): SemanticCacheRecord<T> {
     const key = canonicalizeSemanticQuery(rawQuery, contextId);
     if (this.store.size >= this.maxEntries && !this.store.has(key)) {
@@ -376,6 +399,9 @@ export class SemanticAiResponseCache {
       cacheKey: key,
       canonicalQuery: rawQuery.trim(),
       contextKey: contextId,
+      tenantId: meta?.tenantId || 'scoped',
+      docVersion: meta?.docVersion || 'v1',
+      modelKey: meta?.modelKey || 'default',
       payload,
       createdAt: now,
       lastHitAt: now,
@@ -384,6 +410,21 @@ export class SemanticAiResponseCache {
     };
     this.store.set(key, record);
     return record;
+  }
+
+  public invalidateContextPrefix(prefix: string): number {
+    const lowerPrefix = prefix.toLowerCase();
+    let deleted = 0;
+    for (const [key, record] of this.store.entries()) {
+      if (
+        record.contextKey.toLowerCase().startsWith(lowerPrefix) ||
+        key.startsWith(lowerPrefix)
+      ) {
+        this.store.delete(key);
+        deleted += 1;
+      }
+    }
+    return deleted;
   }
 
   public getStats() {
@@ -411,7 +452,7 @@ export class SemanticAiResponseCache {
 }
 
 /* ============================================================================
- * 4. ONE-CLICK READ-ONLY SHARE LINKS FOR NOTES, FORMULAS & DESMOS GRAPHS
+ * 4. CRYPTOGRAPHIC, SANITIZED, REVOCABLE READ-ONLY SHARE LINKS
  * ============================================================================ */
 
 export type ShareSnapshotKind = 'handwritten_note' | 'formula_sheet' | 'desmos_graph';
@@ -424,12 +465,75 @@ export interface SharedStudySnapshot {
   title: string;
   subtitle: string;
   createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
   viewsCount: number;
   payload: Record<string, unknown>;
 }
 
+function generateCryptographicToken(byteCount = 24): string {
+  const bytes = new Uint8Array(byteCount);
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+const SENSITIVE_SHARE_KEYS = new Set([
+  'uid',
+  'owneruid',
+  'email',
+  'token',
+  'accesstoken',
+  'refreshtoken',
+  'secret',
+  'password',
+  'authorization',
+  'apikey',
+  'phone',
+]);
+
+export function sanitizeSharedString(input: string): string {
+  return String(input || '')
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<iframe\b[^>]*>.*?<\/iframe>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(?:(['"]).*?\1|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, 'blocked:')
+    .replace(/[<>]/g, (ch) => (ch === '<' ? '&lt;' : '&gt;'));
+}
+
+export function sanitizeSharedPayload(value: unknown, depth = 0): unknown {
+  if (depth > 8) return null;
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return sanitizeSharedString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return value.slice(0, 200).map((item) => sanitizeSharedPayload(item, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (SENSITIVE_SHARE_KEYS.has(k.toLowerCase())) continue;
+      out[sanitizeSharedString(k)] = sanitizeSharedPayload(v, depth + 1);
+    }
+    return out;
+  }
+  return undefined;
+}
+
 export class ShareSnapshotRegistry {
   private readonly snapshots = new Map<string, SharedStudySnapshot>();
+
+  public hydrateFromRecords(records: SharedStudySnapshot[]): void {
+    this.snapshots.clear();
+    for (const rec of records) {
+      this.snapshots.set(rec.shareId, rec);
+    }
+  }
 
   public createSnapshot(params: {
     ownerUid: string;
@@ -438,19 +542,31 @@ export class ShareSnapshotRegistry {
     title: string;
     subtitle?: string;
     payload: Record<string, unknown>;
+    ttlHours?: number;
   }): SharedStudySnapshot {
-    const randomSuffix = Math.random().toString(36).slice(2, 9);
-    const shareId = `lm-share-${Date.now().toString(36)}-${randomSuffix}`;
+    const token = generateCryptographicToken(24);
+    const shareId = `lm-share-${token}`;
+    const now = Date.now();
+    const ttlMs = Math.max(1, Math.min(24 * 90, params.ttlHours ?? 24 * 30)) * 3600 * 1000;
+    const sanitizedPayload = (sanitizeSharedPayload(params.payload) || {}) as Record<
+      string,
+      unknown
+    >;
+
     const snap: SharedStudySnapshot = {
       shareId,
       ownerUid: params.ownerUid,
-      ownerName: params.ownerName || 'LearnMate Scholar',
+      ownerName: sanitizeSharedString(params.ownerName || 'LearnMate Scholar').slice(0, 80),
       kind: params.kind,
-      title: params.title.trim() || 'Shared Study Artifact',
-      subtitle: params.subtitle || 'Read-only shared study snapshot',
-      createdAt: new Date().toISOString(),
+      title: sanitizeSharedString(params.title.trim() || 'Shared Study Artifact').slice(0, 140),
+      subtitle: sanitizeSharedString(params.subtitle || 'Read-only shared study snapshot').slice(
+        0,
+        240
+      ),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + ttlMs).toISOString(),
       viewsCount: 0,
-      payload: params.payload,
+      payload: sanitizedPayload,
     };
     this.snapshots.set(shareId, snap);
     return snap;
@@ -459,44 +575,120 @@ export class ShareSnapshotRegistry {
   public getSnapshot(shareId: string): SharedStudySnapshot | null {
     const found = this.snapshots.get(shareId);
     if (!found) return null;
+    if (found.revokedAt) return null;
+    if (found.expiresAt && Date.parse(found.expiresAt) < Date.now()) {
+      return null;
+    }
     found.viewsCount += 1;
     return found;
+  }
+
+  public getSnapshotRaw(shareId: string): SharedStudySnapshot | null {
+    return this.snapshots.get(shareId) || null;
+  }
+
+  public revokeSnapshot(
+    shareId: string,
+    requesterUid: string
+  ): { ok: true; snapshot: SharedStudySnapshot } | { ok: false; status: 403 | 404; error: string } {
+    const found = this.snapshots.get(shareId);
+    if (!found) {
+      return { ok: false, status: 404, error: 'Share link not found.' };
+    }
+    if (found.ownerUid !== requesterUid) {
+      return { ok: false, status: 403, error: 'Only the snapshot owner can revoke this share link.' };
+    }
+    found.revokedAt = new Date().toISOString();
+    return { ok: true, snapshot: found };
+  }
+
+  public listSnapshotsForOwner(ownerUid: string): SharedStudySnapshot[] {
+    return Array.from(this.snapshots.values())
+      .filter((s) => s.ownerUid === ownerUid)
+      .reverse();
   }
 
   public listSnapshots(): SharedStudySnapshot[] {
     return Array.from(this.snapshots.values()).reverse();
   }
+
+  public deleteSnapshotsForOwner(ownerUid: string): number {
+    let removed = 0;
+    for (const [id, snap] of Array.from(this.snapshots.entries())) {
+      if (snap.ownerUid === ownerUid) {
+        this.snapshots.delete(id);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
 }
 
 /* ============================================================================
- * 5. BACKGROUND JOB TRACKER (LONG YOUTUBE MARATHONS, MULTI-PAGE OCR, RAG INDEX)
+ * 5. OWNER-ISOLATED DURABLE BACKGROUND JOB TRACKER (STATE MACHINE + RETRIES)
  * ============================================================================ */
 
 export type BackgroundJobKind = 'youtube_marathon' | 'handwritten_ocr' | 'rag_index';
+export type BackgroundJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface BackgroundJobRecord {
   jobId: string;
   uid: string;
   kind: BackgroundJobKind;
   title: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: BackgroundJobStatus;
   progressPct: number;
   stepLabel: string;
+  idempotencyKey?: string;
+  retryCount: number;
+  maxRetries: number;
+  leaseExpiresAt: string;
+  errorMessage?: string;
   createdAt: string;
   updatedAt: string;
 }
 
+const VALID_JOB_TRANSITIONS: Record<BackgroundJobStatus, BackgroundJobStatus[]> = {
+  queued: ['running', 'failed', 'cancelled'],
+  running: ['running', 'completed', 'failed', 'cancelled'],
+  failed: ['queued', 'running', 'cancelled'],
+  completed: [],
+  cancelled: [],
+};
+
 export class BackgroundJobRegistry {
   private readonly jobs = new Map<string, BackgroundJobRecord>();
+
+  public hydrateFromRecords(records: BackgroundJobRecord[]): void {
+    this.jobs.clear();
+    for (const rec of records) {
+      this.jobs.set(rec.jobId, rec);
+    }
+  }
 
   public startJob(params: {
     uid: string;
     kind: BackgroundJobKind;
     title: string;
     stepLabel?: string;
+    idempotencyKey?: string;
+    maxRetries?: number;
   }): BackgroundJobRecord {
-    const jobId = `job-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    const now = new Date().toISOString();
+    if (params.idempotencyKey) {
+      for (const existing of this.jobs.values()) {
+        if (
+          existing.uid === params.uid &&
+          existing.idempotencyKey === params.idempotencyKey &&
+          existing.status !== 'cancelled' &&
+          existing.status !== 'failed'
+        ) {
+          return existing;
+        }
+      }
+    }
+
+    const jobId = `job-${generateCryptographicToken(8)}`;
+    const now = Date.now();
     const record: BackgroundJobRecord = {
       jobId,
       uid: params.uid,
@@ -505,32 +697,72 @@ export class BackgroundJobRegistry {
       status: 'running',
       progressPct: 15,
       stepLabel: params.stepLabel || 'Initializing background pipeline…',
-      createdAt: now,
-      updatedAt: now,
+      idempotencyKey: params.idempotencyKey,
+      retryCount: 0,
+      maxRetries: params.maxRetries ?? 3,
+      leaseExpiresAt: new Date(now + 10 * 60 * 1000).toISOString(),
+      createdAt: new Date(now).toISOString(),
+      updatedAt: new Date(now).toISOString(),
     };
     this.jobs.set(jobId, record);
     return record;
   }
 
+  public getJob(jobId: string): BackgroundJobRecord | null {
+    return this.jobs.get(jobId) || null;
+  }
+
   public updateJob(
     jobId: string,
-    patch: Partial<Pick<BackgroundJobRecord, 'status' | 'progressPct' | 'stepLabel'>>
+    patch: Partial<Pick<BackgroundJobRecord, 'status' | 'progressPct' | 'stepLabel' | 'errorMessage'>>,
+    requesterUid?: string
   ): BackgroundJobRecord | null {
     const existing = this.jobs.get(jobId);
     if (!existing) return null;
-    if (patch.status) existing.status = patch.status;
+    if (requesterUid && existing.uid !== requesterUid) {
+      return null;
+    }
+
+    if (patch.status && patch.status !== existing.status) {
+      const allowed = VALID_JOB_TRANSITIONS[existing.status] || [];
+      if (!allowed.includes(patch.status)) {
+        return existing;
+      }
+      if (existing.status === 'failed' && patch.status === 'running') {
+        if (existing.retryCount >= existing.maxRetries) {
+          existing.errorMessage = 'Max retry budget exhausted.';
+          return existing;
+        }
+        existing.retryCount += 1;
+      }
+      existing.status = patch.status;
+    }
+
     if (typeof patch.progressPct === 'number') {
       existing.progressPct = Math.max(0, Math.min(100, Math.round(patch.progressPct)));
     }
     if (patch.stepLabel) existing.stepLabel = patch.stepLabel;
+    if (patch.errorMessage !== undefined) existing.errorMessage = patch.errorMessage;
+    existing.leaseExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     existing.updatedAt = new Date().toISOString();
     return existing;
   }
 
   public getJobsForUser(uid: string): BackgroundJobRecord[] {
     return Array.from(this.jobs.values())
-      .filter((j) => j.uid === uid || uid === 'dev-student-local')
+      .filter((j) => j.uid === uid)
       .reverse();
+  }
+
+  public deleteJobsForUser(uid: string): number {
+    let removed = 0;
+    for (const [id, job] of Array.from(this.jobs.entries())) {
+      if (job.uid === uid) {
+        this.jobs.delete(id);
+        removed += 1;
+      }
+    }
+    return removed;
   }
 }
 

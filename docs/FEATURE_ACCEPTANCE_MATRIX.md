@@ -1,0 +1,25 @@
+# LearnMate JEE — Feature Acceptance & Verification Matrix
+
+Status taxonomy:
+- `LIVE_VERIFIED`: Exercised directly against running app/browser/HTTP server in this audit.
+- `IMPLEMENTED_NOT_LIVE_TESTED`: Implemented and covered by automated unit/integration tests; live external provider or user-session flow not executed end-to-end here.
+- `WORKING_WITH_LIMITATIONS`: Works locally/deterministically with disclosed scope constraints.
+- `BLOCKED_EXTERNAL_SERVICE`: Requires external merchant credentials, official NTA licensed dataset, or cloud secrets not present in sandbox.
+
+---
+
+| Area & Feature | Classification | Verification Evidence | Disclosed Limitations / Notes |
+|---|---|---|---|
+| Public Landing & Sample Chapter (`LandingPage.tsx`, `SampleChapterPage.tsx`) | `LIVE_VERIFIED` | Verified in Playwright desktop (`1440x900`) & fixed hero badge overlap (`w5-landing-v2.png`); 0 console errors. | Worked sample runs deterministically without login/AI keys. |
+| Student Dashboard & Daily Mentor Brief (`StudentDashboardView.tsx`, `StreakTracker.tsx`) | `LIVE_VERIFIED` | Verified via `?autostart=1#dashboard` on `1440x900` (`w5-dashboard-v2.png`) & `390x844` (`w5-mobile-v2.png`) after fixing mobile header crowding & StreakTracker layout. | Local autostart is strictly gated off when `import.meta.env.PROD === true`. |
+| Academic Provenance Registry & Exam Rules (`examRegistry.ts`, `pyqCorpusEngine.ts`) | `LIVE_VERIFIED` | `/api/pyq/provenance` & `examRegistry.test.ts` confirm 0 fabricated NTA papers, 84 `ORIGINAL_EDITORIAL` items, 6 incomplete shift catalog slots. | `officialVerifiedQuestionsCount: 0` (`BLOCKED_EXTERNAL_SERVICE` awaiting licensed NTA import). |
+| JEE Main 2027 & Advanced CBT Simulator (`JeeCbtExamModal.tsx`, `pyqAndCbtRoutes.ts`) | `WORKING_WITH_LIMITATIONS` | Unit tests + HTTP `/api/cbt/grade` benchmark & `Array.isArray(responses)` guard verified; Practice tab rendered in Playwright. | Percentile estimator explicitly flags `isEmpiricalNtaData: false`. |
+| Practice Hub (`PracticeWorkspaceView.tsx`) | `LIVE_VERIFIED` | Playwright `nav-tab-practice` verified (`w5-practice-desktop.png`); misleading "Official Papers" heading updated to "Mock Papers & PYQ Catalog". | Shift catalog slots launch as Pattern Sims unless official verified Qs are loaded. |
+| Study Tools Lab: 2D Grapher, Matrix, 3D Surface, Geometry & Scientific (`StudyToolsWorkspaceView.tsx`) | `LIVE_VERIFIED` | Playwright `nav-tab-study-tools` verified (`w5-studytools-desktop.png`) with SVG curve plotting, parameter sliders, derivatives & integrals. | Heavy canvas/Three.js chunk (`629.36 kB`) is code-split via `React.lazy`. |
+| Revision Studio & 6-Stage Mistake Book (`QuickReviseView.tsx`, `learningIntelligenceEngine.ts`, `mistakeBookEngine.ts`) | `LIVE_VERIFIED` | Unit-tested in `learningIntelligenceEngine.test.ts` (taxonomy confidence, `seenQuestionIds` anti-inflation, SM-2 recheck); tab verified in Playwright. | AI reteach drawer calls `/api/ai/*` which requires server Gemini/Anthropic keys for live LLM completion. |
+| Commercial Entitlements & Billing Webhooks (`entitlementService.ts`, `commercialAndScaleRoutes.ts`) | `BLOCKED_EXTERNAL_SERVICE` (Billing) / `LIVE_VERIFIED` (AuthZ) | Security suite (`wave2And3Security.test.ts`) proves `/select-tier` returns `403`, new users default to `free_explorer`, HMAC webhook verify + replay cache work. | Live Razorpay/Stripe checkout disabled until merchant keys are provisioned. |
+| Multi-Tenant Storage, RAG, Cache & Job Isolation (`storageRoutes.ts`, `ragService.ts`, `commercialScaleEngine.ts`) | `LIVE_VERIFIED` (Integration Tests) | 6/6 security tests in `wave2And3Security.test.ts` + SSRF/XSS/traversal tests passing; persisted in `.learnmate-runtime-data/`. | Single-node disk JSON persistence requires Redis/Firestore Admin adapter for multi-replica scaling. |
+| YouTube Lecture Transcript Ingestion (`youtubeService.ts`, `studyMediaService.ts`) | `IMPLEMENTED_NOT_LIVE_TESTED` | Host allowlist & honest `transcript_unavailable` failure implemented so URLs never generate hallucinated notes. | Live `YOUTUBE_API_KEY` / caption network fetch not run against live YouTube in sandbox. |
+| AI Tutor, Diagram Engine & Live Voice WS (`aiGateway.ts`, `aiTelemetryService.ts`, `voiceLiveServer.ts`) | `IMPLEMENTED_NOT_LIVE_TESTED` | Schema validation, telemetry accounting & WS origin/auth guards implemented. | Live LLM / Gemini Live audio streaming requires server `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`. |
+| PWA Offline Mode & Service Worker (`public/sw.js`, `indexedDbStorage.ts`) | `WORKING_WITH_LIMITATIONS` | Network-first HTML & strict same-origin cache policy (`learnmate-jee-pwa-v2`); `/api/` bypassed cleanly. | Full offline-to-online background conflict sync verified via code review, not multi-tab offline simulation. |
+| Firestore Rules & Account Deletion (`firestore.rules`, `storageService.ts`) | `IMPLEMENTED_NOT_LIVE_TESTED` | Hardcoded personal email removed, `admins` & client-write-denied `entitlements` rules added; `deleteStudentAccountAndData()` extended. | `npm run test:rules` requires Firebase Java emulator (`firebase emulators:exec`). |

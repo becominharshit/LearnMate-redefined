@@ -1,5 +1,12 @@
 import type { FlashcardItem, QuickReviseBundle } from '../types/study';
 import { studyStorage } from '../services/storageService';
+import {
+  diagnoseRootCauseMisconception,
+  advanceClosedLoopStage,
+  type RootCauseCategoryId,
+  type DiagnosisConfidence,
+  type ClosedLoopMasteryStage,
+} from './learningIntelligenceEngine';
 
 export type MistakeClassificationTag =
   | 'Conceptual Gap'
@@ -26,6 +33,13 @@ export interface MistakeBookEntry {
   triggerReason: MistakeTriggerReason;
   outcomeType?: MistakeTriggerReason;
   errorCategory: MistakeClassificationTag;
+  rootCauseCategory?: RootCauseCategoryId;
+  rootCauseLabel?: string;
+  diagnosisConfidence?: DiagnosisConfidence;
+  diagnosisRationale?: string;
+  reteachDirective?: string;
+  studentReasoningSteps?: string;
+  closedLoopStage?: ClosedLoopMasteryStage;
   convertedToSm2: boolean;
   sm2CardId?: string;
   neuronzStage: 'Day 1' | 'Day 3' | 'Day 7' | 'Mastered';
@@ -171,6 +185,15 @@ export function extractMistakesFromCbtAttempt(params: {
         : 'Verified Official Key';
 
     const prev = byQuestionId.get(q.id);
+    const diag = diagnoseRootCauseMisconception({
+      triggerReason,
+      timeSpentSeconds: r.timeSpentSeconds || 0,
+      questionText: q.questionText,
+      topic: q.topic,
+      studentResponseLabel,
+      correctAnswerLabel,
+      studentReasoningSteps: prev?.studentReasoningSteps,
+    });
     const entry: MistakeBookEntry = {
       id: prev?.id || `mistake-${q.id}-${Date.now()}`,
       questionId: q.id,
@@ -192,6 +215,13 @@ export function extractMistakesFromCbtAttempt(params: {
           triggerReason,
           timeSpentSeconds: r.timeSpentSeconds || 0,
         }),
+      rootCauseCategory: prev?.rootCauseCategory || diag.category,
+      rootCauseLabel: prev?.rootCauseLabel || diag.label,
+      diagnosisConfidence: prev?.diagnosisConfidence || diag.confidence,
+      diagnosisRationale: prev?.diagnosisRationale || diag.rationale,
+      reteachDirective: prev?.reteachDirective || diag.reteachDirective,
+      studentReasoningSteps: prev?.studentReasoningSteps,
+      closedLoopStage: prev?.closedLoopStage || 'diagnosed',
       convertedToSm2: prev?.convertedToSm2 ?? false,
       sm2CardId: prev?.sm2CardId,
       neuronzStage: prev?.neuronzStage || 'Day 1',
@@ -215,6 +245,50 @@ export function updateMistakeClassification(
 ): MistakeBookEntry[] {
   const entries = getStoredMistakeBookEntries();
   const updated = entries.map((e) => (e.id === entryId ? { ...e, errorCategory } : e));
+  saveMistakeBookEntries(updated);
+  return updated;
+}
+
+export function submitMistakeReasoningAndAdvanceStage(
+  entryId: string,
+  params: {
+    studentReasoningSteps?: string;
+    targetStage?: ClosedLoopMasteryStage;
+  }
+): MistakeBookEntry[] {
+  const entries = getStoredMistakeBookEntries();
+  const updated = entries.map((e) => {
+    if (e.id !== entryId) return e;
+    const reasoning =
+      params.studentReasoningSteps !== undefined
+        ? params.studentReasoningSteps
+        : e.studentReasoningSteps;
+    const diag = diagnoseRootCauseMisconception({
+      triggerReason: e.triggerReason,
+      timeSpentSeconds: e.timeSpentSeconds,
+      questionText: e.questionText,
+      topic: e.topic,
+      studentResponseLabel: e.studentResponseLabel,
+      correctAnswerLabel: e.correctAnswerLabel,
+      studentReasoningSteps: reasoning,
+    });
+    const currentStage: ClosedLoopMasteryStage = e.closedLoopStage || 'diagnosed';
+    const nextStageRes = params.targetStage
+      ? advanceClosedLoopStage(currentStage, params.targetStage)
+      : { allowed: true, stage: currentStage };
+    return {
+      ...e,
+      studentReasoningSteps: reasoning,
+      rootCauseCategory: diag.category,
+      rootCauseLabel: diag.label,
+      diagnosisConfidence: diag.confidence,
+      diagnosisRationale: diag.rationale,
+      reteachDirective: diag.reteachDirective,
+      closedLoopStage: nextStageRes.stage,
+      neuronzStage:
+        nextStageRes.stage === 'verified_mastered' ? 'Mastered' : e.neuronzStage,
+    };
+  });
   saveMistakeBookEntries(updated);
   return updated;
 }

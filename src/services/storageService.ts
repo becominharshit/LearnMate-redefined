@@ -1908,6 +1908,20 @@ export class HybridCloudStudyRepository implements IStudyStorageRepository {
           await deleteDoc(doc(db, 'users', uid, 'attempts', att.id)).catch(() => {});
           deletedCloudDocumentsCount += 1;
         }
+        const reportsSnap = await getDocs(collection(db, 'users', uid, 'reports')).catch(() => null);
+        if (reportsSnap) {
+          for (const rep of reportsSnap.docs) {
+            await deleteDoc(rep.ref).catch(() => {});
+            deletedCloudDocumentsCount += 1;
+          }
+        }
+        const liSnap = await getDocs(collection(db, 'users', uid, 'learningIntelligence')).catch(() => null);
+        if (liSnap) {
+          for (const liDoc of liSnap.docs) {
+            await deleteDoc(liDoc.ref).catch(() => {});
+            deletedCloudDocumentsCount += 1;
+          }
+        }
         await deleteDoc(doc(db, 'users', uid)).catch(() => {});
         deletedCloudDocumentsCount += 1;
       } catch {

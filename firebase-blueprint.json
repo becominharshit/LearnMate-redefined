@@ -147,6 +147,43 @@
         "completedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["jobId", "sourceId", "dryRun", "totalInspected", "startedAt", "completedAt"]
+    },
+    "EntitlementRecord": {
+      "title": "EntitlementRecord",
+      "description": "Server-managed commercial subscription tier and billing webhook status (read-only for owning user).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "tierId": { "type": "string", "enum": ["free_explorer", "pro_scholar", "institute"] },
+        "status": { "type": "string", "enum": ["free_active", "active", "past_due", "cancelled", "expired", "refunded"] },
+        "provider": { "type": "string", "enum": ["free", "razorpay", "stripe", "admin_grant"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "tierId", "status", "provider", "updatedAt"]
+    },
+    "LearningIntelligenceRecord": {
+      "title": "LearningIntelligenceRecord",
+      "description": "Closed-loop JEE root-cause mistake diagnostics, seenQuestionIds anti-inflation mastery, and parent/mentor consent settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "payloadJson": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "updatedAt"]
+    },
+    "SharedSnapshotRecord": {
+      "title": "SharedSnapshotRecord",
+      "description": "Sanitized, cryptographic, owner-revocable read-only study share snapshot.",
+      "type": "object",
+      "properties": {
+        "shareId": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "kind": { "type": "string" },
+        "revoked": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["shareId", "ownerUid", "kind", "createdAt"]
     }
   },
   "firestore": {
@@ -169,6 +206,18 @@
     "/users/{userId}/reports/{reportId}": {
       "schema": { "$ref": "#/entities/AiReport" },
       "description": "User-scoped AI content reports."
+    },
+    "/users/{userId}/entitlements/{entitlementId}": {
+      "schema": { "$ref": "#/entities/EntitlementRecord" },
+      "description": "Server-managed user billing entitlements (read-only for owner)."
+    },
+    "/users/{userId}/learningIntelligence/{recordId}": {
+      "schema": { "$ref": "#/entities/LearningIntelligenceRecord" },
+      "description": "User-scoped closed-loop JEE mastery diagnostics and consent settings."
+    },
+    "/shared_snapshots/{shareId}": {
+      "schema": { "$ref": "#/entities/SharedSnapshotRecord" },
+      "description": "Sanitized read-only shared study snapshots revocable by owner."
     },
     "/question_bank/{questionId}": {
       "schema": { "$ref": "#/entities/QuestionBankRecord" },

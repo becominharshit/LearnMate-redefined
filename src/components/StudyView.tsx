@@ -864,7 +864,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
           )}
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-1 border-b border-line">
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 min-w-0 flex-1">
           <div className="lm-kicker flex items-center gap-2">
             <span>{documentSubject || 'Study'}</span>
             <span>/</span>
@@ -991,7 +991,9 @@ export const StudyView: React.FC<StudyViewProps> = ({
         <div
           ref={splitContainerRef}
           data-testid="study-resizable-split-pane"
-          className="flex flex-col lg:flex-row items-stretch gap-5 lg:gap-0"
+          className={`flex flex-col lg:flex-row items-stretch gap-5 lg:gap-0 ${
+            maximizedPane === 'none' ? 'lg:h-[calc(100dvh-14.5rem)] lg:min-h-[540px]' : ''
+          }`}
         >
           {/* LEFT PANE: STUDY MATERIAL READER + INLINE ANNOTATIONS */}
           <div
@@ -1005,7 +1007,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
               flexBasis:
                 maximizedPane === 'none' ? `${readerSplitPct}%` : undefined,
             }}
-            className={`lm-card-editorial overflow-hidden flex flex-col transition-all duration-150 ${
+            className={`lm-card-editorial overflow-hidden flex flex-col min-h-0 transition-all duration-150 ${
               maximizedPane === 'tutor'
                 ? 'hidden'
                 : mobilePane === 'ask'
@@ -1343,7 +1345,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
 
             {/* Main Reader Content Body + Optional Freehand Ink Overlay */}
             <div
-              className="relative p-6 sm:p-8 lg:p-10 bg-white space-y-5 flex-1 min-h-[580px]"
+              className="relative p-6 sm:p-8 lg:p-10 bg-white space-y-5 flex-1 min-h-[420px] lg:min-h-0 lg:overflow-y-auto"
               onMouseUp={handleReaderSelection}
             >
               {inlineAnnotateActive && (inlineTool === 'pen' || inlineTool === 'eraser') && (
@@ -1461,7 +1463,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
               flexBasis:
                 maximizedPane === 'none' ? `${100 - readerSplitPct}%` : undefined,
             }}
-            className={`lm-card-editorial overflow-hidden flex flex-col min-h-[580px] lg:sticky lg:top-20 transition-all duration-150 ${
+            className={`lm-card-editorial overflow-hidden flex flex-col min-h-[480px] lg:min-h-0 lg:h-full transition-all duration-150 ${
               maximizedPane === 'reader'
                 ? 'hidden'
                 : mobilePane === 'read'
@@ -1545,7 +1547,7 @@ export const StudyView: React.FC<StudyViewProps> = ({
             {/* Clean Conversation Stream (No starter chips or preset mode pills) */}
             <div
               ref={tutorScrollRef}
-              className="p-4 sm:p-5 space-y-4 flex-1 overflow-y-auto max-h-[540px] bg-white"
+              className="p-4 sm:p-5 space-y-4 flex-1 min-h-0 overflow-y-auto max-h-[540px] lg:max-h-none bg-white"
             >
               {tutorMessages.length === 0 && (
                 <div className="p-6 rounded-2xl bg-canvas border border-dashed border-line text-center space-y-2 my-6">

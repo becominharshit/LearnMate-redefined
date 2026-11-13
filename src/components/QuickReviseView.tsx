@@ -70,6 +70,7 @@ import { MathText } from './MathText';
 import { HandwrittenNotesView } from './HandwrittenNotesView';
 import { JEE_SYLLABUS_CHAPTERS } from '../data/jeeSyllabusAndNotes';
 import { MistakeBookAndImprovementModal } from './MistakeBookAndImprovementModal';
+import { diagnoseRootCauseMisconception } from '../utils/learningIntelligenceEngine';
 
 export type QuickReviseSubTab =
   | 'flashcards'
@@ -2257,44 +2258,85 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {mistakeInsights.map((item, idx) => (
-                  <div
-                    key={item.questionId || idx}
-                    className="p-4 rounded-2xl bg-canvas border border-line space-y-2.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="px-2.5 py-0.5 rounded-full bg-red-50 text-danger border border-red-200 text-[11px] font-bold">
-                        {item.topic}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onNavigateToCitation(item.sourcePage, item.sourceQuote || item.topic)}
-                        className="text-xs font-semibold text-brand hover:underline cursor-pointer"
-                      >
-                        Page {item.sourcePage}
-                      </button>
-                    </div>
-                    <MathText text={item.question} className="text-xs font-semibold text-ink" />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      <div className="p-2 rounded-lg bg-red-50/70 border border-red-200 text-red-900">
-                        <span className="font-semibold block">Your Answer:</span>
-                        <MathText text={item.selectedOption} variant="inline" />
+                {mistakeInsights.map((item, idx) => {
+                  const diag = diagnoseRootCauseMisconception({
+                    triggerReason: 'incorrect',
+                    timeSpentSeconds: 90,
+                    questionText: item.question,
+                    topic: item.topic,
+                    studentResponseLabel: item.selectedOption,
+                    correctAnswerLabel: item.correctOption,
+                  });
+                  return (
+                    <div
+                      key={item.questionId || idx}
+                      className="p-4 rounded-2xl bg-canvas border border-line space-y-2.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="px-2.5 py-0.5 rounded-full bg-red-50 text-danger border border-red-200 text-[11px] font-bold">
+                            {item.topic}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-brand-soft text-brand text-[10px] font-bold">
+                            {diag.label}
+                          </span>
+                          <span
+                            className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold"
+                            title={diag.rationale}
+                          >
+                            {diag.confidence === 'step_verified'
+                              ? 'Step Verified'
+                              : 'Qualified Inference'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToCitation(item.sourcePage, item.sourceQuote || item.topic)}
+                          className="text-xs font-semibold text-brand hover:underline cursor-pointer"
+                        >
+                          Page {item.sourcePage}
+                        </button>
                       </div>
-                      <div className="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-900">
-                        <span className="font-semibold block">Correct Answer:</span>
-                        <MathText text={item.correctOption} variant="inline" />
+                      <MathText text={item.question} className="text-xs font-semibold text-ink" />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div className="p-2 rounded-lg bg-red-50/70 border border-red-200 text-red-900">
+                          <span className="font-semibold block">Your Answer:</span>
+                          <MathText text={item.selectedOption} variant="inline" />
+                        </div>
+                        <div className="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-900">
+                          <span className="font-semibold block">Correct Answer:</span>
+                          <MathText text={item.correctOption} variant="inline" />
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-950">
+                        <strong>Why it happened:</strong>{' '}
+                        <MathText text={item.likelyMisconception} variant="inline" />
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 text-xs text-emerald-950 space-y-1">
+                        <div>
+                          <strong>Concept &amp; Reteach Fix:</strong>{' '}
+                          <MathText text={item.coreConceptFix} variant="inline" />
+                        </div>
+                        <p className="text-[11px] text-emerald-800">{diag.reteachDirective}</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        {onAskTutorAboutConcept && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onAskTutorAboutConcept(
+                                `Reteach the core concept behind "${item.topic}" (${diag.label}) and test me with 1 similar recheck problem: ${item.question.slice(0, 180)}`
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-white border border-line hover:bg-brand-soft text-[11px] font-semibold text-brand cursor-pointer"
+                          >
+                            Reteach &amp; Recheck with AI Tutor →
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-950">
-                      <strong>Why it happened:</strong>{' '}
-                      <MathText text={item.likelyMisconception} variant="inline" />
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 text-xs text-emerald-950">
-                      <strong>Concept to review:</strong>{' '}
-                      <MathText text={item.coreConceptFix} variant="inline" />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

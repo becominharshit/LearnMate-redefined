@@ -50,6 +50,8 @@ import {
   buildStudyDocumentFromSyllabusChapter,
   type ExamTrackId,
 } from '../data/jeeSyllabusAndNotes';
+import { buildDailyMentorBrief } from '../utils/learningIntelligenceEngine';
+import { getStoredMistakeBookEntries } from '../utils/mistakeBookEngine';
 
 interface StudentDashboardViewProps {
   studentName?: string;
@@ -263,6 +265,20 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
       }),
     [documents, allAttempts, weakTopics, totalDueFlashcards, selectedExamTrack, completedTaskIds]
   );
+
+  const dailyMentorBrief = useMemo(() => {
+    const allCards = documents.flatMap(
+      (doc) => studyStorage.getQuickReviseBundle(doc.id)?.flashcards || []
+    );
+    const mistakes = getStoredMistakeBookEntries();
+    return buildDailyMentorBrief({
+      attempts: allAttempts,
+      mistakes,
+      flashcards: allCards,
+      targetExamLabel: selectedExamTrack === 'jee_advanced' ? 'JEE Advanced 2027' : 'JEE Main 2027',
+      now,
+    });
+  }, [allAttempts, documents, selectedExamTrack, now]);
 
   const toggleCoachTask = (taskId: string, title: string) => {
     setCompletedTaskIds((prev) => {
@@ -1127,6 +1143,48 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                 </button>
               </div>
             )}
+          </section>
+
+          {/* 5. Daily Mentor Brief (6 empirical answers from real attempts, mistakes & SM-2 cards) */}
+          <section
+            aria-labelledby="daily-mentor-brief-heading"
+            data-testid="home-daily-mentor-brief"
+            className="lm-card-editorial p-5 space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 id="daily-mentor-brief-heading" className="font-display text-base font-bold text-ink">
+                Daily Mentor Brief
+              </h2>
+              <span className="px-2 py-0.5 rounded-full bg-brand-soft text-brand text-[10px] font-bold">
+                {dailyMentorBrief.verifiedPracticeAttemptsCount} Attempts · {dailyMentorBrief.dueItemsCount} Due
+              </span>
+            </div>
+            <dl className="space-y-2 text-xs">
+              <div className="p-2.5 rounded-xl bg-canvas border border-line">
+                <dt className="font-bold text-ink">1. What should I study today?</dt>
+                <dd className="text-muted mt-0.5">{dailyMentorBrief.q1WhatToStudyToday}</dd>
+              </div>
+              <div className="p-2.5 rounded-xl bg-canvas border border-line">
+                <dt className="font-bold text-ink">2. Why this now?</dt>
+                <dd className="text-muted mt-0.5">{dailyMentorBrief.q2WhyThisNow}</dd>
+              </div>
+              <div className="p-2.5 rounded-xl bg-canvas border border-line">
+                <dt className="font-bold text-ink">3. How am I progressing?</dt>
+                <dd className="text-muted mt-0.5">{dailyMentorBrief.q3HowAmIProgressing}</dd>
+              </div>
+              <div className="p-2.5 rounded-xl bg-canvas border border-line">
+                <dt className="font-bold text-ink">4. Where am I losing marks?</dt>
+                <dd className="text-muted mt-0.5">{dailyMentorBrief.q4WhereLosingMarks}</dd>
+              </div>
+              <div className="p-2.5 rounded-xl bg-canvas border border-line">
+                <dt className="font-bold text-ink">5. What is due for revision today?</dt>
+                <dd className="text-muted mt-0.5">{dailyMentorBrief.q5DueForRevisionToday}</dd>
+              </div>
+              <div className="p-2.5 rounded-xl bg-canvas border border-line">
+                <dt className="font-bold text-ink">6. Am I exam-ready?</dt>
+                <dd className="text-muted mt-0.5">{dailyMentorBrief.q6AmIExamReady}</dd>
+              </div>
+            </dl>
           </section>
         </div>
       </div>
