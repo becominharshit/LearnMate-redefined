@@ -26,6 +26,10 @@ import {
   Calculator,
   Calendar,
   ShieldCheck,
+  Menu,
+  MoreHorizontal,
+  BookMarked,
+  X,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -177,22 +181,33 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [profileOpen, setProfileOpen] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [headerOverflowOpen, setHeaderOverflowOpen] = useState(false);
+  const [localUtilityTab, setLocalUtilityTab] = useState<UtilityTab | null>(null);
 
   const isDark = themeMode === 'dark';
   const profileRef = useRef<HTMLDivElement>(null);
+  const headerOverflowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setProfileOpen(false);
       }
+      if (headerOverflowRef.current && !headerOverflowRef.current.contains(e.target as Node)) {
+        setHeaderOverflowOpen(false);
+      }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setProfileOpen(false);
+        setHeaderOverflowOpen(false);
+        setMobileDrawerOpen(false);
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setMobileDrawerOpen(false);
+        setHeaderOverflowOpen(false);
         onOpenSearchModal?.();
       }
     };
@@ -204,7 +219,10 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
   }, [onOpenSearchModal]);
 
-  const countdown = useMemo(() => getNextJeeCountdown(), []);
+  const countdown = useMemo(
+    () => getNextJeeCountdown(new Date(), studentProfile?.targetExam || 'jee_main'),
+    [studentProfile?.targetExam]
+  );
 
   const filteredDocs = searchQuery.trim()
     ? documents.filter(
@@ -229,6 +247,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const go = (tab: ActiveTab) => {
     onSelectTab(tab);
     setProfileOpen(false);
+    setHeaderOverflowOpen(false);
+    setMobileDrawerOpen(false);
   };
 
   const menuItemClass =
@@ -393,9 +413,19 @@ export const Navbar: React.FC<NavbarProps> = ({
           CLEAN WIDESCREEN TOP HEADER BAR (5 Approved Utility Controls)
          ===================================================================== */}
       <header className="sticky top-0 z-30 w-full bg-white/95 dark:bg-[#0B1020]/95 backdrop-blur-xl border-b border-line lm-no-print">
-        <div className="max-w-[1920px] w-full mx-auto px-3 sm:px-6 lg:px-10 xl:px-12 h-16 flex items-center justify-between gap-2 sm:gap-4">
-          {/* Left Context: Mobile Brand + Desktop Section Breadcrumb */}
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
+        <div className="max-w-[1920px] w-full mx-auto px-3 sm:px-6 lg:px-6 xl:px-10 h-16 flex items-center justify-between gap-2 sm:gap-3">
+          {/* Left Context: Hamburger (<lg) + Mobile Brand + Desktop Section Breadcrumb */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(true)}
+              data-testid="mobile-hamburger-btn"
+              aria-label="Open navigation menu"
+              className="lg:hidden p-2 -ml-1 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink cursor-pointer shrink-0"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+
             {/* Mobile Brand */}
             <button
               type="button"
@@ -412,29 +442,29 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {/* Desktop Workspace Title & Active Document Context */}
-            <div className="hidden lg:flex items-center gap-3 min-w-0">
-              <span className="font-display text-base font-bold text-ink whitespace-nowrap">
+            <div className="hidden lg:flex items-center gap-2.5 min-w-0 overflow-hidden">
+              <span className="font-display text-base font-bold text-ink whitespace-nowrap shrink-0">
                 {activeMeta.title}
               </span>
               {activeDoc ? (
                 <>
-                  <span className="text-line-strong">/</span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-canvas border border-line text-xs font-medium text-body truncate max-w-md">
+                  <span className="text-line-strong shrink-0">/</span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-canvas border border-line text-xs font-medium text-body truncate max-w-[160px] xl:max-w-[220px]">
                     <FileText className="w-3.5 h-3.5 text-brand shrink-0" />
                     <span className="truncate">{activeDoc.title.replace(/\.pdf$/i, '')}</span>
                   </span>
                 </>
               ) : (
                 <>
-                  <span className="text-line-strong">·</span>
+                  <span className="text-line-strong shrink-0">·</span>
                   <span className="text-xs text-muted truncate">{activeMeta.subtitle}</span>
                 </>
               )}
             </div>
           </div>
 
-          {/* Right Global Utilities (ONLY the 5 approved controls: Add Material, Voice Tutor, Global Search, Formula Book, Profile) */}
-          <div className="ml-auto flex items-center gap-1.5 sm:gap-2.5 lg:gap-3 shrink-0">
+          {/* Right Global Utilities (Fits cleanly at 1280px+ with zero clipping) */}
+          <div className="ml-auto flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* 1. + Add Material Button */}
             {onOpenAddMaterial && (
               <button
@@ -442,7 +472,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => onOpenAddMaterial('pdf')}
                 data-testid="navbar-add-material-btn"
                 aria-label="Add Material"
-                className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-2 sm:px-3.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 px-2.5 py-2 sm:px-3 xl:px-3.5 rounded-xl lm-btn-accent text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus className="w-4 h-4 shrink-0" />
                 <span className="hidden sm:inline">Add Material</span>
@@ -455,7 +485,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 type="button"
                 onClick={onOpenVoiceTutor}
                 data-testid="navbar-voice-tutor-btn"
-                className="inline-flex items-center gap-2 p-2 sm:px-3.5 sm:py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 p-2 sm:px-3 xl:px-3.5 sm:py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
                 title="Open AI Voice Tutor"
               >
                 <Mic className="w-4 h-4 text-brand shrink-0" />
@@ -463,7 +493,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* 3. Global Search (Ctrl+K) */}
+            {/* 3. Global Search (inline >=xl / 1280px, in More menu <xl) */}
             {onOpenSearchModal && (
               <button
                 type="button"
@@ -471,21 +501,72 @@ export const Navbar: React.FC<NavbarProps> = ({
                 data-testid="navbar-search-btn"
                 aria-label="Search (Ctrl+K)"
                 title="Search chapters, notes, PYQs, materials & tools (Ctrl+K)"
-                className="inline-flex items-center gap-2 p-2 sm:px-3.5 sm:py-2 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                className="hidden xl:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-canvas hover:bg-soft text-muted hover:text-ink text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer"
               >
                 <Search className="w-4 h-4 shrink-0" />
-                <span className="hidden md:inline">Search (Ctrl+K)</span>
+                <span>
+                  Search<span className="hidden 2xl:inline"> (Ctrl+K)</span>
+                </span>
               </button>
             )}
 
-            {/* 4. Unified Formula Book Button */}
+            {/* 4. Unified Formula Book Button (inline >=xl / 1280px; drawer remains mounted on all viewports) */}
             <CompactStudyUtilitiesWidget
               activeDocument={activeDoc}
-              externalOpenTab={externalUtilityTab}
-              onConsumeExternalOpen={onConsumeExternalUtilityTab}
+              externalOpenTab={localUtilityTab ?? externalUtilityTab}
+              onConsumeExternalOpen={() => {
+                setLocalUtilityTab(null);
+                onConsumeExternalUtilityTab?.();
+              }}
               onPlotFormulaInStudyTools={onPlotFormulaInStudyTools}
               onOpenStudyToolsWorkspace={onOpenStudyToolsWorkspace}
+              triggerClassName="hidden xl:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
             />
+
+            {/* <xl Overflow Menu for Search & Formula Book */}
+            <div ref={headerOverflowRef} className="relative xl:hidden">
+              <button
+                type="button"
+                onClick={() => setHeaderOverflowOpen((prev) => !prev)}
+                data-testid="navbar-more-menu-btn"
+                aria-label="More study utilities"
+                className="inline-flex items-center gap-1.5 p-2 sm:px-2.5 sm:py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold cursor-pointer"
+              >
+                <MoreHorizontal className="w-4 h-4 text-muted" />
+                <span className="hidden md:inline">More</span>
+              </button>
+              {headerOverflowOpen && (
+                <div
+                  data-testid="navbar-more-dropdown"
+                  className="absolute right-0 mt-2 w-56 rounded-2xl bg-white dark:bg-[#121A2E] border border-line shadow-xl py-1.5 z-50"
+                >
+                  {onOpenSearchModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHeaderOverflowOpen(false);
+                        onOpenSearchModal();
+                      }}
+                      className={menuItemClass}
+                    >
+                      <Search className="w-4 h-4 text-muted" />
+                      <span>Search (Ctrl+K)</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderOverflowOpen(false);
+                      setLocalUtilityTab('formulas');
+                    }}
+                    className={menuItemClass}
+                  >
+                    <BookMarked className="w-4 h-4 text-brand" />
+                    <span>Formula Book</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             {isAuthReady && !user && onLogin && (
               <button
@@ -760,6 +841,135 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
+      {/* Mobile & Tablet Slide-Over Hamburger Drawer (<lg) */}
+      {mobileDrawerOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-[2px] flex lm-no-print"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setMobileDrawerOpen(false);
+          }}
+        >
+          <aside
+            data-testid="mobile-nav-drawer"
+            aria-label="Mobile Navigation Drawer"
+            className="w-72 max-w-[85vw] h-full bg-white dark:bg-[#0B1020] border-r border-line shadow-2xl flex flex-col overflow-hidden"
+          >
+            <div className="px-4 h-16 border-b border-line flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-brand text-white grid place-items-center">
+                  <GraduationCap className="w-4 h-4" />
+                </span>
+                <span className="font-display font-extrabold text-base text-ink">LearnMate JEE</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileDrawerOpen(false)}
+                aria-label="Close navigation menu"
+                className="p-2 rounded-xl text-muted hover:text-ink hover:bg-soft cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-5">
+              <nav className="space-y-1">
+                <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+                  Workspaces
+                </div>
+                {[...DESKTOP_PRIMARY_NAV, ...DESKTOP_SECONDARY_NAV].map((item) => {
+                  const Icon = item.icon;
+                  const active = isTabActive(item.id, activeTab);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => go(item.id)}
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold cursor-pointer ${
+                        active
+                          ? 'bg-brand-soft text-brand border border-brand/20'
+                          : 'text-ink hover:bg-soft'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <div className="pt-3 border-t border-line space-y-1">
+                <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+                  Utilities
+                </div>
+                {onOpenSearchModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileDrawerOpen(false);
+                      onOpenSearchModal();
+                    }}
+                    className={menuItemClass}
+                  >
+                    <Search className="w-4 h-4 text-muted" />
+                    <span>Search (Ctrl+K)</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileDrawerOpen(false);
+                    setLocalUtilityTab('formulas');
+                  }}
+                  className={menuItemClass}
+                >
+                  <BookMarked className="w-4 h-4 text-brand" />
+                  <span>Formula Book</span>
+                </button>
+                {onOpenMentorReportModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileDrawerOpen(false);
+                      onOpenMentorReportModal();
+                    }}
+                    className={menuItemClass}
+                  >
+                    <Calendar className="w-4 h-4 text-brand" />
+                    <span>Weekly Report</span>
+                  </button>
+                )}
+                {onOpenCommercialConsoleModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileDrawerOpen(false);
+                      onOpenCommercialConsoleModal();
+                    }}
+                    className={menuItemClass}
+                  >
+                    <ShieldCheck className="w-4 h-4 text-brand" />
+                    <span>Plans &amp; Quota</span>
+                  </button>
+                )}
+                {onOpenProfileModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileDrawerOpen(false);
+                      onOpenProfileModal();
+                    }}
+                    className={menuItemClass}
+                  >
+                    <UserRound className="w-4 h-4 text-muted" />
+                    <span>Profile &amp; Settings</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {/* Non-collapsible Tablet & Android/Mobile navigation dock exposing all 8 destinations directly */}
       <nav
         aria-label="Mobile and tablet navigation"
@@ -776,6 +986,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 type="button"
                 onClick={() => {
                   setProfileOpen(false);
+                  setMobileDrawerOpen(false);
                   onSelectTab(item.id);
                 }}
                 data-testid={`mobile-nav-tab-${item.id}`}

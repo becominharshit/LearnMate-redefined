@@ -1,5 +1,5 @@
-const CACHE_NAME = 'learnmate-jee-pwa-v2';
-const OFFLINE_ASSETS = ['/', '/index.html', '/manifest.json'];
+const CACHE_NAME = 'learnmate-jee-pwa-v3';
+const OFFLINE_ASSETS = ['/', '/index.html', '/manifest.json', '/pyq-packs/index.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -51,8 +51,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first with background refresh for immutable static assets (/assets/*, fonts, manifest)
-  if (url.pathname.startsWith('/assets/') || url.pathname.endsWith('.json') || url.pathname.endsWith('.png') || url.pathname.endsWith('.svg')) {
+  // Cache-first with background refresh for immutable static assets (/assets/*, /pyq-packs/*, fonts, manifest)
+  if (
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.startsWith('/pyq-packs/') ||
+    url.pathname.endsWith('.json') ||
+    url.pathname.endsWith('.png') ||
+    url.pathname.endsWith('.svg')
+  ) {
     event.respondWith(
       caches.match(request).then((cached) => {
         const fetchPromise = fetch(request)

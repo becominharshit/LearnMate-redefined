@@ -59,6 +59,12 @@ import {
   type UnifiedQuestionRecord,
 } from '../ingestion';
 import { BITSAT_AND_VITEEE_PYQ_QUESTIONS } from '../utils/commercialScaleEngine';
+import {
+  fetchPyqPackIndex,
+  loadPyqPack,
+  packQuestionToCorpusQuestion,
+  type PyqPackIndexEntry,
+} from '../utils/pyqPackLoader';
 
 interface PracticeWorkspaceViewProps {
   documents: StudyDocument[];
@@ -89,11 +95,20 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
   const [unifiedCorpus, setUnifiedCorpus] = useState<UnifiedQuestionRecord[]>(() =>
     getStoredUnifiedQuestions()
   );
+  const [packIndex, setPackIndex] = useState<PyqPackIndexEntry[]>([]);
+  const [loadedPackIds, setLoadedPackIds] = useState<Record<string, boolean>>({});
+  const [loadingPackId, setLoadingPackId] = useState<string | null>(null);
+  const [lazyPackQuestions, setLazyPackQuestions] = useState<PyqCorpusQuestion[]>([]);
 
   useEffect(() => {
     void ensureInitialOpenSourcePyqSeed().then((seeded) => {
       setUnifiedCorpus(seeded);
     });
+    void fetchPyqPackIndex()
+      .then((idx) => setPackIndex(idx.packs || []))
+      .catch(() => {
+        // Offline or test env without static pack server
+      });
   }, []);
 
   // Official Paper Filters
@@ -312,10 +327,21 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
           })
         : [];
 
+    const lazyMatching = lazyPackQuestions.filter((lq) => {
+      if (examFilter === 'jee_advanced' && lq.exam !== 'jee_advanced') return false;
+      if (examFilter === 'jee_main' && lq.exam !== 'jee_main') return false;
+      if (paperYearFilter !== 'All' && lq.year !== paperYearFilter) return false;
+      if (pyqSubjectFilter !== 'All' && lq.subject !== pyqSubjectFilter) return false;
+      if (paperChapterFilter !== 'All' && lq.chapterId !== paperChapterFilter) return false;
+      if (difficulty !== 'Mixed' && lq.difficulty !== difficulty) return false;
+      return true;
+    });
+
     const existingIds = new Set(baseQuestions.map((q) => q.id));
     const merged = [
       ...archetypeMatches.filter((q) => !existingIds.has(q.id)),
       ...importedMatching.filter((q) => !existingIds.has(q.id)),
+      ...lazyMatching.filter((q) => !existingIds.has(q.id)),
       ...baseQuestions,
     ];
     return merged;
@@ -326,7 +352,51 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
     paperChapterFilter,
     difficulty,
     unifiedCorpus,
+    lazyPackQuestions,
   ]);
+
+  const matchingLazyPacks = useMemo(() => {
+    const normalizedExam = examFilter === 'jee_advanced' ? 'jee_advanced' : 'jee_main';
+    return packIndex.filter((p) => {
+      if (p.exam !== normalizedExam) return false;
+      if (paperYearFilter !== 'All' && p.year !== paperYearFilter) return false;
+      if (paperSessionFilter !== 'All' && p.session !== paperSessionFilter) return false;
+      if (
+        paperShiftFilter !== 'All' &&
+        !p.shift.toLowerCase().includes(paperShiftFilter.toLowerCase())
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [packIndex, examFilter, paperYearFilter, paperSessionFilter, paperShiftFilter]);
+
+  const handleLoadLazyPack = async (entry: PyqPackIndexEntry, launchCbt = false) => {
+    setLoadingPackId(entry.packId);
+    try {
+      const pack = await loadPyqPack(entry);
+      const converted = pack.questions.map((item, idx) =>
+        packQuestionToCorpusQuestion(item, pack, idx + 1)
+      );
+      setLazyPackQuestions((prev) => {
+        const seen = new Set(prev.map((q) => q.id));
+        return [...prev, ...converted.filter((q) => !seen.has(q.id))];
+      });
+      setLoadedPackIds((prev) => ({ ...prev, [entry.packId]: true }));
+      if (launchCbt && converted.length > 0) {
+        setActiveCbtPaper({
+          title: pack.title,
+          variant: pack.exam,
+          paperId: pack.packId,
+          questions: converted,
+          durationMinutes: 60,
+        });
+        setIsJeeExamModalOpen(true);
+      }
+    } finally {
+      setLoadingPackId(null);
+    }
+  };
 
   const launchFullJeeMainMock = () => {
     const assembled75 = assembleFull75QuestionNtaMock('paper-jee-main-2027-editorial-mock-1');
@@ -1127,7 +1197,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 <div>
                   <h2 className="text-lg font-bold text-ink">Mock Papers &amp; PYQ Catalog</h2>
                   <p className="text-xs text-muted">
-                    Editorial 75-Q mocks and historical shift catalog slots (pending verified NTA paper imports).
+                    Full 75-Q NTA-pattern mocks and multi-shift JEE Main &amp; Advanced practice packs.
                   </p>
                 </div>
 
@@ -1287,6 +1357,71 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                 </table>
               </div>
 
+              {/* Shift-Tagged Practice Packs (Lazy IndexedDB Cache) */}
+              {matchingLazyPacks.length > 0 && (
+                <div
+                  data-testid="lazy-pyq-packs-panel"
+                  className="pt-4 border-t border-line space-y-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-ink">
+                        Shift-Tagged Practice Packs ({matchingLazyPacks.length} packs · Lazy Offline Cache)
+                      </h3>
+                      <p className="text-[11px] text-muted">
+                        Original editorial shift-pattern practice sets loaded on demand and cached in IndexedDB.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                    {matchingLazyPacks.map((entry) => {
+                      const isLoaded = Boolean(loadedPackIds[entry.packId]);
+                      const isLoading = loadingPackId === entry.packId;
+                      return (
+                        <div
+                          key={entry.packId}
+                          data-testid={`lazy-pack-card-${entry.packId}`}
+                          className="p-3.5 rounded-xl border border-line bg-canvas flex flex-col justify-between gap-2.5"
+                        >
+                          <div className="space-y-1">
+                            <div className="text-xs font-bold text-ink leading-snug">
+                              {entry.title}
+                            </div>
+                            <div className="text-[11px] text-muted">
+                              {entry.year} · {entry.session} · {entry.questionCount} Qs · Original Editorial
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={isLoading}
+                              onClick={() => void handleLoadLazyPack(entry, false)}
+                              data-testid={`load-pack-btn-${entry.packId}`}
+                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer ${
+                                isLoaded
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : 'bg-white hover:bg-soft text-ink border-line'
+                              }`}
+                            >
+                              {isLoading ? 'Loading…' : isLoaded ? 'Loaded in Bank ✓' : 'Load 25 Qs'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isLoading}
+                              onClick={() => void handleLoadLazyPack(entry, true)}
+                              data-testid={`launch-pack-cbt-${entry.packId}`}
+                              className="px-2.5 py-1.5 rounded-lg bg-brand hover:bg-brand-strong text-white text-[11px] font-bold cursor-pointer ml-auto"
+                            >
+                              Launch CBT
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Chapter-wise & Year-wise Practice Link Cards (matching wanted/LearnMate JEE Practice Dashboard-2.png) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-line">
                 <button
@@ -1325,7 +1460,7 @@ export const PracticeWorkspaceView: React.FC<PracticeWorkspaceViewProps> = ({
                       Year-wise Practice
                     </h3>
                     <p className="text-xs text-muted leading-relaxed">
-                      Solve actual past year papers shift by shift with official NTA answer keys and simulated CBT.
+                      Solve shift-tagged pattern papers with NTA marking keys and simulated CBT.
                     </p>
                   </div>
                   <span className="text-xs font-bold text-brand flex items-center gap-1">

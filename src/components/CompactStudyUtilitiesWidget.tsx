@@ -14,6 +14,7 @@ import {
 import type { StudyDocument } from '../types/study';
 import { JEE_SYLLABUS_CHAPTERS } from '../data/jeeSyllabusAndNotes';
 import { extractPlottableExpressionFromFormula } from '../utils/desmosStudyToolsEngine';
+import { apiFetch } from '../services/apiFetch';
 import { MathText } from './MathText';
 
 export type UtilityTab =
@@ -32,6 +33,7 @@ interface CompactStudyUtilitiesWidgetProps {
   onConsumeExternalOpen?: () => void;
   onPlotFormulaInStudyTools?: (expression: string, formulaLabel?: string) => void;
   onOpenStudyToolsWorkspace?: (initialTool?: 'graph2d' | 'matrix' | 'surface3d' | 'geometry' | 'scientific') => void;
+  triggerClassName?: string;
 }
 
 const PHYSICAL_CONSTANTS: Array<{ symbol: string; label: string; value: string; unit: string }> = [
@@ -49,6 +51,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
   onConsumeExternalOpen,
   onPlotFormulaInStudyTools,
   onOpenStudyToolsWorkspace,
+  triggerClassName,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [copiedFormulaIdx, setCopiedFormulaIdx] = useState<number | null>(null);
@@ -337,7 +340,7 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
 
   const handleShareFormulaSheet = async () => {
     try {
-      const response = await fetch('/api/share/create', {
+      const response = await apiFetch('/api/share/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -372,7 +375,10 @@ export const CompactStudyUtilitiesWidget: React.FC<CompactStudyUtilitiesWidgetPr
         type="button"
         onClick={() => setIsOpen(true)}
         data-testid="navbar-formula-book-btn"
-        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+        className={
+          triggerClassName ||
+          'inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-line bg-white dark:bg-[#121A2E] hover:bg-soft text-ink text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer'
+        }
         title="Open Pure Formula Book (All formulas & equations from uploaded material and chapters)"
       >
         <BookMarked className="w-4 h-4 text-brand shrink-0" />

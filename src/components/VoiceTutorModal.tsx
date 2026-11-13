@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import type { StudyDocument, VoiceTurn, TutorCitation } from '../types/study';
 import { aiStudyClient } from '../services/aiClient';
+import { buildWsUrl } from '../services/apiFetch';
+import { getApiIdToken } from '../firebase';
 import { studyStorage } from '../services/storageService';
 import { MathText } from './MathText';
 
@@ -365,6 +367,7 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
   const silenceTimerRef = useRef<number | null>(null);
   const speechQueueAbortRef = useRef<boolean>(false);
   const inFlightQueryRef = useRef<boolean>(false);
+  const liveWsRef = useRef<WebSocket | null>(null);
   const historyEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -469,6 +472,15 @@ export const VoiceTutorModal: React.FC<VoiceTutorModalProps> = ({
       } catch {
         // Ignore errors cancelling speech synthesis
       }
+    }
+
+    if (liveWsRef.current) {
+      try {
+        liveWsRef.current.close();
+      } catch {
+        // Ignore WebSocket close error
+      }
+      liveWsRef.current = null;
     }
 
     setActiveSpokenSentence('');
@@ -775,6 +787,36 @@ Student Spoken Words: ${cleanQuery}`;
     setErrorMsg(null);
 
     if (typeof window !== 'undefined') {
+      // Establish optional Render/Backend /api/live WebSocket using VITE_WS_BASE_URL when configured
+      try {
+        const wsUrl = buildWsUrl('/api/live');
+        const ws = new WebSocket(wsUrl);
+        liveWsRef.current = ws;
+        ws.onopen = async () => {
+          if (!isMountedRef.current || !sessionActiveRef.current) {
+            ws.close();
+            return;
+          }
+          const idToken = await getApiIdToken().catch(() => null);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'setup',
+                title: docTitle,
+                pages: (doc?.pages || []).slice(0, 6),
+                weakTopics,
+                ...(idToken ? { idToken } : {}),
+              })
+            );
+          }
+        };
+        ws.onerror = () => {
+          // Non-fatal: SpeechRecognition + SSE tutor stream remains primary interactive path
+        };
+      } catch {
+        // Ignore invalid/blocked WebSocket attempts in restricted environments
+      }
+
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {

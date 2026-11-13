@@ -19,3 +19,18 @@ test('getNextJeeCountdown counts calendar days to the next JEE Main session', ()
 
   assert.equal(getNextJeeCountdown(new Date(2027, 3, 8)), null);
 });
+
+test('getNextJeeCountdown returns distinct dynamic dates per exam track', () => {
+  const sampleDate = new Date(2026, 10, 13, 12, 0);
+  const main = getNextJeeCountdown(sampleDate, 'jee_main');
+  const adv = getNextJeeCountdown(sampleDate, 'jee_advanced');
+  const bitsat = getNextJeeCountdown(sampleDate, 'bitsat');
+  const viteee = getNextJeeCountdown(sampleDate, 'viteee');
+
+  assert.equal(main?.label, 'JEE Main Session 1');
+  assert.equal(adv?.label, 'JEE Advanced 2027');
+  assert.equal(bitsat?.label, 'BITSAT Session 1');
+  assert.equal(viteee?.label, 'VITEEE 2027 Window');
+  assert.ok((adv?.daysLeft || 0) > (main?.daysLeft || 0));
+});
+

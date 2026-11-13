@@ -6,6 +6,10 @@ import type { DistributedRateLimiterAndTokenBudget } from '../middleware/rateLim
 import { getEntitlementService } from '../services/entitlementService.ts';
 import { getAiTelemetryService } from '../services/aiTelemetryService.ts';
 import { wrapUntrustedStudyMaterial } from '../services/aiGateway.ts';
+import {
+  generateWithModelFallback,
+  getGeminiModelConfig,
+} from '../services/geminiModelConfig.ts';
 
 export interface VoiceLivePageInput {
   pageNumber: number;
@@ -270,9 +274,12 @@ Rules for Voice Tutoring:
 - Reference specific page numbers verbally whenever answering from the material.
 - Encourage the student and ask a short check-for-understanding question when appropriate.`;
 
+          const modelConfig = getGeminiModelConfig();
+          const liveModel = modelConfig.liveModel;
+
           try {
             const connectPromise = ai.live.connect({
-              model: 'gemini-3.8-live',
+              model: liveModel,
               config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: {
@@ -292,7 +299,7 @@ Rules for Voice Tutoring:
                   safeSend({
                     type: 'status',
                     state: 'connected',
-                    model: 'gemini-3.8-live',
+                    model: liveModel,
                     languageRegister: preferredLanguage,
                   });
                 },
@@ -343,7 +350,7 @@ Rules for Voice Tutoring:
                       getAiTelemetryService().recordUsage({
                         endpoint: 'voice_live_ws',
                         provider: 'gemini',
-                        model: 'gemini-3.8-live',
+                        model: liveModel,
                         uid: studentUid,
                         promptTokens: Number(usageMeta?.promptTokenCount || Math.round(totalTok * 0.4)),
                         completionTokens: Number(usageMeta?.candidatesTokenCount || Math.round(totalTok * 0.6)),
@@ -480,8 +487,9 @@ Rules for Voice Tutoring:
                   .join('\n\n'),
                 sessionTitle
               );
-              const resp = await ai.models.generateContent({
-                model: 'gemini-3.1-flash-lite',
+              const modelConfig = getGeminiModelConfig();
+              const { response: resp, modelUsed } = await generateWithModelFallback(ai, {
+                preferredModel: modelConfig.fastModel,
                 contents: qText,
                 config: {
                   systemInstruction: `You are LearnMate's friendly voice tutor for JEE Main & Advanced (Physics, Chemistry, Mathematics), helping with "${sessionTitle}" in ${preferredLanguage}. Answer in 2 to 4 short spoken sentences without Markdown or LaTeX symbols. Reference notes: ${material}`,
@@ -498,7 +506,7 @@ Rules for Voice Tutoring:
               getAiTelemetryService().recordUsage({
                 endpoint: 'voice_question_fallback',
                 provider: 'gemini',
-                model: 'gemini-3.1-flash-lite',
+                model: modelUsed,
                 uid: studentUid,
                 promptTokens: Number(resp.usageMetadata?.promptTokenCount || 150),
                 completionTokens: Number(resp.usageMetadata?.candidatesTokenCount || 200),

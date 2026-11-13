@@ -27,6 +27,7 @@ import { filterPyqQuestions } from '../utils/pyqCorpusEngine';
 import type { JeeSubject } from '../utils/jeeSubjects';
 import type { StudyDocument } from '../types/study';
 import { MathText } from './MathText';
+import { formatStudyFormulaToLatex } from '../utils/mathMarkdown';
 import { awardLearningXp } from '../utils/rewardsEngine';
 
 interface SyllabusAndNotesWorkspaceProps {
@@ -363,13 +364,16 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                           className="p-3 rounded-xl border border-line bg-white dark:bg-[#121A2E] space-y-1"
                         >
                           <div className="text-xs font-bold text-brand">{f.name}</div>
-                          <div className="text-xs sm:text-sm font-mono font-bold text-ink bg-soft px-2.5 py-1.5 rounded-lg">
-                            {f.expression}
+                          <div className="text-xs sm:text-sm font-semibold text-ink bg-soft px-2.5 py-1.5 rounded-lg overflow-x-auto">
+                            <MathText text={formatStudyFormulaToLatex(f.expression)} variant="inline" />
                           </div>
                           <div className="text-[11px] text-muted">
-                            <strong>Conditions/Units:</strong> {f.unitsOrConditions}
+                            <strong>Conditions/Units:</strong>{' '}
+                            <MathText text={f.unitsOrConditions} variant="inline" />
                           </div>
-                          <div className="text-[11px] text-muted">{f.variablesExplanation}</div>
+                          <div className="text-[11px] text-muted">
+                            <MathText text={f.variablesExplanation} variant="inline" />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -383,7 +387,9 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                     </div>
                     <ul className="list-disc pl-5 space-y-1 text-ink">
                       {topic.exceptionsAndCommonMistakes.map((mistake, mi) => (
-                        <li key={mi}>{mistake}</li>
+                        <li key={mi}>
+                          <MathText text={mistake} variant="inline" />
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -391,7 +397,7 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                   {/* Main vs Advanced Distinction */}
                   <div className="text-xs text-muted bg-soft px-3.5 py-2.5 rounded-xl border border-line">
                     <strong className="text-ink">JEE Main vs Advanced Scope:</strong>{' '}
-                    {topic.mainVsAdvancedDistinction}
+                    <MathText text={topic.mainVsAdvancedDistinction} variant="inline" />
                   </div>
                 </section>
               ))}
@@ -407,16 +413,19 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                     className="rounded-2xl border border-line bg-canvas p-4 sm:p-5 space-y-3"
                   >
                     <div className="text-sm font-bold text-brand">{ex.title}</div>
-                    <p className="text-xs sm:text-sm font-medium text-ink">{ex.problemStatement}</p>
+                    <div className="text-xs sm:text-sm font-medium text-ink">
+                      <MathText text={ex.problemStatement} variant="inline" />
+                    </div>
                     <div className="space-y-1.5 pl-3 border-l-2 border-brand text-xs text-ink">
                       {ex.solutionSteps.map((step, si) => (
                         <p key={si}>
-                          <strong>Step {si + 1}:</strong> {step}
+                          <strong>Step {si + 1}:</strong>{' '}
+                          <MathText text={step} variant="inline" />
                         </p>
                       ))}
                     </div>
                     <div className="px-3 py-2 rounded-xl bg-success-soft text-success text-xs font-bold">
-                      Final Answer: {ex.finalAnswer}
+                      Final Answer: <MathText text={ex.finalAnswer} variant="inline" />
                     </div>
                   </div>
                 ))}
@@ -436,10 +445,12 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                       className="p-3.5 rounded-xl border border-line bg-canvas space-y-1"
                     >
                       <div className="text-xs font-bold text-brand">{ef.label}</div>
-                      <div className="text-xs font-mono font-bold text-ink bg-soft px-2.5 py-1.5 rounded-lg">
-                        {ef.formula}
+                      <div className="text-xs font-semibold text-ink bg-soft px-2.5 py-1.5 rounded-lg overflow-x-auto">
+                        <MathText text={formatStudyFormulaToLatex(ef.formula)} variant="inline" />
                       </div>
-                      <div className="text-[11px] text-muted">{ef.condition}</div>
+                      <div className="text-[11px] text-muted">
+                        <MathText text={ef.condition} variant="inline" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -451,7 +462,7 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                   <ul className="list-disc pl-4 space-y-1.5 text-muted">
                     {activeChapter.quickNotes.reactionsOrKeyFacts.map((fact, fi) => (
                       <li key={fi} className="text-ink">
-                        {fact}
+                        <MathText text={fact} variant="inline" />
                       </li>
                     ))}
                   </ul>
@@ -463,7 +474,9 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                   </div>
                   <ul className="list-disc pl-4 space-y-1.5 text-ink">
                     {activeChapter.quickNotes.commonTraps.map((trap, ti) => (
-                      <li key={ti}>{trap}</li>
+                      <li key={ti}>
+                        <MathText text={trap} variant="inline" />
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -483,7 +496,9 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                       className="rounded-xl border border-line bg-canvas p-4 space-y-2.5"
                     >
                       <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
-                        <p className="text-xs sm:text-sm font-bold text-ink min-w-0 flex-1">{chk.question}</p>
+                        <div className="text-xs sm:text-sm font-bold text-ink min-w-0 flex-1">
+                          <MathText text={chk.question} variant="inline" />
+                        </div>
                         <button
                           type="button"
                           onClick={() =>
@@ -500,7 +515,7 @@ export const SyllabusAndNotesWorkspace: React.FC<SyllabusAndNotesWorkspaceProps>
                       </div>
                       {revealed && (
                         <div className="p-3 rounded-lg bg-success-soft text-success text-xs font-semibold">
-                          ✓ {chk.expectedKeyPoint}
+                          ✓ <MathText text={chk.expectedKeyPoint} variant="inline" />
                         </div>
                       )}
                     </div>

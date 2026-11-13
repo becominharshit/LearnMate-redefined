@@ -9,6 +9,8 @@ import {
   connectAuthEmulator,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -92,6 +94,7 @@ function createSafeAuth(): Auth {
 export const auth = createSafeAuth();
 export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 if (usingFirebaseEmulator) {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
@@ -157,12 +160,33 @@ export function handleFirestoreError(
 }
 
 export async function signInWithGoogle(): Promise<User | null> {
-  const result = await signInWithPopup(
-    auth,
-    googleProvider,
-    browserPopupRedirectResolver
-  );
-  return result.user;
+  try {
+    const result = await signInWithPopup(
+      auth,
+      googleProvider,
+      browserPopupRedirectResolver
+    );
+    return result.user;
+  } catch (err: unknown) {
+    const code = (err as { code?: string } | null)?.code || '';
+    if (
+      code === 'auth/popup-blocked' ||
+      code === 'auth/operation-not-supported-in-this-environment'
+    ) {
+      await signInWithRedirect(auth, googleProvider, browserPopupRedirectResolver);
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function consumeGoogleRedirectResult(): Promise<User | null> {
+  try {
+    const result = await getRedirectResult(auth, browserPopupRedirectResolver);
+    return result?.user || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function signInWithEmail(email: string, password: string): Promise<User> {

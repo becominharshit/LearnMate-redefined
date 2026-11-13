@@ -67,6 +67,7 @@ interface StudentDashboardViewProps {
   isProcessingMaterial?: boolean;
   studentProfile?: StudentAcademicProfile;
   isProfileSyncing?: boolean;
+  onUpdateStudentProfile?: (profile: StudentAcademicProfile) => void;
   onOpenProfileModal?: () => void;
   onSaveDocument?: (doc: StudyDocument) => void;
   onOpenStudySection?: (section: 'my_materials' | 'syllabus' | 'chapter_notes' | 'ai_tutor' | 'resources') => void;
@@ -125,6 +126,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   isProcessingMaterial = false,
   studentProfile,
   isProfileSyncing = false,
+  onUpdateStudentProfile,
   onOpenProfileModal,
   onSaveDocument,
   onOpenStudySection,
@@ -140,6 +142,13 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   const [selectedExamTrack, setSelectedExamTrack] = useState<ExamTrackId>(
     studentProfile?.targetExam === 'jee_advanced' ? 'jee_advanced' : 'jee_main'
   );
+
+  React.useEffect(() => {
+    if (studentProfile?.targetExam === 'jee_advanced' || studentProfile?.targetExam === 'jee_main') {
+      setSelectedExamTrack(studentProfile.targetExam);
+    }
+  }, [studentProfile?.targetExam]);
+
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(DAILY_COACH_COMPLETION_KEY);
@@ -153,7 +162,14 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   const [showTaskReasonId, setShowTaskReasonId] = useState<string | null>(null);
 
   const now = useMemo(() => new Date(), [documents]);
-  const countdown = useMemo(() => getNextJeeCountdown(now), [now]);
+  const countdownExamTarget =
+    studentProfile?.targetExam === 'bitsat' || studentProfile?.targetExam === 'viteee'
+      ? studentProfile.targetExam
+      : selectedExamTrack;
+  const countdown = useMemo(
+    () => getNextJeeCountdown(now, countdownExamTarget),
+    [now, countdownExamTarget]
+  );
 
   const allAttempts = useMemo(() => studyStorage.getQuizAttempts(), [documents]);
   const focusSessions = useMemo(() => studyStorage.getFocusSessions(), [documents]);
@@ -327,10 +343,12 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   const handleExamTrackChange = (track: ExamTrackId) => {
     setSelectedExamTrack(track);
     if (studentProfile) {
-      studyStorage.saveStudentProfile({
+      const updated: StudentAcademicProfile = {
         ...studentProfile,
         targetExam: track,
-      });
+      };
+      studyStorage.saveStudentProfile(updated);
+      onUpdateStudentProfile?.(updated);
     }
   };
 
@@ -886,16 +904,16 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             data-testid="home-rewards-summary-card"
             className="lm-card-editorial p-6 lg:p-7 space-y-4"
           >
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-xl border border-line bg-canvas flex items-center gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3 rounded-xl border border-line bg-canvas flex items-center gap-2.5 min-w-0">
                 <span className="w-8 h-8 rounded-xl bg-brand-soft text-brand flex items-center justify-center shrink-0">
                   <Star className="w-4 h-4" />
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <span className="text-[11px] text-muted block">XP &amp; Level</span>
                   <span
                     data-testid="home-xp-value"
-                    className="text-sm font-extrabold text-ink tabular-nums truncate block"
+                    className="text-sm font-extrabold text-ink tabular-nums leading-snug break-words block"
                   >
                     {rewardsSummary.totalXp.toLocaleString()} XP · L{rewardsSummary.levelInfo.level}
                   </span>
@@ -905,14 +923,14 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               <button
                 type="button"
                 onClick={() => onNavigateTab('analytics')}
-                className="p-3 rounded-xl border border-line bg-canvas hover:border-brand text-left flex items-center gap-2.5 cursor-pointer"
+                className="p-3 rounded-xl border border-line bg-canvas hover:border-brand text-left flex items-center gap-2.5 cursor-pointer min-w-0"
               >
                 <span className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                   <Trophy className="w-4 h-4" />
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <span className="text-[11px] text-muted block">Rank Tier</span>
-                  <span className="text-xs font-bold text-ink truncate block">
+                  <span className="text-xs font-bold text-ink leading-snug break-words block">
                     {rewardsSummary.levelInfo.title}
                   </span>
                 </div>
@@ -921,16 +939,16 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
 
             {dailyChallenge && (
               <div className="p-3.5 rounded-xl border border-line bg-canvas space-y-2">
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="font-bold text-ink">{dailyChallenge.title}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-brand">
+                  <div className="flex items-center gap-2 shrink-0 ml-auto">
+                    <span className="font-mono font-bold text-brand whitespace-nowrap">
                       {dailyChallenge.currentCount}/{dailyChallenge.targetCount} (+{dailyChallenge.xpReward} XP)
                     </span>
                     <button
                       type="button"
                       onClick={() => onNavigateTab('practice')}
-                      className="px-2 py-0.5 rounded-md bg-brand text-white text-[11px] font-semibold hover:bg-brand-strong cursor-pointer"
+                      className="px-2.5 py-1 rounded-md bg-brand text-white text-[11px] font-semibold hover:bg-brand-strong whitespace-nowrap cursor-pointer"
                     >
                       Start →
                     </button>

@@ -77,6 +77,7 @@ import {
 } from './utils/phase6Engine';
 import {
   auth,
+  consumeGoogleRedirectResult,
   firebaseConfigured,
   needsEmailVerification,
   signInWithGoogle,
@@ -420,6 +421,14 @@ export function App() {
     setActiveDoc(initialDoc);
     setNotifications(studyStorage.getNotifications());
     setStudentProfile(studyStorage.getStudentProfile());
+
+    void consumeGoogleRedirectResult().then(async (redirectUser) => {
+      if (redirectUser && !needsEmailVerification(redirectUser)) {
+        setUser(redirectUser);
+        await syncAccount(redirectUser);
+        setIsAuthReady(true);
+      }
+    });
 
     const fallbackTimer = window.setTimeout(() => {
       setIsAuthReady(true);
@@ -1153,6 +1162,10 @@ export function App() {
               onAskDoubt={handleAskDoubtFromHome}
               studentProfile={studentProfile}
               isProfileSyncing={isSyncing}
+              onUpdateStudentProfile={(updated) => {
+                studyStorage.saveStudentProfile(updated);
+                setStudentProfile(updated);
+              }}
               onOpenProfileModal={() => {
                 setSetupDismissed(false);
                 setSetupOpen(true);

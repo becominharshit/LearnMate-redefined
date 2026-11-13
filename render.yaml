@@ -9,8 +9,16 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # Firebase web settings are needed at build time (Vite) as well as at runtime.
-      # Add these in the Render dashboard; see docs/PHASE2_PLAN.md section 4.
+      - key: PORT
+        value: 3000
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL_FAST
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_MODEL_THINKING
+        value: gemini-3.8-flash
+      - key: GEMINI_MODEL_LIVE
+        value: gemini-3.8-live
       - key: VITE_FIREBASE_API_KEY
         sync: false
       - key: VITE_FIREBASE_AUTH_DOMAIN
@@ -23,9 +31,15 @@ services:
         sync: false
       - key: VITE_FIREBASE_APP_ID
         sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_STORAGE_BUCKET
+        sync: false
       - key: VITE_SUPPORT_EMAIL
         sync: false
-      - key: ANTHROPIC_API_KEY
+      - key: VITE_API_BASE_URL
+        value: ""
+      - key: VITE_WS_BASE_URL
         sync: false
       - key: APP_URL
         sync: false
@@ -33,7 +47,13 @@ services:
         sync: false
       - key: ADMIN_TOKEN
         sync: false
-      # Optional: Higgsfield stays paused until age checks exist.
+      - key: STORAGE_SIGNING_SECRET
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      # Optional: Third-party providers remain disabled unless configured.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: HIGGSFIELD_API_KEY
         sync: false
       - key: HIGGSFIELD_API_SECRET

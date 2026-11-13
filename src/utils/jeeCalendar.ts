@@ -1,8 +1,25 @@
-/** Official JEE Main 2027 exam windows (NTA Information Bulletin, 24 Oct 2026). */
+/** Official JEE Main 2027 & Target Exam Windows. */
 export const JEE_MAIN_EXAM_WINDOWS = [
   { id: 'jee-main-2027-s1', label: 'JEE Main Session 1', start: '2027-01-20', end: '2027-01-28' },
   { id: 'jee-main-2027-s2', label: 'JEE Main Session 2', start: '2027-04-02', end: '2027-04-07' },
 ] as const;
+
+export const EXAM_CALENDAR_WINDOWS: Record<
+  string,
+  ReadonlyArray<{ id: string; label: string; start: string; end: string }>
+> = {
+  jee_main: JEE_MAIN_EXAM_WINDOWS,
+  jee_advanced: [
+    { id: 'jee-adv-2027', label: 'JEE Advanced 2027', start: '2027-05-23', end: '2027-05-23' },
+  ],
+  bitsat: [
+    { id: 'bitsat-2027-s1', label: 'BITSAT Session 1', start: '2027-05-26', end: '2027-05-30' },
+    { id: 'bitsat-2027-s2', label: 'BITSAT Session 2', start: '2027-06-23', end: '2027-06-27' },
+  ],
+  viteee: [
+    { id: 'viteee-2027', label: 'VITEEE 2027 Window', start: '2027-04-20', end: '2027-04-30' },
+  ],
+};
 
 /** Key JEE Main 2027 dates from the NTA Information Bulletin (24 Oct 2026). */
 export const JEE_MAIN_2027_KEY_DATES = [
@@ -26,10 +43,14 @@ function localDate(isoDay: string): Date {
   return new Date(y, m - 1, d);
 }
 
-/** Days until the next JEE Main session, counted on the student's local calendar. */
-export function getNextJeeCountdown(now: Date = new Date()): JeeCountdown | null {
+/** Days until the next session of the selected exam track, counted on the student's local calendar. */
+export function getNextJeeCountdown(
+  now: Date = new Date(),
+  targetExam: string = 'jee_main'
+): JeeCountdown | null {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  for (const window of JEE_MAIN_EXAM_WINDOWS) {
+  const windows = EXAM_CALENDAR_WINDOWS[targetExam] || JEE_MAIN_EXAM_WINDOWS;
+  for (const window of windows) {
     const start = localDate(window.start);
     const end = localDate(window.end);
     if (today <= end) {

@@ -1,0 +1,572 @@
+{
+  "packId": "jee-main-2026-jan-s2",
+  "title": "JEE (Main) 2026 · Jan Session · Shift 2 Practice Pack",
+  "exam": "jee_main",
+  "year": 2026,
+  "session": "January",
+  "examDate": "2026-01-22",
+  "shift": "Shift 2 (Evening)",
+  "collectionKind": "original_practice",
+  "sourceCategory": "ORIGINAL_EDITORIAL",
+  "isFakeShiftAssignment": false,
+  "questions": [
+    {
+      "id": "jee-main-2026-jan-s2-phy-1",
+      "subject": "Physics",
+      "section": "A",
+      "chapterId": "ch-phys-kinematics-laws",
+      "chapterName": "Kinematics & Laws of Motion",
+      "topicName": "Projectile Motion",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "A projectile is fired from level ground with speed $40\\text{ m/s}$ at $30^\\circ$ above the horizontal. Taking $g = 10\\text{ m/s}^2$, find the maximum height reached.",
+      "options": [
+        "$20\\text{ m}$",
+        "$40.0\\text{ m}$",
+        "$80.0\\text{ m}$",
+        "$10.00\\text{ m}$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "$H_{\\max} = \\frac{u^2 \\sin^2 \\theta}{2g} = \\frac{40^2 \\cdot (1/2)^2}{2 \\times 10} = 20\\text{ m}$.",
+      "keyFormula": "$H_{\\max} = \\frac{u^2 \\sin^2\\theta}{2g}$",
+      "commonMistakeTrap": "Using $\\sin(2\\theta)$ instead of $\\sin^2\\theta$ in the maximum height formula."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-2",
+      "subject": "Physics",
+      "section": "A",
+      "chapterId": "ch-phys-work-energy-rotation",
+      "chapterName": "Work, Energy & Rotational Dynamics",
+      "topicName": "Spring-Mass Energy Conservation",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Medium",
+      "prompt": "A block of mass $4\\text{ kg}$ is gently attached to a vertical spring of stiffness $k = 300\\text{ N/m}$ and released from rest at the natural length. Find the maximum extension of the spring ($g = 10\\text{ m/s}^2$).",
+      "options": [
+        "$0.134\\text{ m}$",
+        "$0.267\\text{ m}$",
+        "$0.534\\text{ m}$",
+        "$0.401\\text{ m}$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "By conservation of mechanical energy between release and lowest point: $mgx_{\\max} = \\frac{1}{2}kx_{\\max}^2 \\implies x_{\\max} = \\frac{2mg}{k} = \\frac{2 \\times 4 \\times 10}{300} = 0.267\\text{ m}$.",
+      "keyFormula": "$x_{\\max} = \\frac{2mg}{k}$ (vs equilibrium $x_{\\text{eq}} = \\frac{mg}{k}$)",
+      "commonMistakeTrap": "Balancing forces $kx = mg$ gives equilibrium extension, half of maximum dynamic extension."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-3",
+      "subject": "Physics",
+      "section": "A",
+      "chapterId": "ch-phys-work-energy-rotation",
+      "chapterName": "Work, Energy & Rotational Dynamics",
+      "topicName": "Moment of Inertia",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Medium",
+      "prompt": "A uniform solid sphere of mass $M$ and radius $R$ rotates about a tangent axis. Taking $I_{\\text{cm}} = \\frac{2}{5}MR^2$ and $n = 4$, what is its moment of inertia about an axis parallel to the diameter at distance $d = 4R$?",
+      "options": [
+        "$\\frac{82}{5}MR^2$",
+        "$\\frac{6}{5}MR^2$",
+        "$\\frac{7}{5}MR^2$",
+        "$16MR^2$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "By the Parallel Axis Theorem, $I = I_{\\text{cm}} + Md^2 = \\frac{2}{5}MR^2 + M(4R)^2 = \\frac{82}{5}MR^2$.",
+      "keyFormula": "$I = I_{\\text{cm}} + Md^2$",
+      "commonMistakeTrap": "Applying the parallel axis theorem from a non-centroidal axis."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-4",
+      "subject": "Physics",
+      "section": "A",
+      "chapterId": "ch-phys-thermodynamics-ktg",
+      "chapterName": "Thermodynamics & Kinetic Theory",
+      "topicName": "Carnot Efficiency",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "A reversible Carnot engine operates between a hot reservoir at $500\\text{ K}$ and a cold sink at $300\\text{ K}$. What is its thermal efficiency?",
+      "options": [
+        "$60.0\\%$",
+        "$40\\%$",
+        "$20.0\\%$",
+        "$52.0\\%$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "Carnot efficiency $\\eta = 1 - \\frac{T_C}{T_H} = 1 - \\frac{300}{500} = 40\\%$.",
+      "keyFormula": "$\\eta = 1 - \\frac{T_C}{T_H}$",
+      "commonMistakeTrap": "Using Celsius temperatures instead of Kelvin."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-5",
+      "subject": "Physics",
+      "section": "A",
+      "chapterId": "ch-phys-electrostatics-current",
+      "chapterName": "Electrostatics, Capacitors & Current Electricity",
+      "topicName": "Capacitor Energy Storage",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "A $6\\,\\mu\\text{F}$ parallel-plate capacitor is charged to $30\\text{ V}$ using an ideal battery. Find the electrostatic energy stored in the capacitor.",
+      "options": [
+        "$2700\\,\\mu\\text{J}$",
+        "$5400\\,\\mu\\text{J}$",
+        "$1350\\,\\mu\\text{J}$",
+        "$180\\,\\mu\\text{J}$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "Energy stored $U = \\frac{1}{2}CV^2 = \\frac{1}{2} \\times 6 \\times 30^2 = 2700\\,\\mu\\text{J}$.",
+      "keyFormula": "$U = \\frac{1}{2}CV^2$",
+      "commonMistakeTrap": "Calculating $QV = CV^2$ (total battery work) instead of $\\frac{1}{2}CV^2$ stored."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-6",
+      "subject": "Physics",
+      "section": "A",
+      "chapterId": "ch-phys-magnetism-emi-ac",
+      "chapterName": "Magnetism, EMI & Alternating Current",
+      "topicName": "Motional EMF",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Medium",
+      "prompt": "A conducting rod of length $L = 0.5\\text{ m}$ moves perpendicular to its length with uniform speed $v = 12\\text{ m/s}$ in a perpendicular uniform magnetic field $B = 4\\text{ T}$. The induced motional EMF across its ends is:",
+      "options": [
+        "$12.0\\text{ V}$",
+        "$48.0\\text{ V}$",
+        "$24.0\\text{ V}$",
+        "$0\\text{ V}$"
+      ],
+      "correctOptionIndices": [
+        2
+      ],
+      "detailedSolution": "When rod velocity, length, and magnetic field are mutually perpendicular, $\\mathcal{E} = Bvl = 4 \\times 12 \\times 0.5 = 24.0\\text{ V}$.",
+      "keyFormula": "$\\mathcal{E} = (\\vec{v} \\times \\vec{B}) \\cdot \\vec{l}$",
+      "commonMistakeTrap": "Forgetting the factor $L = 0.5\\text{ m}$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-7",
+      "subject": "Physics",
+      "section": "A",
+      "chapterId": "ch-phys-optics-modern",
+      "chapterName": "Optics & Modern Physics",
+      "topicName": "Photoelectric Effect",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "Monochromatic photons of energy $7\\text{ eV}$ strike a metallic surface whose work function is $4\\text{ eV}$. What is the stopping potential $V_0$ required to halt the fastest photoelectrons?",
+      "options": [
+        "$7\\text{ V}$",
+        "$3\\text{ V}$",
+        "$4\\text{ V}$",
+        "$11\\text{ V}$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "By Einstein photoelectric equation, $eV_0 = K_{\\max} = h\\nu - \\phi_0 = 7 - 4 = 3\\text{ eV} \\implies V_0 = 3\\text{ V}$.",
+      "keyFormula": "$eV_0 = h\\nu - \\phi_0$",
+      "commonMistakeTrap": "Adding work function instead of subtracting it."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-8",
+      "subject": "Physics",
+      "section": "B",
+      "chapterId": "ch-phys-electrostatics-current",
+      "chapterName": "Electrostatics, Capacitors & Current Electricity",
+      "topicName": "DC Series Circuit",
+      "format": "numerical_decimal",
+      "questionType": "numerical",
+      "difficulty": "Easy",
+      "prompt": "Two resistors of $6\\,\\Omega$ and $9\\,\\Omega$ are connected in series across an ideal $30\\text{ V}$ DC battery. Find the steady-state current in amperes (round to 2 decimal places).",
+      "numericalAnswer": 2,
+      "numericalTolerance": 0.05,
+      "detailedSolution": "$R_{\\text{eq}} = 6 + 9 = 15\\,\\Omega$. Current $I = \\frac{V}{R_{\\text{eq}}} = \\frac{30}{15} = 2\\text{ A}$.",
+      "keyFormula": "$I = \\frac{V}{R_1 + R_2}$",
+      "commonMistakeTrap": "Computing parallel equivalent resistance instead of series."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-phy-9",
+      "subject": "Physics",
+      "section": "B",
+      "chapterId": "ch-phys-optics-modern",
+      "chapterName": "Optics & Modern Physics",
+      "topicName": "Combination of Thin Lenses",
+      "format": "numerical_integer",
+      "questionType": "numerical",
+      "difficulty": "Easy",
+      "prompt": "Two thin lenses of powers $+4\\text{ D}$ and $-1\\text{ D}$ are placed in coaxially close contact in air. Find the net optical power of the combination (in Dioptres).",
+      "numericalAnswer": 3,
+      "numericalTolerance": 0,
+      "detailedSolution": "For thin lenses in contact, $P_{\\text{net}} = P_1 + P_2 = 4 + (-1) = 3\\text{ D}$.",
+      "keyFormula": "$P_{\\text{eq}} = P_1 + P_2$",
+      "commonMistakeTrap": "Adding focal lengths directly instead of adding powers."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-1",
+      "subject": "Chemistry",
+      "section": "A",
+      "chapterId": "ch-chem-atomic-bonding",
+      "chapterName": "Atomic Structure & Chemical Bonding",
+      "topicName": "Bohr Radius",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "In Bohr model of the hydrogen atom, the radius of the $n = 4$ stationary orbit in terms of the Bohr radius $a_0$ is:",
+      "options": [
+        "$4a_0$",
+        "$16a_0$",
+        "$\\frac{a_0}{4}$",
+        "$\\frac{a_0}{16}$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "For hydrogen ($Z = 1$), $r_n = \\frac{n^2 a_0}{Z} = 4^2 a_0 = 16a_0$.",
+      "keyFormula": "$r_n = 0.529 \\frac{n^2}{Z}\\text{ \\AA}$",
+      "commonMistakeTrap": "Assuming radius scales linearly with $n$ instead of $n^2$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-2",
+      "subject": "Chemistry",
+      "section": "A",
+      "chapterId": "ch-chem-thermo-equilibrium",
+      "chapterName": "Chemical Thermodynamics & Equilibrium",
+      "topicName": "Ionic Equilibrium & pH",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "What is the $\\text{pH}$ of an aqueous $0.001\\text{ M}$ $\\text{HCl}$ solution at $298\\text{ K}$ assuming complete dissociation?",
+      "options": [
+        "$3$",
+        "$11$",
+        "$4$",
+        "$7$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "Since $\\text{HCl}$ is a strong monoprotic acid, $[\\text{H}^+] = 0.001 = 10^{-3}\\text{ M} \\implies \\text{pH} = -\\log_{10}(10^{-3}) = 3$.",
+      "keyFormula": "$\\text{pH} = -\\log_{10}[\\text{H}^+]$",
+      "commonMistakeTrap": "Reporting $\\text{pOH} = 14 - \\text{pH}$ instead of $\\text{pH}$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-3",
+      "subject": "Chemistry",
+      "section": "A",
+      "chapterId": "ch-chem-electrochem-kinetics-solutions",
+      "chapterName": "Electrochemistry, Kinetics & Solutions",
+      "topicName": "Gibbs Free Energy & Cell EMF",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Medium",
+      "prompt": "For a galvanic cell reaction transferring $n = 2$ electrons with $E^\\circ_{\\text{cell}} = +1.2\\text{ V}$ and $F = 96500\\text{ C mol}^{-1}$, calculate $\\Delta G^\\circ$ (in $\\text{kJ mol}^{-1}$).",
+      "options": [
+        "$+231.6\\text{ kJ mol}^{-1}$",
+        "$-231.6\\text{ kJ mol}^{-1}$",
+        "$-115.8\\text{ kJ mol}^{-1}$",
+        "$-463.2\\text{ kJ mol}^{-1}$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "$\\Delta G^\\circ = -nFE^\\circ_{\\text{cell}} = -2 \\times 96.5 \\times 1.2 = -231.6\\text{ kJ mol}^{-1}$.",
+      "keyFormula": "$\\Delta G^\\circ = -nFE^\\circ_{\\text{cell}}$",
+      "commonMistakeTrap": "Forgetting the negative sign or using $n=1$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-4",
+      "subject": "Chemistry",
+      "section": "A",
+      "chapterId": "ch-chem-electrochem-kinetics-solutions",
+      "chapterName": "Electrochemistry, Kinetics & Solutions",
+      "topicName": "First-Order Chemical Kinetics",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Medium",
+      "prompt": "A first-order reaction has a half-life $t_{1/2} = 30\\text{ min}$. What fraction of the initial reactant remains unreacted after $90\\text{ min}$?",
+      "options": [
+        "$1/4$",
+        "$1/8$",
+        "$1/16$",
+        "$7/8$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "Number of half-lives $n = \\frac{90}{30} = 3$. Fraction remaining $= \\left(\\frac{1}{2}\\right)^3 = \\frac{1}{8}$.",
+      "keyFormula": "$[A]_t / [A]_0 = (1/2)^{t / t_{1/2}}$",
+      "commonMistakeTrap": "Reporting the reacted fraction $7/8$ instead of remaining fraction $1/8$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-5",
+      "subject": "Chemistry",
+      "section": "A",
+      "chapterId": "ch-chem-coordination-dfblock",
+      "chapterName": "Coordination Compounds & d/f-Block",
+      "topicName": "Crystal Field Theory",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Medium",
+      "prompt": "In a high-spin octahedral complex ion with $d^{4}$ electronic configuration (weak-field ligands), how many unpaired electrons are present?",
+      "options": [
+        "$4$",
+        "$2$",
+        "$5$",
+        "$0$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "In weak-field octahedral complexes ($\\Delta_o < P$), electrons fill $t_{2g}$ and $e_g$ singly per Hund’s rule before pairing: $d^{4}$ has $4$ unpaired electrons.",
+      "keyFormula": "$\\mu = \\sqrt{n(n+2)}\\text{ BM}$",
+      "commonMistakeTrap": "Pairing electrons into $t_{2g}$ as if $\\Delta_o > P$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-6",
+      "subject": "Chemistry",
+      "section": "A",
+      "chapterId": "ch-chem-goc-hydrocarbons",
+      "chapterName": "General Organic Chemistry & Hydrocarbons",
+      "topicName": "Carbocation Stability & Markovnikov Addition",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Medium",
+      "prompt": "Which intermediate governs the regioselectivity of electrophilic addition of $\\text{HBr}$ to propene ($\\text{CH}_3\\text{CH}=\\text{CH}_2$) in the absence of peroxides?",
+      "options": [
+        "Secondary carbocation ($\\text{CH}_3\\overset{+}{\\text{C}}\\text{HCH}_3$)",
+        "Primary carbocation ($\\text{CH}_3\\text{CH}_2\\overset{+}{\\text{C}}\\text{H}_2$)",
+        "Free radical ($\\text{CH}_3\\dot{\\text{C}}\\text{HCH}_2\\text{Br}$)",
+        "Carbanion ($\\text{CH}_3\\bar{\\text{C}}\\text{HCH}_3$)"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "In ionic Markovnikov addition without peroxides, protonation yields the more stable $2^\\circ$ isopropyl carbocation (stabilized by 6 $\\alpha$-H hyperconjugation).",
+      "keyFormula": "Carbocation stability: $3^\\circ > 2^\\circ > 1^\\circ$",
+      "commonMistakeTrap": "Confusing ionic $\\text{HBr}$ addition with peroxide-mediated anti-Markovnikov radical mechanism."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-7",
+      "subject": "Chemistry",
+      "section": "B",
+      "chapterId": "ch-chem-thermo-equilibrium",
+      "chapterName": "Chemical Thermodynamics & Equilibrium",
+      "topicName": "Stoichiometry & Mole Concept",
+      "format": "numerical_integer",
+      "questionType": "numerical",
+      "difficulty": "Easy",
+      "prompt": "How many grams of $\\text{O}_2$ gas (molar mass $32\\text{ g mol}^{-1}$) are required for complete combustion of $4\\text{ mol}$ of methane ($\\text{CH}_4$)?",
+      "numericalAnswer": 256,
+      "numericalTolerance": 0,
+      "detailedSolution": "$\\text{CH}_4 + 2\\text{O}_2 \\to \\text{CO}_2 + 2\\text{H}_2\\text{O}$. Therefore $4\\text{ mol}$ $\\text{CH}_4$ requires $2 \\times 4 = 8\\text{ mol}$ $\\text{O}_2$, i.e., $8 \\times 32 = 256\\text{ g}$.",
+      "keyFormula": "$m = n \\times M$",
+      "commonMistakeTrap": "Using stoichiometric coefficient 1 instead of 2 for $\\text{O}_2$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-chem-8",
+      "subject": "Chemistry",
+      "section": "B",
+      "chapterId": "ch-chem-organic-functional-groups",
+      "chapterName": "Alcohols, Carbonyls, Carboxylic Acids & Amines",
+      "topicName": "Degree of Unsaturation & Hybridization",
+      "format": "numerical_integer",
+      "questionType": "numerical",
+      "difficulty": "Easy",
+      "prompt": "What is the Degree of Unsaturation (Double Bond Equivalent, $\\text{DBE}$) of benzene ($\\text{C}_6\\text{H}_6$) plus $4$ additional acyclic $\\text{C}=\\text{O}$ double bonds in an aromatic polycarbonyl derivative?",
+      "numericalAnswer": 8,
+      "numericalTolerance": 0,
+      "detailedSolution": "A benzene ring contributes $\\text{DBE} = 4$ (1 ring + 3 $\\pi$ bonds). Each $\\text{C}=\\text{O}$ double bond adds $1$, so total $\\text{DBE} = 4 + 4 = 8$.",
+      "keyFormula": "$\\text{DBE} = C + 1 - \\frac{H + X - N}{2}$",
+      "commonMistakeTrap": "Counting oxygen atoms in the hydrogen-deficiency formula."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-1",
+      "subject": "Mathematics",
+      "section": "A",
+      "chapterId": "ch-math-algebra-quad-seq",
+      "chapterName": "Quadratic Equations, Complex Numbers & Sequences",
+      "topicName": "Vieta Relations",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "If $\\alpha$ and $\\beta$ are the roots of $x^2 - 8x + 15 = 0$, find the value of $\\alpha^2 + \\beta^2$.",
+      "options": [
+        "$34$",
+        "$64$",
+        "$64$",
+        "$19$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "$\\alpha + \\beta = 8$ and $\\alpha\\beta = 15$. Hence $\\alpha^2 + \\beta^2 = (\\alpha + \\beta)^2 - 2\\alpha\\beta = 8^2 - 2(15) = 34$.",
+      "keyFormula": "$\\alpha^2 + \\beta^2 = (\\alpha + \\beta)^2 - 2\\alpha\\beta$",
+      "commonMistakeTrap": "Forgetting to subtract $2\\alpha\\beta$ from $(\\alpha+\\beta)^2$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-2",
+      "subject": "Mathematics",
+      "section": "A",
+      "chapterId": "ch-math-matrices-determinants",
+      "chapterName": "Matrices & Determinants",
+      "topicName": "Adjoint & Determinant Properties",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "Let $A$ be a $3 \\times 3$ non-singular square matrix such that $\\det(A) = 4$. What is the value of $\\det(\\operatorname{adj} A)$?",
+      "options": [
+        "$4$",
+        "$16$",
+        "$64$",
+        "$12$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "For an $n \\times n$ invertible matrix, $\\det(\\operatorname{adj} A) = (\\det A)^{n-1}$. Here $n = 3$, so $\\det(\\operatorname{adj} A) = 4^{3-1} = 16$.",
+      "keyFormula": "$|\\operatorname{adj} A| = |A|^{n-1}$",
+      "commonMistakeTrap": "Using exponent $n$ instead of $n - 1$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-3",
+      "subject": "Mathematics",
+      "section": "A",
+      "chapterId": "ch-math-calculus-limits-diff",
+      "chapterName": "Limits, Continuity & Differentiation",
+      "topicName": "Trigonometric Limits",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "Evaluate the limit $\\lim_{x \\to 0} \\frac{\\sin^2(4x)}{x^2}$.",
+      "options": [
+        "$4$",
+        "$16$",
+        "$8$",
+        "$1$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "$\\lim_{x \\to 0} \\left(\\frac{\\sin(4x)}{4x} \\cdot 4\\right)^2 = 1^2 \\cdot 4^2 = 16$.",
+      "keyFormula": "$\\lim_{\\theta \\to 0} \\frac{\\sin \\theta}{\\theta} = 1$",
+      "commonMistakeTrap": "Writing ${limK} instead of squaring the coefficient (${limAns})."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-4",
+      "subject": "Mathematics",
+      "section": "A",
+      "chapterId": "ch-math-integral-calculus-ode",
+      "chapterName": "Indefinite & Definite Integration, Area & Differential Equations",
+      "topicName": "Definite Integration",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "Evaluate the definite integral $I = \\int_0^{3} 12x^2\\,dx$.",
+      "options": [
+        "$108$",
+        "$324$",
+        "$36$",
+        "$36$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "$\\int_0^{3} 12x^2\\,dx = \\left[4x^3\\right]_0^{3} = 4 \\times 3^3 = 108$.",
+      "keyFormula": "$\\int x^n dx = \\frac{x^{n+1}}{n+1}$",
+      "commonMistakeTrap": "Differentiating instead of integrating."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-5",
+      "subject": "Mathematics",
+      "section": "A",
+      "chapterId": "ch-math-algebra-quad-seq",
+      "chapterName": "Quadratic Equations, Complex Numbers & Sequences",
+      "topicName": "Arithmetic Progression",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "In an Arithmetic Progression with first term $a = 4$ and common difference $d = 5$, what is the 10th term $T_{10}$?",
+      "options": [
+        "$44$",
+        "$49$",
+        "$54$",
+        "$40$"
+      ],
+      "correctOptionIndices": [
+        1
+      ],
+      "detailedSolution": "$T_n = a + (n - 1)d \\implies T_{10} = 4 + 9(5) = 49$.",
+      "keyFormula": "$T_n = a + (n - 1)d$",
+      "commonMistakeTrap": "Using $nd$ instead of $(n - 1)d$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-6",
+      "subject": "Mathematics",
+      "section": "A",
+      "chapterId": "ch-math-vectors-3d-coordinate",
+      "chapterName": "Coordinate Geometry, Vectors & 3D Geometry",
+      "topicName": "Vector Dot Product",
+      "format": "single_mcq",
+      "questionType": "mcq_single",
+      "difficulty": "Easy",
+      "prompt": "Find the scalar dot product $\\vec{a} \\cdot \\vec{b}$ for $\\vec{a} = 3\\hat{i} + 4\\hat{j} + 3\\hat{k}$ and $\\vec{b} = 2\\hat{i} - \\hat{j} + \\hat{k}$.",
+      "options": [
+        "$5$",
+        "$9$",
+        "$3$",
+        "$10$"
+      ],
+      "correctOptionIndices": [
+        0
+      ],
+      "detailedSolution": "$\\vec{a} \\cdot \\vec{b} = (3)(2) + (4)(-1) + (3)(1) = 6 - 4 + 3 = 5$.",
+      "keyFormula": "$\\vec{a} \\cdot \\vec{b} = a_x b_x + a_y b_y + a_z b_z$",
+      "commonMistakeTrap": "Dropping the negative sign on $\\hat{j}$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-7",
+      "subject": "Mathematics",
+      "section": "B",
+      "chapterId": "ch-math-vectors-3d-coordinate",
+      "chapterName": "Coordinate Geometry, Vectors & 3D Geometry",
+      "topicName": "Equation of a Circle",
+      "format": "numerical_integer",
+      "questionType": "numerical",
+      "difficulty": "Medium",
+      "prompt": "Find the radius of the circle given by $x^2 + y^2 - 4x + 6y + (-12) = 0$.",
+      "numericalAnswer": 5,
+      "numericalTolerance": 0,
+      "detailedSolution": "Here $g = -2$, $f = 3$, $c = -12$. Radius $r = \\sqrt{g^2 + f^2 - c} = \\sqrt{4 + 9 - (-12)} = \\sqrt{25} = 5$.",
+      "keyFormula": "$r = \\sqrt{g^2 + f^2 - c}$",
+      "commonMistakeTrap": "Using coefficients $-4$ and $6$ directly as $g, f$ without dividing by $2$."
+    },
+    {
+      "id": "jee-main-2026-jan-s2-math-8",
+      "subject": "Mathematics",
+      "section": "B",
+      "chapterId": "ch-math-algebra-quad-seq",
+      "chapterName": "Quadratic Equations, Complex Numbers & Sequences",
+      "topicName": "Combinations",
+      "format": "numerical_integer",
+      "questionType": "numerical",
+      "difficulty": "Easy",
+      "prompt": "From a group of $7$ distinct students, in how many ways can a 2-member study committee be selected?",
+      "numericalAnswer": 21,
+      "numericalTolerance": 0,
+      "detailedSolution": "Number of ways $= \\binom{7}{2} = \\frac{7 \\times 6}{2} = 21$.",
+      "keyFormula": "$\\binom{n}{r} = \\frac{n!}{r!(n-r)!}$",
+      "commonMistakeTrap": "Computing permutations $^nP_2 = n(n-1)$ instead of combinations $^nC_2$."
+    }
+  ]
+}

@@ -19,6 +19,10 @@ import { initializeApp as initializeAdminApp, getApps as getAdminApps } from 'fi
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { GoogleGenAI, Modality, ThinkingLevel, Type } from '@google/genai';
 import {
+  generateWithModelFallback,
+  getGeminiModelConfig,
+} from './services/geminiModelConfig.ts';
+import {
   GeminiRequestManager,
   computeRequestFingerprint,
   classifyGeminiError,
@@ -181,17 +185,22 @@ const studentUsage = new StudentUsageLimiter({
 type StudentRequest = express.Request & { student?: VerifiedStudent };
 
 const PORT = Number(process.env.PORT) || 3000;
+const GEMINI_CONFIG = getGeminiModelConfig();
 const ALLOWED_MODELS = new Set([
-  'gemini-3.1-flash-lite',
+  GEMINI_CONFIG.fastModel,
+  GEMINI_CONFIG.thinkingModel,
   'gemini-3.8-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
   'gemini-4-argon',
-  'gemini-flash-latest',
 ]);
 const FALLBACK_MODEL_CHAIN = [
+  GEMINI_CONFIG.thinkingModel,
+  'gemini-3.6-flash',
+  GEMINI_CONFIG.fastModel,
   'gemini-3.1-flash-lite',
-  'gemini-3.8-flash',
-  'gemini-flash-latest',
-] as const;
+].filter((model, index, list) => Boolean(model) && list.indexOf(model) === index);
 const GEMINI_TIMEOUT_MS = 25000;
 
 // Anthropic Claude: "smart" for tutoring, quizzes and OCR; "fast" for high-volume extraction.
@@ -1335,9 +1344,10 @@ Rules for Voice Tutoring:
 - Reference specific page numbers verbally (e.g. "On Page 2 of your notes...") whenever answering from the material.
 - Encourage the student and ask a short check-for-understanding question when appropriate.`;
 
+          const liveModel = getGeminiModelConfig().liveModel;
           try {
             const connectPromise = ai.live.connect({
-              model: 'gemini-3.8-live',
+              model: liveModel,
               config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: {
@@ -1356,7 +1366,7 @@ Rules for Voice Tutoring:
                   safeSend({
                     type: 'status',
                     state: 'connected',
-                    model: 'gemini-3.8-live',
+                    model: liveModel,
                   });
                 },
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1525,13 +1535,12 @@ ${material || 'No notes provided.'}`,
                   .slice(0, 8)
                   .map((p) => `Page ${p.pageNumber} (${p.title}): ${p.content.slice(0, 800)}`)
                   .join('\n\n');
-                const candidateModels = getOrderedCandidateModels('gemini-3.1-flash-lite');
-                const voiceModel = candidateModels[0] || 'gemini-3.1-flash-lite';
-                const resp = await ai.models.generateContent({
-                  model: voiceModel,
-                  contents: qText,
-                  config: {
-                    systemInstruction: `You are LearnMate's friendly voice tutor for JEE Main (Physics, Chemistry, Mathematics), helping with "${sessionTitle}".
+                const resp = (
+                  await generateWithModelFallback(ai, {
+                    preferredModel: getGeminiModelConfig().fastModel,
+                    contents: qText,
+                    config: {
+                      systemInstruction: `You are LearnMate's friendly voice tutor for JEE Main (Physics, Chemistry, Mathematics), helping with "${sessionTitle}".
 Your reply is read aloud by a speech synthesizer, so:
 - Answer in 2 to 4 short spoken sentences.
 - No Markdown, no bullet points, no LaTeX; say formulas in words (for example "v equals u plus a t").
@@ -1543,8 +1552,9 @@ ${MINOR_SAFETY_RULES}
 Student notes:
 ${material || 'No notes provided.'}`,
                     temperature: 0.3,
-                  },
-                });
+                    },
+                  })
+                ).response;
                 const spokenText = (resp.text || '').replace(/[*#_`$\\]/g, '').replace(/\s+/g, ' ').trim();
                 if (spokenText) {
                   safeSend({ type: 'voice_response', text: spokenText, citations: [], sourceType: 'general' });
@@ -2302,7 +2312,7 @@ At the very end of your response, on a new line after "---METADATA---", output a
           Number(claudeResult.usage?.input_tokens || 0) +
           Number(claudeResult.usage?.output_tokens || 0);
       } else if (geminiAi) {
-        const candidateModels = getOrderedCandidateModels('gemini-3.1-flash-lite');
+        const candidateModels = getOrderedCandidateModels(getGeminiModelConfig().thinkingModel);
         let streamSuccess = false;
         let lastStreamErr: unknown = null;
 
@@ -4502,8 +4512,8 @@ Never output markdown fences or commentary outside the JSON.`;
         const ai = getGenAIClient();
         if (ai) {
           try {
-            const resp = await ai.models.generateContent({
-              model: 'gemini-3.8-flash',
+            const { response: resp, modelUsed: used3dModel } = await generateWithModelFallback(ai, {
+              preferredModel: getGeminiModelConfig().thinkingModel,
               contents: `${systemPrompt}\n\nConcept to visualize in 3D: "${concept}". Academic context: ${contextText.slice(0, 400)}. Style: ${style}. Return JSON.`,
               config: {
                 responseMimeType: 'application/json',
@@ -4512,7 +4522,7 @@ Never output markdown fences or commentary outside the JSON.`;
             if (resp.text) {
               sceneSpec = JSON.parse(resp.text);
               provider = 'gemini';
-              modelUsed = 'gemini-3.8-flash';
+              modelUsed = used3dModel;
             }
           } catch (err) {
             console.warn('Gemini 3D generation failed, falling back to procedural:', err);
@@ -5525,7 +5535,7 @@ ${relevantExcerpt || '(Standard JEE Main syllabus)'}`,
       });
       res.json({
         checkedAt: new Date().toISOString(),
-        defaultModel: 'gemini-3.1-flash-lite',
+        defaultModel: getGeminiModelConfig().fastModel,
         providers: {
           geminiDeveloperApi: hasDeveloperApiKey ? 'CONFIGURED' : 'UNCONFIGURED',
           vertexAiAdc: probe.readyForMigration ? 'WORKING_VERIFIED' : probe.status,

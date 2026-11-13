@@ -47,6 +47,9 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
   const [provider, setProvider] = useState<'razorpay' | 'stripe'>('razorpay');
   const [loading, setLoading] = useState(false);
   const [billingNotice, setBillingNotice] = useState<string | null>(null);
+  const [waitlistEmail, setWaitlistEmail] = useState('');
+  const [waitlistSaving, setWaitlistSaving] = useState(false);
+  const [waitlistTierJoined, setWaitlistTierJoined] = useState<Record<string, boolean>>({});
 
   const fetchHealthAndTiers = async () => {
     setLoading(true);
@@ -74,11 +77,15 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
   };
 
   useEffect(() => {
-    if (isOpen) {
-      setBillingNotice(null);
-      void fetchHealthAndTiers();
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    setBillingNotice(null);
+    void fetchHealthAndTiers();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   const handleSelectTier = async (tierId: CommercialSubscriptionTierId) => {
     setBillingNotice(null);
@@ -122,6 +129,38 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
       }
     } catch {
       setBillingNotice('Network unavailable — plan changes require server verification.');
+    }
+  };
+
+  const billingReady = Boolean(
+    tierData?.billingConfigured?.razorpay || tierData?.billingConfigured?.stripe
+  );
+
+  const handleJoinWaitlist = async (tierId: CommercialSubscriptionTierId) => {
+    setBillingNotice(null);
+    setWaitlistSaving(true);
+    try {
+      const res = await apiFetch('/api/commercial/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tierId,
+          email: waitlistEmail.trim() || undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.joined) {
+        setWaitlistTierJoined((prev) => ({ ...prev, [tierId]: true }));
+        setBillingNotice(
+          json.message || 'You are on the Pro Scholar Early Access waitlist.'
+        );
+      } else {
+        setBillingNotice(json.error || 'Could not join waitlist right now. Please try again.');
+      }
+    } catch {
+      setBillingNotice('Network unavailable — waitlist signup requires connection to LearnMate API.');
+    } finally {
+      setWaitlistSaving(false);
     }
   };
 
@@ -262,22 +301,60 @@ export const AdminCommercialConsoleModal: React.FC<AdminCommercialConsoleModalPr
                       </ul>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleSelectTier(tier.id)}
-                      data-testid={`select-tier-btn-${tier.id}`}
-                      className={`w-full py-2 px-4 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                        isCurrent
-                          ? 'bg-brand text-white'
-                          : 'bg-white dark:bg-[#1E293B] border border-line text-ink hover:bg-soft'
-                      }`}
-                    >
-                      {isCurrent
-                        ? 'Active Plan'
-                        : tier.id === 'free_explorer'
-                        ? `Switch to ${tier.name}`
-                        : `Upgrade via Checkout`}
-                    </button>
+                    {isCurrent ? (
+                      <button
+                        type="button"
+                        disabled
+                        data-testid={`select-tier-btn-${tier.id}`}
+                        className="w-full py-2 px-4 rounded-xl text-xs font-bold bg-brand text-white cursor-default"
+                      >
+                        Active Plan
+                      </button>
+                    ) : tier.id === 'free_explorer' || billingReady ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSelectTier(tier.id)}
+                        data-testid={`select-tier-btn-${tier.id}`}
+                        className="w-full py-2 px-4 rounded-xl text-xs font-bold cursor-pointer transition-colors bg-white dark:bg-[#1E293B] border border-line text-ink hover:bg-soft"
+                      >
+                        {tier.id === 'free_explorer'
+                          ? `Switch to ${tier.name}`
+                          : 'Upgrade via Checkout'}
+                      </button>
+                    ) : (
+                      <div className="space-y-2 pt-1">
+                        <div className="text-[11px] font-semibold text-brand">
+                          {tier.name} Launching Soon — Early Access Waitlist
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="email"
+                            value={waitlistEmail}
+                            onChange={(e) => setWaitlistEmail(e.target.value)}
+                            placeholder="Email (optional)"
+                            aria-label={`Waitlist email for ${tier.name}`}
+                            className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-line bg-white dark:bg-[#1E293B] text-[11px] text-ink placeholder:text-muted focus:outline-none focus:border-brand"
+                          />
+                          <button
+                            type="button"
+                            disabled={waitlistSaving || Boolean(waitlistTierJoined[tier.id])}
+                            onClick={() => void handleJoinWaitlist(tier.id)}
+                            data-testid={`select-tier-btn-${tier.id}`}
+                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold shrink-0 transition-colors cursor-pointer ${
+                              waitlistTierJoined[tier.id]
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-brand text-white hover:bg-brand-strong'
+                            }`}
+                          >
+                            {waitlistTierJoined[tier.id]
+                              ? 'Joined'
+                              : waitlistSaving
+                              ? 'Saving…'
+                              : 'Join Early Access'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

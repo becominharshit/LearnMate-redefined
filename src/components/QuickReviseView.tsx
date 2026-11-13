@@ -1639,8 +1639,8 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
               <div className="xl:col-span-8 rounded-2xl bg-canvas border border-line overflow-hidden relative min-h-[480px] flex items-center justify-center">
                 {(() => {
-                  const width = 1040;
-                  const height = 620;
+                  const width = 1480;
+                  const height = 820;
                   const cx = width / 2;
                   const cy = height / 2;
 
@@ -1661,8 +1661,8 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                   branches.forEach((b, idx) => {
                     const angle =
                       (idx / Math.max(1, branches.length)) * Math.PI * 2 - Math.PI / 2;
-                    const rx = 230;
-                    const ry = 145;
+                    const rx = 315;
+                    const ry = 205;
                     const bx = cx + Math.cos(angle) * rx;
                     const by = cy + Math.sin(angle) * ry;
                     posMap.set(b.id, { x: bx, y: by });
@@ -1674,15 +1674,15 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                       let sx = bx;
                       let sy = by;
                       if (Math.abs(cosA) > 0.5) {
-                        sx = bx + Math.sign(cosA) * 205;
-                        sy = by + (cIdx - (children.length - 1) / 2) * 68;
+                        sx = bx + Math.sign(cosA) * 270;
+                        sy = by + (cIdx - (children.length - 1) / 2) * 96;
                       } else {
-                        sx = bx + (cIdx - (children.length - 1) / 2) * 195;
-                        sy = by + Math.sign(sinA) * 110;
+                        sx = bx + (cIdx - (children.length - 1) / 2) * 250;
+                        sy = by + Math.sign(sinA) * 145;
                       }
                       posMap.set(child.id, {
-                        x: Math.max(105, Math.min(width - 105, sx)),
-                        y: Math.max(52, Math.min(height - 52, sy)),
+                        x: Math.max(130, Math.min(width - 130, sx)),
+                        y: Math.max(55, Math.min(height - 55, sy)),
                       });
                     });
                   });
@@ -1723,7 +1723,7 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                     <svg
                       id="learnmate-mindmap-svg"
                       viewBox={`0 0 ${width} ${height}`}
-                      className="w-full h-[500px] select-none"
+                      className="w-full h-[540px] select-none"
                     >
                       <g
                         transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
@@ -1796,19 +1796,23 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                               node.explanation.toLowerCase().includes(searchLower));
                           const boxWidth =
                             node.level === 'central'
-                              ? 200
+                              ? 240
                               : node.level === 'branch'
-                              ? 186
-                              : 168;
-                          const boxHeight = node.level === 'central' ? 58 : 54;
+                              ? 240
+                              : 224;
+                          const boxHeight =
+                            node.level === 'central'
+                              ? 82
+                              : node.level === 'branch'
+                              ? 76
+                              : 74;
 
-                          // Concise concept summary / formula snippet inside each node so no node is just a bare heading
                           const snippetRaw = (node.explanation || '')
                             .replace(/\s+/g, ' ')
                             .trim();
                           const snippet =
-                            snippetRaw.length > 28
-                              ? `${snippetRaw.slice(0, 26)}…`
+                            snippetRaw.length > 72
+                              ? `${snippetRaw.slice(0, 70)}…`
                               : snippetRaw || `Page ${node.sourcePage}`;
 
                           return (
@@ -1836,28 +1840,35 @@ export const QuickReviseView: React.FC<QuickReviseViewProps> = ({
                                 }
                                 strokeWidth={matchesSearch || isSelected ? 3 : 1.8}
                               />
-                              <text
-                                x={boxWidth / 2}
-                                y={22}
-                                textAnchor="middle"
-                                fill={node.level === 'central' ? '#FFFFFF' : theme.text}
-                                fontSize={node.level === 'central' ? 12 : 11}
-                                fontWeight={700}
+                              <foreignObject
+                                x={8}
+                                y={6}
+                                width={boxWidth - 16}
+                                height={boxHeight - 12}
                               >
-                                {node.label.length > 23
-                                  ? `${node.label.slice(0, 21)}…`
-                                  : node.label}
-                              </text>
-                              <text
-                                x={boxWidth / 2}
-                                y={40}
-                                textAnchor="middle"
-                                fill={node.level === 'central' ? '#E0E7FF' : theme.sub}
-                                fontSize={9.5}
-                                fontWeight={500}
-                              >
-                                {snippet}
-                              </text>
+                                <div
+                                  className="w-full h-full flex flex-col items-center justify-center text-center max-w-[240px] whitespace-normal break-words overflow-hidden"
+                                >
+                                  <div
+                                    style={{
+                                      color: node.level === 'central' ? '#FFFFFF' : theme.text,
+                                    }}
+                                    className={`font-bold leading-tight whitespace-normal break-words ${
+                                      node.level === 'central' ? 'text-[12px]' : 'text-[11px]'
+                                    }`}
+                                  >
+                                    {node.label}
+                                  </div>
+                                  <div
+                                    style={{
+                                      color: node.level === 'central' ? '#E0E7FF' : theme.sub,
+                                    }}
+                                    className="mt-0.5 text-[9.5px] font-medium leading-tight whitespace-normal break-words line-clamp-2"
+                                  >
+                                    {snippet}
+                                  </div>
+                                </div>
+                              </foreignObject>
                             </g>
                           );
                         })}

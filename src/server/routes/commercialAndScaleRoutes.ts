@@ -227,6 +227,45 @@ export function createCommercialAndScaleRouter(params: {
     });
   });
 
+  // 2b-iii. POST /api/commercial/waitlist — Persists Early Access waitlist signups when billing is unprovisioned
+  router.post('/commercial/waitlist', (req, res) => {
+    const studentReq = req as StudentRequest;
+    const uid = studentReq.student?.uid || 'dev-student-local';
+    const {
+      email = studentReq.student?.email || '',
+      tierId = 'pro_scholar',
+      targetExam = 'jee_main',
+    } = (req.body || {}) as {
+      email?: string;
+      tierId?: CommercialSubscriptionTierId;
+      targetExam?: string;
+    };
+
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      res.status(400).json({ error: 'Please enter a valid email address.' });
+      return;
+    }
+
+    const entryId = `${uid}::${tierId}`;
+    const record = {
+      entryId,
+      uid,
+      email: normalizedEmail || studentReq.student?.email || '',
+      tierId,
+      targetExam: String(targetExam || 'jee_main').slice(0, 40),
+      joinedAt: new Date().toISOString(),
+      status: 'waitlisted',
+    };
+    store.set('commercial_waitlist', entryId, record);
+
+    res.json({
+      joined: true,
+      entry: record,
+      message: 'You are on the Pro Scholar Early Access waitlist.',
+    });
+  });
+
   // 2c. Signed Billing Webhooks (Razorpay & Stripe) with HMAC-SHA256 & replay idempotency
   router.post('/commercial/webhook/:provider', (req, res) => {
     const provider = req.params.provider;

@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import { JEE_SYLLABUS_CHAPTERS } from '../../data/jeeSyllabusAndNotes.ts';
+import {
+  generateWithModelFallback,
+  getGeminiModelConfig,
+} from '../services/geminiModelConfig.ts';
 
 export type TutorLanguageRegister = 'English' | 'Hinglish' | 'Hindi';
 
@@ -177,8 +181,9 @@ export function createAiTutorRouter(): Router {
 
       if (ai) {
         try {
-          const resp = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+          const modelConfig = getGeminiModelConfig();
+          const { response: resp, modelUsed } = await generateWithModelFallback(ai, {
+            preferredModel: modelConfig.thinkingModel,
             contents: `Student Doubt: "${cleanQ}"\nContext Topic: "${contextTopic || fallback.matchedChapterTitle}"\nGenerate 3 progressive Socratic hints ("Clue Coins") and a final concise solution summary. ${getLanguageInstruction(safeRegister)}`,
             config: {
               responseMimeType: 'application/json',
@@ -223,7 +228,7 @@ export function createAiTutorRouter(): Router {
               matchedChapterId: fallback.matchedChapterId,
               matchedChapterTitle: fallback.matchedChapterTitle,
               languageRegister: safeRegister,
-              modelUsed: 'gemini-3-flash-preview',
+              modelUsed,
             } satisfies SocraticCluePayload);
             return;
           }
@@ -276,8 +281,9 @@ export function createAiTutorRouter(): Router {
       if (ai && hasImage) {
         try {
           const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
-          const resp = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+          const modelConfig = getGeminiModelConfig();
+          const { response: resp, modelUsed } = await generateWithModelFallback(ai, {
+            preferredModel: modelConfig.thinkingModel,
             contents: [
               {
                 inlineData: {
@@ -357,7 +363,7 @@ export function createAiTutorRouter(): Router {
               commonTrap:
                 parsed.commonTrap ||
                 'Check SI unit conversions and vector sign conventions before final substitution.',
-              modelUsed: 'gemini-3-flash-preview',
+              modelUsed,
             } satisfies OcrDoubtResultPayload);
             return;
           }

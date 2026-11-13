@@ -11,6 +11,7 @@ import {
   Download,
   Flag,
   HelpCircle,
+  LayoutGrid,
   Maximize2,
   Minimize2,
   RotateCcw,
@@ -1058,6 +1059,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
   const [strictMockMode, setStrictMockMode] = useState(false);
   const [acceptedInstructions, setAcceptedInstructions] = useState(true);
   const [showInstructionsModal, setShowInstructionsModal] = useState(false);
+  const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
   const [sectionBRuleMode, setSectionBRuleMode] = useState<'compulsory_2026' | 'archival_2024'>(
     'compulsory_2026'
   );
@@ -1148,6 +1150,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
     setDraftMultiOptions([]);
     setDraftNumerical('');
     setConfirmSubmitOpen(false);
+    setMobilePaletteOpen(false);
     setExamResult(null);
     setHasStartedExam(true); // Start directly into the CBT interface so automated and 1-click launches work immediately; Instructions button opens full rules
     questionEntryTimestampRef.current = Date.now();
@@ -2579,8 +2582,8 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
         {/* LEFT 9 COLUMNS: SUBJECT TABS + QUESTION STEM + OPTIONS + ACTION BAR */}
         <div className="lg:col-span-9 flex flex-col min-h-0 bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
           {/* Subject Tabs Bar matching Image 3 */}
-          <div className="px-4 pt-3 pb-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
-            <div className="flex items-center gap-2">
+          <div className="px-3 sm:px-4 pt-2.5 sm:pt-3 pb-2 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
               {(['Physics', 'Chemistry', 'Mathematics'] as JeeSubject[]).map(
                 (subj) => {
                   const isActiveSubj = currentQuestion.subject === subj;
@@ -2589,7 +2592,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                       key={subj}
                       type="button"
                       onClick={() => selectSubjectAndSection(subj, 'Section A')}
-                      className={`px-4 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-colors border cursor-pointer ${
+                      className={`px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-colors border cursor-pointer shrink-0 ${
                         isActiveSubj
                           ? 'bg-indigo-100 text-indigo-800 border-indigo-300 shadow-2xs'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -2602,12 +2605,23 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-600">
-              <span>Language:</span>
+            <div className="flex items-center gap-2 text-xs text-slate-600 ml-auto">
+              <button
+                type="button"
+                onClick={() => setMobilePaletteOpen(true)}
+                data-testid="cbt-mobile-palette-toggle"
+                className="lg:hidden inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-800 text-xs font-bold cursor-pointer"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>
+                  Palette ({paletteCounts.answered}/{questions.length})
+                </span>
+              </button>
+              <span className="hidden sm:inline">Language:</span>
               <select
                 aria-label="Exam Language"
                 defaultValue="English"
-                className="px-2.5 py-1 rounded-md border border-slate-200 bg-white text-xs font-semibold text-slate-800"
+                className="px-2 sm:px-2.5 py-1 rounded-md border border-slate-200 bg-white text-xs font-semibold text-slate-800"
               >
                 <option value="English">English</option>
               </select>
@@ -2982,14 +2996,14 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
             )}
           </div>
 
-          {/* Bottom NTA Action Buttons Bar matching Image 3 */}
-          <div className="px-4 py-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
-            <div className="flex flex-wrap items-center gap-2">
+          {/* Bottom NTA Action Buttons Bar matching Image 3 (sticky on 375px mobile) */}
+          <div className="sticky bottom-0 z-20 px-3 sm:px-4 py-2.5 sm:py-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={handleMarkForReviewAndNext}
                 data-testid="jee-cbt-mark-review-btn"
-                className="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold transition-colors cursor-pointer"
+                className="px-2.5 sm:px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-[11px] sm:text-xs font-bold transition-colors cursor-pointer"
               >
                 Mark for Review &amp; Next
               </button>
@@ -2997,18 +3011,18 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                 type="button"
                 onClick={handleClearResponse}
                 data-testid="jee-cbt-clear-btn"
-                className="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold transition-colors cursor-pointer"
+                className="px-2.5 sm:px-4 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-[11px] sm:text-xs font-bold transition-colors cursor-pointer"
               >
                 Clear Response
               </button>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2 ml-auto">
               <button
                 type="button"
                 onClick={handleSaveAndNext}
                 data-testid="jee-cbt-save-next-btn"
-                className="px-5 py-2 rounded-lg bg-[#2E2A85] hover:bg-indigo-900 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                className="px-4 sm:px-5 py-2 rounded-lg bg-[#2E2A85] hover:bg-indigo-900 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
               >
                 Save &amp; Next
               </button>
@@ -3016,7 +3030,7 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
                 type="button"
                 onClick={() => setConfirmSubmitOpen(true)}
                 data-testid="jee-cbt-open-submit-btn"
-                className="px-5 py-2 rounded-lg bg-indigo-100 hover:bg-indigo-200 border border-indigo-300 text-indigo-900 text-xs font-bold transition-colors cursor-pointer"
+                className="px-3.5 sm:px-5 py-2 rounded-lg bg-indigo-100 hover:bg-indigo-200 border border-indigo-300 text-indigo-900 text-xs font-bold transition-colors cursor-pointer"
               >
                 Submit
               </button>
@@ -3024,8 +3038,8 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
           </div>
         </div>
 
-        {/* RIGHT 3 COLUMNS: CANDIDATE CARD + 5-STATE LEGEND + PALETTE GRID (Matches Image 3) */}
-        <aside className="lg:col-span-3 flex flex-col gap-3 min-h-0 overflow-hidden">
+        {/* RIGHT 3 COLUMNS (Desktop lg+): CANDIDATE CARD + 5-STATE LEGEND + PALETTE GRID */}
+        <aside className="hidden lg:flex lg:col-span-3 flex-col gap-3 min-h-0 overflow-hidden">
           {/* Candidate Card */}
           <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex items-center gap-3 shrink-0 shadow-2xs">
             <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 flex items-center justify-center shrink-0">
@@ -3132,6 +3146,84 @@ export const JeeCbtExamModal: React.FC<JeeCbtExamModalProps> = ({
           </div>
         </aside>
       </div>
+
+      {/* Mobile & Tablet Slide-Up Question Palette Drawer (<lg) */}
+      {mobilePaletteOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-slate-950/60 flex items-end justify-center"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setMobilePaletteOpen(false);
+          }}
+        >
+          <div
+            data-testid="cbt-mobile-palette-sheet"
+            className="w-full max-h-[82vh] bg-white rounded-t-2xl border-t border-slate-200 shadow-2xl flex flex-col overflow-hidden"
+          >
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-slate-900">
+                  Question Palette — {currentQuestion.subject}
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {studentProfile?.fullName || 'Candidate'} · {paletteCounts.answered} answered
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobilePaletteOpen(false)}
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer"
+                aria-label="Close palette drawer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded bg-emerald-600 inline-block" />
+                  <span className="text-slate-700">Answered ({paletteCounts.answered})</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded bg-red-600 inline-block" />
+                  <span className="text-slate-700">Not Answered ({paletteCounts.not_answered})</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded-full bg-purple-600 inline-block" />
+                  <span className="text-slate-700">Review ({paletteCounts.marked_for_review})</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded bg-slate-200 border border-slate-300 inline-block" />
+                  <span className="text-slate-700">Not Visited ({paletteCounts.not_visited})</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-5 gap-2">
+                {currentSubjectQuestions.map((q) => {
+                  const st = responses[q.id]?.status || 'not_visited';
+                  const isCurr = q.id === currentQuestion.id;
+                  const globalIdx = questions.findIndex((item) => item.id === q.id);
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => {
+                        navigateToIndex(globalIdx);
+                        setMobilePaletteOpen(false);
+                      }}
+                      className={`h-9 text-xs flex items-center justify-center transition-all cursor-pointer ${getPaletteButtonClass(
+                        st,
+                        isCurr
+                      )}`}
+                    >
+                      <span>{q.questionNumber}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Instructions & Strict Mode Modal */}
       {showInstructionsModal && (
